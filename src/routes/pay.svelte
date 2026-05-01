@@ -2,7 +2,7 @@
   import { currentPath } from "../router.js";
   import StripeTablePrices from "../components/StripeTablePrices.svelte";
   import CheckoutForm from "../components/CheckoutForm.svelte";
-  import { ChevronLeft, CreditCard, ArrowRight } from "lucide-svelte";
+  import { ArrowRight, ChevronLeft, CreditCard } from "lucide-svelte";
   import { paymentStore } from "../data/payments.svelte.js";
 
   let step = $state(1); // 1 = select plan, 2 = checkout
@@ -24,28 +24,41 @@
   }
 </script>
 
-<div class="pay-page">
+<div class="pay-page" class:checkout-step={step === 2}>
   <div class="nav-header">
     <button class="back-button" onclick={goBack}>
       <ChevronLeft size={20} />
       <span>{step === 2 ? "Cambiar plan" : "Volver"}</span>
     </button>
+    <div class="step-pill">
+      <CreditCard size={16} />
+      <span>{step === 1 ? "Planes" : "Pago"}</span>
+    </div>
   </div>
 
   {#if step === 1}
-    <StripeTablePrices />
+    <section class="pay-intro">
+      <span class="eyebrow">MetricWork Teams</span>
+      <h1>Elige el plan de tu equipo</h1>
+      <p>Selecciona el tamaño que necesitas y continúa para crear tu equipo.</p>
+    </section>
+
+    <section class="plans-shell">
+      <StripeTablePrices />
+    </section>
 
     <div class="payment-footer">
       <button class="pay-button" onclick={goToCheckout}>
         <span class="btn-content">
-          <ArrowRight size={20} />
           <span>Continuar con {paymentStore.selectedPlan?.name || "el plan"}</span>
+          <ArrowRight size={20} />
         </span>
-        <span class="btn-highlight"></span>
       </button>
     </div>
   {:else}
-    <CheckoutForm />
+    <section class="checkout-shell">
+      <CheckoutForm />
+    </section>
   {/if}
 </div>
 
@@ -53,32 +66,97 @@
   .pay-page {
     height: 100%;
     overflow-y: auto;
-    padding-bottom: var(--bottom-nav-clearance);
+    padding: 24px 20px calc(var(--bottom-nav-clearance) + 96px);
     background: var(--bg-page);
   }
 
+  .pay-page.checkout-step {
+    padding-bottom: var(--bottom-nav-clearance);
+  }
+
   .nav-header {
-    padding: 1rem 1.5rem;
-    max-width: 1200px;
+    max-width: 500px;
+    margin: 0 auto 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
   }
 
   .back-button {
-    background: none;
-    border: none;
-    color: var(--text-secondary);
-    font-size: 0.95rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 700;
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 0.3rem;
-    padding: 0.5rem 0.75rem;
-    border-radius: 10px;
+    gap: 8px;
+    min-height: 44px;
+    padding: 0 14px;
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-card);
     transition: all 0.2s;
   }
 
   .back-button:hover {
     color: var(--text-primary);
+    border-color: var(--accent-color);
+  }
+
+  .step-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    padding: 0 12px;
+    border-radius: 100px;
+    background: var(--accent-color);
+    color: var(--accent-ink);
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .pay-intro {
+    max-width: 500px;
+    margin: 0 auto 18px;
     background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 22px;
+    box-shadow: var(--shadow-card);
+  }
+
+  .eyebrow {
+    color: var(--text-secondary);
+    display: block;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  .pay-intro h1 {
+    margin: 0;
+    font-size: 28px;
+    font-weight: 800;
+    line-height: 1.08;
+    color: var(--text-primary);
+  }
+
+  .pay-intro p {
+    margin: 10px 0 0;
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.45;
+  }
+
+  .plans-shell,
+  .checkout-shell {
+    max-width: 500px;
+    margin: 0 auto;
   }
 
   .payment-footer {
@@ -86,33 +164,34 @@
     bottom: var(--bottom-nav-occupied);
     left: 0;
     right: 0;
-    padding: 1.5rem;
+    padding: 18px 20px;
     background: linear-gradient(to top, var(--bg-page) 80%, transparent);
     display: flex;
     justify-content: center;
-    z-index: 100;
+    z-index: 90;
   }
 
   .pay-button {
     position: relative;
-    background: linear-gradient(135deg, #ff8a50, #ffd54f);
-    color: white;
+    background: var(--accent-strong);
+    color: var(--bg-card);
     border: none;
-    padding: 1rem 2.5rem;
-    border-radius: 16px;
-    font-size: 1.1rem;
+    min-height: 54px;
+    padding: 0 22px;
+    border-radius: var(--radius-md);
+    font-size: 15px;
     font-weight: 700;
     cursor: pointer;
     overflow: hidden;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 10px 25px -5px rgba(255, 138, 80, 0.4);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    box-shadow: var(--shadow-button);
     width: 100%;
     max-width: 400px;
   }
 
   .pay-button:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 15px 30px -5px rgba(255, 138, 80, 0.6);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-soft);
   }
 
   .pay-button:active {
@@ -128,27 +207,13 @@
     z-index: 1;
   }
 
-  .btn-highlight {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(
-      90deg,
-      transparent,
-      rgba(255, 255, 255, 0.2),
-      transparent
-    );
-    transform: translateX(-100%);
-    transition: transform 0.6s;
-  }
+  @media (max-width: 420px) {
+    .pay-page {
+      padding-inline: 18px;
+    }
 
-  .pay-button:hover .btn-highlight {
-    transform: translateX(100%);
-  }
-
-  :global(.dark) .payment-footer {
-    background: linear-gradient(to top, #0f172a 80%, transparent);
+    .pay-intro h1 {
+      font-size: 25px;
+    }
   }
 </style>

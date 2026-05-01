@@ -1,48 +1,31 @@
 <script>
-  import { User } from "lucide-svelte";
+  import { BriefcaseBusiness, Check, Sparkles, User, Users } from "lucide-svelte";
   import { paymentStore, plans } from "../data/payments.svelte.js";
 
   const icons = [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-user-icon lucide-user"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`,
-    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-users-icon lucide-users"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></svg>`,
-    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-sparkles-icon lucide-sparkles"><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/></svg>`,
-    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-briefcase-business-icon lucide-briefcase-business"><path d="M12 12h.01"/><path d="M16 6V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><path d="M22 13a18.15 18.15 0 0 1-20 0"/><rect width="20" height="14" x="2" y="6" rx="2"/></svg>`,
+    User,
+    Users,
+    Sparkles,
+    BriefcaseBusiness,
   ];
 </script>
 
 <div class="pricing-container">
-  <div class="hero-section">
-    <div class="hero-image">
-      <div class="back-arrow">
-        <svg
-          viewBox="0 0 24 24"
-          width="32"
-          height="32"
-          fill="none"
-          stroke="white"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          ><line x1="19" y1="12" x2="5" y2="12"></line><polyline
-            points="12 19 5 12 12 5"
-          ></polyline></svg
-        >
-      </div>
-    </div>
-  </div>
-
   <div class="cards-stack">
     {#each plans as plan}
-      <button onclick={() => paymentStore.selectPlan(plan.name)}>
+      <button
+        class="plan-option"
+        class:selected={paymentStore.selectedPlanName === plan.name}
+        onclick={() => paymentStore.selectPlan(plan.name)}
+      >
         <div
           class="plan-card"
           class:recommended={plan.recommended}
           class:selected={paymentStore.selectedPlanName === plan.name}
-          style="--plan-color: {plan.color}; --plan-gradient: {plan.gradient}"
         >
           <div class="card-left">
             <div class="icon">
-              {@html icons[plan.icon]}
+              <svelte:component this={icons[plan.icon]} size={24} />
             </div>
           </div>
 
@@ -60,7 +43,10 @@
             <span class="billing-info">{plan.billing}</span>
             <ul>
               {#each plan.features as feature}
-                <li>{feature}</li>
+                <li>
+                  <Check size={14} />
+                  <span>{feature}</span>
+                </li>
               {/each}
             </ul>
           </div>
@@ -72,15 +58,20 @@
 </div>
 
 <style>
+  .pricing-container {
+    width: 100%;
+  }
+
   .cards-stack {
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
-    padding: 1.5rem;
+    gap: 12px;
+    padding: 0;
     max-width: 500px;
     margin: 0 auto;
   }
-  button {
+
+  .plan-option {
     background-color: transparent;
     border: none;
     padding: 0;
@@ -90,63 +81,66 @@
     text-align: left;
     outline: none;
   }
+
   .plan-card {
     position: relative;
-    border-radius: 24px;
-    padding: 1.5rem;
+    border-radius: var(--radius-lg);
+    padding: 18px;
     display: flex;
-    align-items: center;
-    gap: 1.25rem;
+    align-items: flex-start;
+    gap: 14px;
     background: var(--bg-card);
-    border: 2px solid var(--border-color);
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 1px solid var(--border-color);
+    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
     width: 100%;
     overflow: hidden;
+    box-shadow: var(--shadow-card);
   }
-  .plan-card::before {
+
+  .plan-card::after {
     content: "";
     position: absolute;
     top: 0;
     left: 0;
-    right: 0;
     bottom: 0;
-    background: var(--plan-gradient);
-    opacity: 0.03;
-    transition: opacity 0.4s;
+    width: 5px;
+    background: var(--border-color);
+    transition: background-color 0.2s ease;
   }
+
   .plan-card:hover {
-    transform: translateY(-4px);
+    transform: translateY(-1px);
     border-color: var(--accent-color);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--shadow-soft);
   }
-  :global(.dark) .plan-card:hover {
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-  }
+
   .plan-card.selected {
-    border-color: var(--plan-color);
+    border-color: var(--accent-color);
     background: var(--bg-card);
-    box-shadow: 0 0 20px rgba(0, 0, 0, 0.05);
+    box-shadow: var(--shadow-soft);
   }
-  :global(.dark) .plan-card.selected {
-    background: rgba(255, 255, 255, 0.03);
-    box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
-  }
-  .plan-card.selected::before {
-    opacity: 0.08;
+
+  .plan-card.selected::after {
+    background: var(--accent-color);
   }
 
   .card-left {
-    width: 56px;
-    height: 56px;
-    border-radius: 16px;
+    width: 52px;
+    height: 52px;
+    border-radius: var(--radius-md);
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--plan-gradient);
-    color: white;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    background: var(--bg-input);
+    color: var(--text-primary);
     position: relative;
     z-index: 1;
+    flex-shrink: 0;
+  }
+
+  .plan-card.selected .card-left {
+    background: var(--accent-color);
+    color: var(--accent-ink);
   }
 
   .card-center {
@@ -154,15 +148,36 @@
     position: relative;
     z-index: 1;
   }
+
   .card-center ul {
-    margin-top: 0.5rem;
-    padding-left: 1rem;
+    margin: 10px 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
   }
+
+  .card-center li {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .card-center li svg {
+    color: var(--success-color);
+    flex-shrink: 0;
+  }
+
   .plan-info {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    margin-bottom: 0.4rem;
+    gap: 8px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
   }
 
   .plan-label {
@@ -174,14 +189,13 @@
   }
 
   .most-popular {
-    background: var(--plan-gradient);
-    color: white;
+    background: var(--accent-color);
+    color: var(--accent-ink);
     font-size: 0.65rem;
     font-weight: 800;
     padding: 0.2rem 0.6rem;
     border-radius: 100px;
     text-transform: uppercase;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   }
 
   .price-row {
@@ -228,15 +242,25 @@
   }
 
   .plan-card.selected .selected-indicator {
-    background: var(--plan-color);
-    border-color: var(--plan-color);
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
   }
 
   .plan-card.selected .selected-indicator::after {
     content: "✓";
-    color: white;
+    color: var(--bg-card);
     font-size: 14px;
     font-weight: 900;
+  }
+
+  @media (max-width: 420px) {
+    .plan-card {
+      padding: 16px;
+    }
+
+    .card-left {
+      width: 46px;
+      height: 46px;
+    }
   }
 </style>

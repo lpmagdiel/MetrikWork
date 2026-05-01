@@ -95,8 +95,8 @@
     </div>
   {:else}
     <div class="plan-summary">
-      <div class="plan-badge" style="background: {plan?.gradient}">
-        <CreditCard size={20} color="white" />
+      <div class="plan-badge">
+        <CreditCard size={20} />
       </div>
       <div class="plan-details">
         <span class="plan-name">{plan?.name} — {plan?.title}</span>
@@ -124,11 +124,11 @@
           clientSecret={paymentStore.clientSecret}
           theme="flat"
           variables={{
-            colorPrimary: "#e3654e",
+            colorPrimary: "var(--accent-strong, #000000)",
             colorBackground: "var(--bg-input, #f5f5f5)",
             colorText: "var(--text-primary, #333333)",
             borderRadius: "12px",
-            fontFamily: '"SN Pro", sans-serif',
+            fontFamily: "Inter, sans-serif",
           }}
           rules={{
             ".Input": {
@@ -181,7 +181,7 @@
 
 <style>
   .checkout-form {
-    padding: 1.5rem;
+    padding: 0;
     max-width: 500px;
     margin: 0 auto;
   }
@@ -193,12 +193,16 @@
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding: 3rem 1rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    padding: 40px 24px;
     animation: fadeInUp 0.5s ease;
   }
 
   .success-icon-wrapper {
-    color: #4caf50;
+    color: var(--success-color);
     margin-bottom: 1.5rem;
     animation: scaleIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   }
@@ -228,19 +232,22 @@
     gap: 1rem;
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 16px;
-    padding: 1rem 1.25rem;
+    border-radius: var(--radius-lg);
+    padding: 18px;
     margin-bottom: 1.5rem;
+    box-shadow: var(--shadow-card);
   }
 
   .plan-badge {
     width: 44px;
     height: 44px;
-    border-radius: 12px;
+    border-radius: var(--radius-sm);
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    background: var(--accent-color);
+    color: var(--accent-ink);
   }
 
   .plan-details {
@@ -279,7 +286,7 @@
     width: 100%;
     padding: 14px 16px;
     border: 1px solid var(--border-color);
-    border-radius: 12px;
+    border-radius: var(--radius-sm);
     font-size: 1rem;
     background: var(--bg-input);
     color: var(--text-primary);
@@ -288,8 +295,8 @@
   }
 
   .form-group input:focus {
-    border-color: #e3654e;
-    box-shadow: 0 0 0 3px rgba(227, 101, 78, 0.1);
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 3px var(--bg-accent-subtle);
   }
 
   .form-group input:disabled {
@@ -318,14 +325,14 @@
     gap: 0.75rem;
     padding: 2rem;
     background: var(--bg-input);
-    border-radius: 12px;
+    border-radius: var(--radius-sm);
     color: var(--text-secondary);
     font-size: 0.9rem;
   }
 
   .element-error {
-    color: #ef4444;
-    background: rgba(239, 68, 68, 0.08);
+    color: var(--danger-color);
+    background: var(--bg-danger-subtle);
   }
 
   :global(.spinner) {
@@ -338,10 +345,10 @@
     align-items: center;
     gap: 0.5rem;
     padding: 0.75rem 1rem;
-    background: rgba(239, 68, 68, 0.08);
-    border: 1px solid rgba(239, 68, 68, 0.2);
-    border-radius: 12px;
-    color: #ef4444;
+    background: var(--bg-danger-subtle);
+    border: 1px solid var(--bg-danger-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--danger-color);
     font-size: 0.85rem;
     margin-bottom: 1rem;
     animation: fadeIn 0.3s ease;
@@ -349,9 +356,9 @@
 
   /* Test Card Hint */
   .test-card-hint {
-    background: rgba(59, 130, 246, 0.08);
-    border: 1px solid rgba(59, 130, 246, 0.15);
-    border-radius: 12px;
+    background: var(--bg-info-subtle);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
     padding: 0.75rem 1rem;
     margin-bottom: 1.5rem;
     font-size: 0.78rem;
@@ -360,7 +367,7 @@
   }
 
   .test-card-hint code {
-    background: rgba(59, 130, 246, 0.12);
+    background: var(--bg-card);
     padding: 0.15rem 0.4rem;
     border-radius: 4px;
     font-family: monospace;
@@ -376,20 +383,20 @@
     justify-content: center;
     gap: 0.75rem;
     padding: 1rem 1.5rem;
-    background: linear-gradient(135deg, #ff8a50, #ffd54f);
-    color: white;
+    background: var(--accent-strong);
+    color: var(--bg-card);
     border: none;
-    border-radius: 16px;
+    border-radius: var(--radius-md);
     font-size: 1.05rem;
     font-weight: 700;
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 8px 24px rgba(255, 138, 80, 0.35);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    box-shadow: var(--shadow-button);
   }
 
   .submit-btn:hover:not(:disabled) {
     transform: translateY(-3px);
-    box-shadow: 0 12px 30px rgba(255, 138, 80, 0.5);
+    box-shadow: var(--shadow-soft);
   }
 
   .submit-btn:active:not(:disabled) {

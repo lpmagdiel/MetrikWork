@@ -7,8 +7,8 @@ export const plans = [
     billing: "Facturado anualmente $47.88",
     description: "Equipos de máximo 3 personas",
     features: ["Hasta 3 miembros", "Mensajes en el chat maximo 90 días"],
-    color: "#FF8A50",
-    gradient: "linear-gradient(135deg, #FF8A50, #FFAB91)",
+    color: "#000000",
+    gradient: "linear-gradient(135deg, #000000, #a7f3d0)",
     icon: 0,
     recommended: false,
     stripeLink: "https://buy.stripe.com/test_5kQ6oHeSE9zY8BU8bv8EM01"
@@ -21,8 +21,8 @@ export const plans = [
     billing: "Facturado anualmente $90.00",
     description: "Equipos de máximo 8 personas",
     features: ["Hasta 8 miembros", "Mensajes en el chat ilimitados"],
-    color: "#FFD54F",
-    gradient: "linear-gradient(135deg, #FFC107, #FFE082)",
+    color: "#000000",
+    gradient: "linear-gradient(135deg, #000000, #a7f3d0)",
     icon: 1,
     recommended: true,
     stripeLink: "https://buy.stripe.com/test_5kQ6oHeSE9zY8BU8bv8EM01"
@@ -35,8 +35,8 @@ export const plans = [
     billing: "Facturado anualmente $167.88",
     description: "Equipos de máximo 15 personas",
     features: ["Hasta 15 miembros","Mensajes en el chat ilimitados", "Informes avanzados"],
-    color: "#5C6BC0",
-    gradient: "linear-gradient(135deg, #3F51B5, #7986CB)",
+    color: "#000000",
+    gradient: "linear-gradient(135deg, #000000, #a7f3d0)",
     icon: 2,
     recommended: false,
     stripeLink: "https://buy.stripe.com/test_5kQ6oHeSE9zY8BU8bv8EM01"
@@ -49,8 +49,8 @@ export const plans = [
     billing: "Facturado anualmente $300.00",
     description: "Equipos sin límite de miembros",
     features: ["Miembros ilimitados", "Todo incluido"],
-    color: "#9575CD",
-    gradient: "linear-gradient(135deg, #673AB7, #9575CD)",
+    color: "#000000",
+    gradient: "linear-gradient(135deg, #000000, #a7f3d0)",
     icon: 3,
     recommended: false,
     stripeLink: "https://buy.stripe.com/test_5kQ6oHeSE9zY8BU8bv8EM01"

@@ -6,6 +6,7 @@
     addNote,
     deleteNote,
     updateNote,
+    userStore,
   } from "../data/stores.js";
   import {
     Plus,
@@ -102,6 +103,11 @@
       return;
     }
 
+    if (!$userStore?.uid) {
+      alert("No se pudo identificar el usuario para guardar la nota");
+      return;
+    }
+
     const data = {
       title: noteTitle,
       type: noteType,
@@ -113,9 +119,10 @@
 
     try {
       if (currentNoteId) {
-        await updateNote(currentNoteId, data);
+        await updateNote($userStore.uid, currentNoteId, data);
       } else {
         await addNote(
+          $userStore.uid,
           noteContent,
           null,
           noteTitle,
@@ -142,20 +149,24 @@
   }
 
   function toggleTodoItem(index) {
-    todoItems[index].completed = !todoItems[index].completed;
+    todoItems = todoItems.map((item, i) =>
+      i === index ? { ...item, completed: !item.completed } : item,
+    );
   }
 
   // Quick toggle in list view
-  function quickToggle(note, itemIndex) {
-    const items = [...note.items];
-    items[itemIndex].completed = !items[itemIndex].completed;
-    updateNote(note.id, { items });
+  async function quickToggle(note, itemIndex) {
+    if (!$userStore?.uid) return;
+    const items = (note.items || []).map((item, i) =>
+      i === itemIndex ? { ...item, completed: !item.completed } : item,
+    );
+    await updateNote($userStore.uid, note.id, { items });
   }
 
   async function deleteCurrentNote() {
-    if (!currentNoteId) return;
+    if (!currentNoteId || !$userStore?.uid) return;
     if (confirm("¿Estás seguro de eliminar esta nota?")) {
-      await deleteNote(currentNoteId);
+      await deleteNote($userStore.uid, currentNoteId);
       closeEditor();
     }
   }
@@ -172,9 +183,6 @@
   <header>
     <div class="header-row">
       <h1>Notas</h1>
-      <button class="add-btn-header" onclick={() => (showAddMenu = true)}>
-        <Plus size={24} />
-      </button>
     </div>
     <div class="search-bar">
       <Search size={20} color="#878787" />
@@ -296,6 +304,9 @@
               {/each}
             </div>
           </div>
+          <button class="icon-btn save-btn" onclick={saveNote} aria-label="Guardar">
+            <Check size={22} color="#333" />
+          </button>
           {#if currentNoteId}
             <button
               class="icon-btn"

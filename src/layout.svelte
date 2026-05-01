@@ -25,7 +25,8 @@
   import Tasks from "./routes/tasks.svelte";
   import Chat from "./routes/chat.svelte";
   import TeamPayments from "./routes/team-payments.svelte";
-import Pay from "./routes/pay.svelte";
+  import Pay from "./routes/pay.svelte";
+import Timer from "./routes/Timer.svelte";
 
   // Basic Route Map
   const routes = {
@@ -44,11 +45,11 @@ import Pay from "./routes/pay.svelte";
     "#/chat": Chat,
     "#/team-payments": TeamPayments,
     "#/pay": Pay,
+    "#/timer": Timer,
   };
 
-  // Reactive URL parsing using Svelte 5 runes
-  let cleanPath = $derived($currentPath.split('?')[0]);
-  
+  let cleanPath = $derived($currentPath.split("?")[0]);
+
   let routeInfo = $derived.by(() => {
     // 1. Handle nested team routes: #/teams/:teamId/:subpage
     if (cleanPath.startsWith("#/teams/")) {
@@ -56,17 +57,20 @@ import Pay from "./routes/pay.svelte";
       const teamId = parts[2];
       const subpage = parts[3];
 
-      if (teamId) {
+      if (teamId !== "create") {
         let component = Team;
         if (subpage === "tasks") component = Tasks;
         else if (subpage === "inventory") component = Inventory;
         else if (subpage === "chat") component = Chat;
         else if (subpage === "payments") component = TeamPayments;
-        
         return { component, teamId };
       }
+
+      if (teamId === "create") {
+        return { component: Pay, teamId: null };
+      }
     }
-    
+
     // 2. Fallback to static routes
     return { component: routes[cleanPath] || Home, teamId: null };
   });

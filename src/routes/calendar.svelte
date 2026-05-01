@@ -15,6 +15,7 @@
     notesStore,
     addNote,
     deleteNote,
+    userStore,
   } from "../data/stores.js";
   import SliceContainer from "../components/SliceContainer.svelte";
   import { useSwipe } from "svelte-gestures";
@@ -152,9 +153,13 @@
 
   async function handleAddNote() {
     if (newNoteContent.trim() === "") return;
+    if (!$userStore?.uid) {
+      alert("No se pudo identificar el usuario para guardar la nota");
+      return;
+    }
     isSubmittingNote = true;
     try {
-      await addNote(newNoteContent, selectedDate);
+      await addNote($userStore.uid, newNoteContent, selectedDate);
       newNoteContent = "";
       showAddNote = false;
     } catch (error) {
@@ -173,8 +178,9 @@
   }
 
   async function confirmDeleteNote(noteId) {
+    if (!$userStore?.uid) return;
     try {
-      await deleteNote(noteId);
+      await deleteNote($userStore.uid, noteId);
       if (swipedNoteId === noteId) swipedNoteId = null;
     } catch (error) {
       alert("Error al eliminar la nota");

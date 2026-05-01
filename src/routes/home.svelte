@@ -9,6 +9,7 @@
     MessageSquare,
     Calculator,
     StickyNote,
+    Timer
   } from "lucide-svelte";
 
   let hasUnread = $derived($notificationsStore.some((n) => !n.opened));
@@ -123,6 +124,12 @@
           <Users size={28} />
         </div>
         <span class="action-label">Equipos</span>
+      </a>
+            <a href="#/timer" class="action-btn">
+        <div class="action-icon-box">
+          <Timer size={28} />
+        </div>
+        <span class="action-label">Timer</span>
       </a>
       <a href="#/calculator" class="action-btn">
         <div class="action-icon-box">

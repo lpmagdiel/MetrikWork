@@ -82,9 +82,11 @@
     {/if}
   </div>
 
-  <button class="fab" onclick={handleCreateTeam} disabled={isCreating} aria-label="Crear equipo">
+  <a href="#/teams/create">
+  <button class="fab" aria-label="Crear equipo">
     <Plus size={30} />
   </button>
+  </a>
 </div>
 
 <style>
