@@ -18,6 +18,7 @@
   .avatar {
     width: 40px;
     height: 40px;
+    border: 2px solid var(--bg-card);
     border-radius: 50%;
     background-color: var(--accent-color);
     color: white;

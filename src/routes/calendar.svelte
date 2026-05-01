@@ -221,7 +221,7 @@
 
 <div class="calendar-page">
   <header>
-    <h1>Calendario</h1>
+    <h1>Agenda</h1>
     <div class="month-nav">
       <button onclick={prevMonth} class="nav-btn"
         ><ChevronLeft size={20} /></button
@@ -410,7 +410,7 @@
     justify-content: center;
     background: var(--bg-accent-subtle);
     border: none;
-    color: var(--accent-color);
+    color: var(--bg-card-raised);
     border-radius: 15px;
     padding: 0;
     cursor: pointer;
@@ -474,9 +474,7 @@
   }
 
   .day-btn.selected {
-    background:
-      linear-gradient(135deg, #ffdf76, var(--accent-color)),
-      var(--accent-color);
+    background: var(--accent-color);
     color: #24110e;
     box-shadow: 0 10px 20px var(--shadow-button);
   }

@@ -15,7 +15,9 @@
 
 <style>
   .test-page {
-    min-height: 100vh;
+    height: 100%;
+    overflow-y: auto;
+    padding-bottom: var(--bottom-nav-clearance);
     background-color: var(--bg-page);
     display: flex;
     flex-direction: column;

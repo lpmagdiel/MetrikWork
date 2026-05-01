@@ -41,7 +41,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: flex-start;
-    z-index: 99;
+    z-index: 120;
     box-shadow: 0px -3px 12px 4px rgba(0, 0, 0, 0.3);
     border-top-left-radius: 20px;
     border-top-right-radius: 20px;

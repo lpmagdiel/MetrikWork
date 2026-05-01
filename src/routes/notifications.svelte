@@ -1,18 +1,14 @@
 <script>
-  import { onMount } from "svelte";
   import {
     notificationsStore,
     markNotificationAsRead,
     deleteNotification,
     deleteAllNotifications,
-    userStore,
   } from "../data/stores.js";
   import { ChevronLeft, Bell, CheckCheck, Trash2 } from "lucide-svelte";
   import { currentPath } from "../router.js";
   import { useSwipe } from "svelte-gestures";
-  import { fade, fly } from "svelte/transition";
-  import { addDoc, collection } from "firebase/firestore";
-  import { db } from "../data/firebase.js";
+  import { fly } from "svelte/transition";
   import Toast from "../components/Toast.svelte";
   import ConfirmToast from "../components/ConfirmToast.svelte";
 
@@ -22,6 +18,7 @@
   let showConfirmToast = $state(false);
   let messageToast = $state("");
   let typeToast = $state("");
+  let unreadCount = $derived(notifications.filter((n) => !n.opened).length);
 
   function formatDate(isoString) {
     if (!isoString) return "";
@@ -35,8 +32,6 @@
   }
 
   async function handleNotificationClick(notification) {
-    // This function is now only for marking as read
-    // Card click is removed to allow swipe to work properly
     if (!notification.opened) {
       await markNotificationAsRead(notification.id);
     }
@@ -63,19 +58,22 @@
     }
   }
 
-  const handleDeleteAll = () => {
+  function openDeleteAllConfirm() {
     showConfirmToast = true;
-  };
+  }
 
-  async function handleSimulate() {
-    if (!$userStore) return;
-    await addDoc(collection(db, "notifications"), {
-      title: "Prueba de Swipe",
-      message: "Desliza esta notificación.",
-      date: new Date().toISOString(),
-      notificationFor: $userStore.uid,
-      opened: false,
-    });
+  async function handleDeleteAll() {
+    try {
+      await deleteAllNotifications();
+      showConfirmToast = false;
+      messageToast = "Notificaciones eliminadas";
+      typeToast = "success";
+      showToast = true;
+    } catch (e) {
+      messageToast = "Error al eliminar notificaciones";
+      typeToast = "error";
+      showToast = true;
+    }
   }
 
   function goBack() {
@@ -85,7 +83,7 @@
 
 <div class="notifications-page">
   <Toast
-    type="success"
+    type={typeToast}
     message={messageToast}
     duration={3000}
     show={showToast}
@@ -93,24 +91,47 @@
   <ConfirmToast
     message="¿Estás seguro de que deseas eliminar todas las notificaciones?"
     duration={3000}
-    show={showToast}
+    bind:show={showConfirmToast}
     onConfirm={handleDeleteAll}
   />
   <header>
     <button class="back-btn" onclick={goBack}>
       <ChevronLeft size={24} />
     </button>
-    <h1 style="flex:1">Notificaciones</h1>
+    <div class="title-block">
+      <h1>Notificaciones</h1>
+      <p>
+        {#if unreadCount > 0}
+          {unreadCount} sin leer
+        {:else}
+          Todo al día
+        {/if}
+      </p>
+    </div>
     {#if notifications.length > 0}
       <button
-        class="back-btn delete-all"
-        onclick={handleDeleteAll}
+        class="delete-all"
+        onclick={openDeleteAllConfirm}
         title="Eliminar todas"
+        aria-label="Eliminar todas las notificaciones"
       >
-        <Trash2 size={20} color="#ff4d4d" />
+        <Trash2 size={20} />
       </button>
     {/if}
   </header>
+
+  {#if notifications.length > 0}
+    <section class="summary-card">
+      <div class="summary-icon">
+        <Bell size={22} />
+      </div>
+      <div>
+        <span class="summary-label">Centro de avisos</span>
+        <strong>{notifications.length}</strong>
+      </div>
+      <span class="summary-badge">{unreadCount} nuevas</span>
+    </section>
+  {/if}
 
   <div class="notifications-list">
     {#if notifications.length > 0}
@@ -123,35 +144,36 @@
           <button
             class="delete-bg-btn"
             onclick={() => handleDelete(notification.id)}
+            aria-label="Eliminar notificación"
           >
-            <Trash2 size={24} color="white" />
+            <Trash2 size={22} />
           </button>
           <div
             class="card-slider"
             class:swiped={swipedNotificationId === notification.id}
           >
-            <div
+            <button
               class="notification-card {notification.opened
                 ? 'read'
                 : 'unread'}"
+              onclick={() => handleNotificationClick(notification)}
             >
               <div class="icon-container">
-                <Bell
-                  size={20}
-                  color={notification.opened ? "#ccc" : "#e3654e"}
-                />
+                {#if notification.opened}
+                  <CheckCheck size={20} />
+                {:else}
+                  <Bell size={20} />
+                {/if}
               </div>
-              <div class="content">
-                <div class="header-row">
-                  <h3>{notification.title}</h3>
-                  <span class="date">{formatDate(notification.date)}</span>
-                </div>
+              <div class="notification-content">
+                <span class="date">{formatDate(notification.date)}</span>
+                <h3>{notification.title}</h3>
                 <p>{notification.message}</p>
               </div>
               {#if !notification.opened}
-                <div class="unread-indicator"></div>
+                <span class="unread-indicator" aria-label="Sin leer"></span>
               {/if}
-            </div>
+            </button>
           </div>
         </div>
       {/each}
@@ -160,12 +182,12 @@
         <div class="empty-icon">
           <Bell size={48} />
         </div>
-        <p>No tienes notificaciones</p>
+        <h2>No tienes notificaciones</h2>
+        <p>Cuando haya novedades importantes aparecerán aquí.</p>
       </div>
     {/if}
   </div>
 </div>
-```
 
 <style>
   .notifications-page {
@@ -180,29 +202,108 @@
   header {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 14px;
     margin-bottom: 24px;
   }
 
   .back-btn {
     background: var(--bg-card);
-    border: none;
+    border: 1px solid var(--border-color);
     width: 44px;
     height: 44px;
-    border-radius: 12px;
+    border-radius: var(--radius-sm);
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    box-shadow: var(--shadow-card);
     color: var(--text-primary);
+    flex-shrink: 0;
+  }
+
+  .title-block {
+    flex: 1;
+    min-width: 0;
   }
 
   h1 {
     margin: 0;
     font-size: 24px;
-    font-weight: 700;
+    font-weight: 800;
     color: var(--text-primary);
+  }
+
+  .title-block p {
+    margin: 4px 0 0;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .delete-all {
+    width: 44px;
+    height: 44px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: var(--bg-danger-subtle);
+    color: var(--danger-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: var(--shadow-card);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .summary-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    padding: 18px;
+    margin-bottom: 18px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .summary-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius-md);
+    background: var(--accent-color);
+    color: var(--accent-ink);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .summary-label {
+    display: block;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .summary-card strong {
+    display: block;
+    color: var(--text-primary);
+    font-size: 28px;
+    line-height: 1;
+    margin-top: 4px;
+  }
+
+  .summary-badge {
+    background: var(--bg-accent-subtle);
+    color: var(--success-color);
+    border-radius: 100px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
   }
 
   .notifications-list {
@@ -210,13 +311,13 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 14px;
     padding-bottom: 8px;
   }
 
   .notification-wrapper {
     position: relative;
-    border-radius: 16px;
+    border-radius: var(--radius-lg);
     overflow: hidden;
   }
 
@@ -225,14 +326,14 @@
     top: 0;
     bottom: 0;
     right: 0;
-    width: 70px;
+    width: 76px;
     background: var(--bg-danger-subtle);
-    color: var(--accent-color);
+    color: var(--danger-color);
     display: flex;
     align-items: center;
     justify-content: center;
     border: none;
-    border-radius: 0 16px 16px 0;
+    border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
     cursor: pointer;
     z-index: 1;
   }
@@ -240,27 +341,29 @@
   .card-slider {
     position: relative;
     z-index: 2;
-    transition: transform 0.2s ease-out;
+    transition: transform 0.22s ease-out;
     background: transparent;
   }
 
   .card-slider.swiped {
-    transform: translateX(-70px);
+    transform: translateX(-76px);
   }
 
   .notification-card {
     background: var(--bg-card);
-    border: none;
+    border: 1px solid var(--border-color);
     padding: 16px;
-    border-radius: 16px;
-    display: flex;
+    border-radius: var(--radius-lg);
+    display: grid;
+    grid-template-columns: auto 1fr auto;
     align-items: flex-start;
-    gap: 16px;
+    gap: 14px;
     text-align: left;
     cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+    box-shadow: var(--shadow-card);
     position: relative;
     width: 100%;
+    min-height: 96px;
   }
 
   .notification-card:active {
@@ -268,69 +371,67 @@
   }
 
   .notification-card.unread {
-    background: var(--bg-card);
-    border-left: 4px solid #e3654e;
+    border-color: var(--accent-color);
+    box-shadow: var(--shadow-soft);
   }
 
   .notification-card.read {
-    background: var(--bg-input);
+    background: var(--bg-card);
+    opacity: 0.74;
   }
 
   .icon-container {
-    width: 40px;
-    height: 40px;
-    border-radius: 10px;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-sm);
     background: var(--bg-input);
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    color: var(--text-secondary);
   }
 
   .notification-card.unread .icon-container {
-    background: var(--bg-accent-subtle);
+    background: var(--accent-color);
+    color: var(--accent-ink);
   }
 
-  .content {
-    flex: 1;
+  .notification-content {
+    min-width: 0;
   }
 
-  .header-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 4px;
-  }
-
-  .content h3 {
-    margin: 0;
+  .notification-content h3 {
+    margin: 4px 0 6px;
     font-size: 16px;
-    font-weight: 600;
+    font-weight: 800;
     color: var(--text-primary);
+    line-height: 1.25;
+    overflow-wrap: anywhere;
   }
 
   .date {
-    font-size: 11px;
-    color: #aaa;
-    white-space: nowrap;
-    margin-left: 8px;
+    display: block;
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 700;
   }
 
-  .content p {
+  .notification-content p {
     margin: 0;
-    font-size: 13px;
+    font-size: 14px;
     color: var(--text-secondary);
-    line-height: 1.4;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
   }
 
   .unread-indicator {
-    position: absolute;
-    top: 16px;
-    right: 16px;
-    width: 8px;
-    height: 8px;
-    background: #e3654e;
+    width: 10px;
+    height: 10px;
+    background: var(--accent-strong);
     border-radius: 50%;
+    margin-top: 6px;
+    box-shadow: 0 0 0 4px var(--bg-accent-subtle);
   }
 
   .empty-state {
@@ -338,9 +439,10 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding-top: 60px;
-    color: #ccc;
-    gap: 16px;
+    padding: 72px 24px;
+    color: var(--text-secondary);
+    gap: 12px;
+    text-align: center;
   }
 
   .empty-icon {
@@ -352,5 +454,35 @@
     align-items: center;
     justify-content: center;
     color: var(--text-primary);
+    margin-bottom: 4px;
+  }
+
+  .empty-state h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--text-primary);
+  }
+
+  .empty-state p {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.45;
+    max-width: 260px;
+  }
+
+  @media (max-width: 420px) {
+    .notifications-page {
+      padding-inline: 18px;
+    }
+
+    .summary-card {
+      grid-template-columns: auto 1fr;
+    }
+
+    .summary-badge {
+      grid-column: 1 / -1;
+      justify-self: start;
+    }
   }
 </style>

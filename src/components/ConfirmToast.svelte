@@ -29,7 +29,7 @@
 <style>
     .confirm-toast {
         position: fixed;
-        bottom: 20px;
+        bottom: var(--floating-action-bottom);
         left: 50%;
         transform: translateX(-50%);
         background: white;
