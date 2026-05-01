@@ -1,0 +1,117 @@
+:root {
+  --bg-page: #f9f9f9;
+  --bg-card: #ffffff;
+  --bg-card-raised: #ffffff;
+  --bg-input: #f3f4f6;
+  --bg-accent-subtle: #bbf7d0; /* Mint green */
+  --bg-success-subtle: #bbf7d0;
+  --bg-info-subtle: #e0f2fe;
+  --bg-warning-subtle: #fef3c7;
+  --bg-danger-subtle: #fee2e2;
+  --bg-purple-subtle: #f3e8ff;
+  --text-primary: #000000;
+  --text-secondary: #4b5563;
+  --text-muted: #9ca3af;
+  --border-color: #e5e7eb;
+  --accent-color: #a7f3d0; /* Mint green */
+  --accent-strong: #000000; /* Black for primary buttons */
+  --accent-ink: #000000;
+  --success-color: #059669;
+  --info-color: #0284c7;
+  --warning-color: #d97706;
+  --danger-color: #dc2626;
+  --purple-color: #7e22ce;
+  --nav-bg: #ffffff;
+  --shadow-button: 0 4px 14px rgba(0, 0, 0, 0.08);
+  --shadow-soft: 0 8px 30px rgba(0, 0, 0, 0.04);
+  --shadow-card: 0 2px 10px rgba(0, 0, 0, 0.03);
+  --radius-lg: 24px;
+  --radius-md: 16px;
+  --radius-sm: 12px;
+  --bottom-nav-height: 64px;
+  --bottom-nav-gap: 20px;
+  --bottom-nav-occupied: calc(
+    var(--bottom-nav-height) + var(--bottom-nav-gap) + env(safe-area-inset-bottom, 0px)
+  );
+  --bottom-nav-clearance: calc(var(--bottom-nav-occupied) + 28px);
+  --floating-action-bottom: calc(var(--bottom-nav-occupied) + 20px);
+}
+
+:root.dark {
+  --bg-page: #000000;
+  --bg-card: #111111;
+  --bg-card-raised: #1a1a1a;
+  --bg-input: #222222;
+  --bg-accent-subtle: #064e3b;
+  --bg-success-subtle: #064e3b;
+  --bg-info-subtle: #082f49;
+  --bg-warning-subtle: #451a03;
+  --bg-danger-subtle: #450a0a;
+  --bg-purple-subtle: #3b0764;
+  --text-primary: #ffffff;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+  --border-color: #333333;
+  --accent-color: #a7f3d0;
+  --accent-strong: #ffffff;
+  --accent-ink: #000000;
+  --nav-bg: #000000;
+  --shadow-button: 0 4px 14px rgba(255, 255, 255, 0.08);
+  --shadow-soft: 0 8px 30px rgba(0, 0, 0, 0.5);
+  --shadow-card: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+* {
+  padding: 0;
+  margin: 0;
+  box-sizing: border-box;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+html {
+  min-height: 100%;
+  background: var(--bg-page);
+}
+
+body {
+  min-height: 100vh;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+/* clases basicas */
+.center {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}

@@ -1,0 +1,92 @@
+import { db } from './firebase.js';
+import { collection, addDoc, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { getWorksByTeamId } from './works.js';
+
+export async function getTeamPaymentsData(teamId) {
+    try {
+        // 1. Get works for the team
+        const works = await getWorksByTeamId(teamId);
+        // 2. Get registered payments for the team
+        const paymentsQuery = query(collection(db, 'team_payments'), where('teamId', '==', teamId));
+        const paymentsSnapshot = await getDocs(paymentsQuery);
+        const payments = [];
+        paymentsSnapshot.forEach(doc => payments.push({ id: doc.id, ...doc.data() }));
+
+        // 3. Get team document to have rates and member names
+        const teamDoc = await getDoc(doc(db, 'teams', teamId));
+        const teamData = teamDoc.data();
+        if (!teamData) throw new Error("Team not found");
+
+        const memberSettings = teamData.memberSettings || {};
+        const membersData = teamData.membersData || [];
+
+        // 4. Calculate balances per user
+        const memberBalances = membersData.map(member => {
+            const userId = member.id;
+            const settings = memberSettings[userId] || {};
+            const dailyRate = Number(settings.dailyRate) || 0;
+            const extraHourRate = Number(settings.extraHourRate) || 0;
+
+            const userWorks = works.filter(w => w.userId === userId);
+            const userPayments = payments.filter(p => p.userId === userId);
+
+            let totalFullDays = 0;
+            let totalHalfDays = 0;
+            let totalOvertimeHours = 0;
+            let totalEarned = 0;
+
+            userWorks.forEach(work => {
+                if (work.type === 'full-day') {
+                    totalFullDays++;
+                    totalEarned += dailyRate;
+                } else if (work.type === 'half-day') {
+                    totalHalfDays++;
+                    totalEarned += dailyRate / 2;
+                }
+                if (work.overtimeHours > 0) {
+                    totalOvertimeHours += work.overtimeHours;
+                    totalEarned += work.overtimeHours * extraHourRate;
+                }
+            });
+
+            const totalPaid = userPayments.reduce((sum, p) => sum + p.amount, 0);
+            const balance = totalEarned - totalPaid;
+
+            return {
+                id: userId,
+                name: member.name,
+                totalFullDays,
+                totalHalfDays,
+                totalWorkDays: totalFullDays + (totalHalfDays / 2),
+                totalOvertimeHours,
+                totalEarned,
+                totalPaid,
+                balance,
+                payments: userPayments,
+                works: userWorks
+            };
+        });
+
+        return memberBalances;
+    } catch (error) {
+        console.error("Error calculating team payments:", error);
+        throw error;
+    }
+}
+
+export async function registerTeamPayment(teamId, userId, amount, type) {
+    try {
+        const paymentDoc = {
+            teamId,
+            userId,
+            amount: Number(amount) || 0,
+            type, // 'total' or 'partial'
+            date: new Date().toISOString(),
+            createdAt: new Date().toISOString()
+        };
+        await addDoc(collection(db, 'team_payments'), paymentDoc);
+    } catch (error) {
+        console.error("Error registering team payment:", error);
+        throw error;
+    }
+}

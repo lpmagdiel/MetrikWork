@@ -1,0 +1,114 @@
+import { writable, get } from 'svelte/store';
+import { auth, db } from './firebase.js';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { doc, setDoc, getDoc, onSnapshot, updateDoc } from 'firebase/firestore';
+
+export const userStore = writable(null);
+export const authReady = writable(false);
+export const settingsStore = writable(null);
+
+let settingsUnsubscribe;
+
+export function subscribeToSettings(uid) {
+    if (settingsUnsubscribe) settingsUnsubscribe();
+    settingsStore.set(null);
+    if (!uid) return;
+
+    const settingsDoc = doc(db, 'users', uid, 'settings', 'default');
+    settingsUnsubscribe = onSnapshot(settingsDoc, (doc) => {
+        if (doc.exists()) {
+            settingsStore.set(doc.data());
+        }
+    }, (error) => {
+        console.error("Error in settings listener:", error);
+    });
+}
+
+export function initAuth(setupListeners) {
+    onAuthStateChanged(auth, (user) => {
+        if (user) {
+            const userData = {
+                uid: user.uid,
+                email: user.email,
+                name: user.displayName,
+                photoURL: user.photoURL,
+            };
+            userStore.set(userData);
+            
+            // Save basic profile for others to see
+            setDoc(doc(db, 'users', user.uid), {
+                email: user.email,
+                name: user.displayName || '',
+                lastLogin: new Date().toISOString()
+            }, { merge: true });
+
+            if (setupListeners) setupListeners(user.uid);
+        } else {
+            userStore.set(null);
+            if (setupListeners) setupListeners(null);
+        }
+        authReady.set(true);
+    });
+}
+
+const userProfileCache = {}; // In-memory cache to prevent redundant reads
+
+export async function getUserProfile(uid) {
+    if (userProfileCache[uid]) {
+        return userProfileCache[uid];
+    }
+    
+    try {
+        const userDoc = await getDoc(doc(db, 'users', uid));
+        if (userDoc.exists()) {
+            const data = {...userDoc.data(), id: uid};
+            userProfileCache[uid] = data;
+            return data;
+        }
+        return null;
+    } catch (error) {
+        console.error("Error getting user profile:", error);
+        return null;
+    }
+}
+
+export async function logout() {
+    try {
+        await signOut(auth);
+    } catch (error) {
+        console.error("Error signing out:", error);
+        throw error;
+    }
+}
+
+export async function updateUserProfile(uid, data) {
+    try {
+        const userRef = doc(db, 'users', uid);
+        await updateDoc(userRef, {
+            ...data,
+            updatedAt: new Date().toISOString()
+        });
+        
+        // Update local userStore if it's the current user
+        const currentUser = get(userStore);
+        if (currentUser && currentUser.uid === uid) {
+            userStore.update(u => ({ ...u, ...data }));
+        }
+    } catch (error) {
+        console.error("Error updating user profile:", error);
+        throw error;
+    }
+}
+export async function updateSettings(uid, data) {
+    try {
+        const settingsRef = doc(db, 'users', uid, 'settings', 'default');
+        // Usamos setDoc con merge para crear el documento si no existe o actualizar campos
+        await setDoc(settingsRef, {
+            ...data,
+            updatedAt: new Date().toISOString()
+        }, { merge: true });
+    } catch (error) {
+        console.error("Error updating settings:", error);
+        throw error;
+    }
+}

@@ -1,0 +1,32 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ... tus otras reglas ...
+
+    // Reglas para works (Jornadas)
+    match /works/{workId} {
+      // Permitir leer/escribir si el usuario está autenticado y es miembro del equipo asociado
+      allow read, write: if request.auth != null && 
+        exists(/databases/$(database)/documents/teams/$(resource.data.teamId)) &&
+        request.auth.uid in get(/databases/$(database)/documents/teams/$(resource.data.teamId)).data.members;
+      
+      // Permitir crear si el usuario está autenticado y es miembro del equipo para el que crea la jornada
+      allow create: if request.auth != null && 
+        exists(/databases/$(database)/documents/teams/$(request.resource.data.teamId)) &&
+        request.auth.uid in get(/databases/$(database)/documents/teams/$(request.resource.data.teamId)).data.members;
+    }
+
+    // Reglas para team_payments (Pagos)
+    match /team_payments/{paymentId} {
+      // Permitir leer/escribir si el usuario es miembro del equipo
+      allow read, write: if request.auth != null && 
+        exists(/databases/$(database)/documents/teams/$(resource.data.teamId)) &&
+        request.auth.uid in get(/databases/$(database)/documents/teams/$(resource.data.teamId)).data.members;
+      
+      // Permitir crear pagos si el usuario es el administrador del equipo
+      allow create: if request.auth != null && 
+        exists(/databases/$(database)/documents/teams/$(request.resource.data.teamId)) &&
+        request.auth.uid == get(/databases/$(database)/documents/teams/$(request.resource.data.teamId)).data.admin;
+    }
+  }
+}

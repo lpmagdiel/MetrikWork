@@ -1,0 +1,562 @@
+<script>
+  // @ts-nocheck
+
+  import { onMount } from "svelte";
+  import {
+    User,
+    Mail,
+    LogOut,
+    Bell,
+    Moon,
+    ChevronRight,
+    Save,
+    Camera,
+    Info,
+  } from "lucide-svelte";
+  import {
+    userStore,
+    logout,
+    updateUserProfile,
+    getUserProfile,
+    settingsStore,
+    updateSettings,
+  } from "../data/stores.js";
+  import { currentPath } from "../router.js";
+
+  let name = $state("");
+  let email = $state("");
+  let avatar = $state("👤");
+  let isSaving = $state(false);
+  let showEmojiPicker = $state(false);
+
+  const emojis = [
+    "👤",
+    "👨‍💻",
+    "👩‍💻",
+    "🚀",
+    "🔥",
+    "✨",
+    "🌟",
+    "💼",
+    "🎯",
+    "⚡️",
+    "🌈",
+    "🍀",
+    "🐱",
+    "🐶",
+    "🦊",
+    "🦁",
+    "👻",
+    "👾",
+    "🤖",
+    "👽",
+    "🤡",
+    "🤠",
+    "🤑",
+    "👺",
+    "😼",
+    "🧙‍♂️",
+    "🧝‍♀️",
+    "🧟‍♀️",
+    "🧟‍♂️",
+  ];
+
+  onMount(async () => {
+    if ($userStore) {
+      email = $userStore.email;
+      name = $userStore.name || "";
+
+      const profile = await getUserProfile($userStore.uid);
+      if (profile) {
+        if (profile.name) name = profile.name;
+        if (profile.avatar) avatar = profile.avatar;
+      }
+    }
+  });
+
+  async function handleSave() {
+    if (!$userStore) return;
+    isSaving = true;
+    try {
+      await updateUserProfile($userStore.uid, {
+        name,
+        avatar,
+      });
+      // Visual feedback or toast could be added here
+    } catch (error) {
+      alert("Error al guardar los cambios");
+    } finally {
+      isSaving = false;
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await logout();
+      $currentPath = "#/hello";
+    } catch (error) {
+      alert("Error al cerrar sesión");
+    }
+  }
+
+  function selectEmoji(emoji) {
+    avatar = emoji;
+    showEmojiPicker = false;
+  }
+
+  async function toggleDarkMode() {
+    if (!$userStore) return;
+    const currentSettings = $settingsStore || {};
+    const newDarkMode = !currentSettings.darkMode;
+
+    try {
+      await updateSettings($userStore.uid, {
+        darkMode: newDarkMode,
+      });
+    } catch (error) {
+      console.error("Error toggling dark mode:", error);
+    }
+  }
+</script>
+
+<div class="settings-page">
+  <header>
+    <h1>Configuración</h1>
+  </header>
+
+  <div class="content">
+    <section class="profile-card">
+      <div class="avatar-container">
+        <div class="avatar-circle">
+          {avatar}
+        </div>
+        <button
+          class="edit-avatar-btn"
+          onclick={() => (showEmojiPicker = !showEmojiPicker)}
+          aria-label="Cambiar avatar"
+        >
+          <Camera size={14} />
+        </button>
+      </div>
+
+      {#if showEmojiPicker}
+        <div class="emoji-grid">
+          {#each emojis as emoji}
+            <button class="emoji-btn" onclick={() => selectEmoji(emoji)}
+              >{emoji}</button
+            >
+          {/each}
+        </div>
+      {/if}
+
+      <div class="profile-form">
+        <div class="input-group">
+          <label for="name">Nombre Completo</label>
+          <div class="input-wrapper">
+            <User size={18} />
+            <input
+              type="text"
+              id="name"
+              bind:value={name}
+              placeholder="Tu nombre"
+            />
+          </div>
+        </div>
+
+        <div class="input-group">
+          <label for="email">Correo Electrónico</label>
+          <div class="input-wrapper disabled">
+            <Mail size={18} />
+            <input type="email" id="email" value={email} disabled />
+          </div>
+        </div>
+
+        <button class="save-btn" onclick={handleSave} disabled={isSaving}>
+          {#if isSaving}
+            <span>Guardando...</span>
+          {:else}
+            <Save size={18} />
+            <span>Guardar Cambios</span>
+          {/if}
+        </button>
+      </div>
+    </section>
+
+    <section class="settings-group">
+      <h3>Preferencias</h3>
+      <div class="settings-list">
+        <div class="settings-item">
+          <div class="item-icon bell">
+            <Bell size={18} />
+          </div>
+          <div class="item-info">
+            <span>Notificaciones</span>
+            <p>Recibir avisos de tareas y equipos</p>
+          </div>
+          <label class="switch">
+            <input type="checkbox" checked={true} />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="settings-item">
+          <div class="item-icon moon">
+            <Moon size={18} />
+          </div>
+          <div class="item-info">
+            <span>Modo Oscuro</span>
+            <p>Usar tema oscuro en la interfaz</p>
+          </div>
+          <label class="switch">
+            <input
+              type="checkbox"
+              checked={$settingsStore?.darkMode || false}
+              onchange={toggleDarkMode}
+            />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <section class="settings-group">
+      <h3>Aplicación</h3>
+      <div class="settings-list">
+        <button class="settings-item actionable">
+          <div class="item-icon info">
+            <Info size={18} />
+          </div>
+          <div class="item-info">
+            <span>Sobre MetricWork</span>
+            <p>Versión 1.0.0 (Beta)</p>
+          </div>
+          <ChevronRight size={18} class="chevron" />
+        </button>
+      </div>
+    </section>
+
+    <button class="logout-btn" onclick={handleLogout}>
+      <LogOut size={20} />
+      <span>Cerrar Sesión</span>
+    </button>
+  </div>
+</div>
+
+<style>
+  .settings-page {
+    padding: 22px 18px var(--bottom-nav-clearance);
+    height: 100%;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-page);
+    overflow-y: auto;
+  }
+
+  header {
+    margin-bottom: 24px;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  .content {
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+  }
+
+  .profile-card {
+    background: var(--bg-card);
+    padding: 24px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    backdrop-filter: blur(14px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .avatar-container {
+    position: relative;
+    margin-bottom: 24px;
+  }
+
+  .avatar-circle {
+    width: 100px;
+    height: 100px;
+    background: var(--accent-color);
+    border: 3px solid var(--bg-card);
+    box-shadow: var(--shadow-button);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 48px;
+  }
+
+  .edit-avatar-btn {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    background: var(--text-primary);
+    color: var(--bg-card);
+    border: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: var(--shadow-card);
+  }
+
+  .emoji-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    background: var(--bg-card-raised);
+    padding: 16px;
+    border-radius: 16px;
+    margin-bottom: 24px;
+    border: 1px dashed var(--border-color);
+  }
+
+  .emoji-btn {
+    background: none;
+    border: none;
+    font-size: 24px;
+    padding: 8px;
+    cursor: pointer;
+    border-radius: 10px;
+    transition: background 0.2s;
+    color: var(--text-primary);
+  }
+
+  .emoji-btn:hover {
+    background: var(--bg-input);
+  }
+
+  .profile-form {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .input-group label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-left: 4px;
+  }
+
+  .input-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--bg-input);
+    padding: 12px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 18px;
+    color: var(--text-secondary);
+  }
+
+  .input-wrapper input {
+    background: transparent;
+    border: none;
+    outline: none;
+    width: 100%;
+    font-size: 16px;
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+
+  .input-wrapper.disabled {
+    opacity: 0.6;
+  }
+
+  .save-btn {
+    margin-top: 8px;
+    background: var(--accent-strong);
+    color: var(--bg-card);
+    border: none;
+    padding: 16px;
+    border-radius: var(--radius-md);
+    font-size: 16px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    cursor: pointer;
+    box-shadow: var(--shadow-button);
+  }
+
+  .save-btn:disabled {
+    opacity: 0.7;
+  }
+
+  .settings-group h3 {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    margin: 0 0 16px 4px;
+  }
+
+  .settings-list {
+    background: var(--bg-card-raised);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow-card);
+    backdrop-filter: blur(14px);
+  }
+
+  .settings-item {
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .settings-item.actionable {
+    width: 100%;
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--border-color);
+    text-align: left;
+    cursor: pointer;
+    color: var(--text-primary);
+  }
+
+  .settings-item.actionable:active {
+    background: var(--bg-input);
+  }
+
+  .settings-item:last-child {
+    border-bottom: none;
+  }
+
+  .item-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .item-icon.bell {
+    background: var(--bg-warning-subtle);
+    color: var(--warning-color);
+  }
+  .item-icon.moon {
+    background: var(--bg-purple-subtle);
+    color: var(--purple-color);
+  }
+  .item-icon.info {
+    background: var(--bg-info-subtle);
+    color: var(--info-color);
+  }
+
+  .item-info {
+    flex: 1;
+  }
+
+  .item-info span {
+    display: block;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .item-info p {
+    margin: 2px 0 0;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  /* Switch Toggle Styles */
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+  }
+
+  .switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--bg-input);
+    transition: 0.4s;
+    border-radius: 24px;
+  }
+
+  .slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: var(--bg-card);
+    transition: 0.4s;
+    border-radius: 50%;
+  }
+
+  input:checked + .slider {
+    background-color: var(--accent-color);
+  }
+
+  input:checked + .slider:before {
+    transform: translateX(20px);
+  }
+
+  .logout-btn {
+    width: 100%;
+    padding: 16px;
+    background: var(--bg-danger-subtle);
+    color: var(--danger-color);
+    border: none;
+    border-radius: 22px;
+    font-size: 16px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    cursor: pointer;
+    margin-top: 16px;
+    margin-bottom: 0;
+    transition: background 0.2s;
+  }
+
+  .logout-btn:active {
+    background: var(--bg-danger-subtle);
+  }
+</style>
