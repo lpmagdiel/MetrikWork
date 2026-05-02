@@ -99,7 +99,7 @@ export const resizer = async (fileURL, max = 800) => {
         throw new Error('No se pudo obtener el contexto del canvas');
     }
     ctx.drawImage(image, 0, 0, width, height);
-    return canvas.toDataURL();
+    return canvas.toDataURL("image/webp", 0.7);
 }
 
 /**
