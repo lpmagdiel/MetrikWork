@@ -12,6 +12,7 @@
     teamsStore,
   } from "../data/stores.js";
   import { currentPath } from "../router.js";
+  import { uploader, resizer } from "../data/fileHelper.js";
   import SliceContainer from "../components/SliceContainer.svelte";
 
   let messageInput = $state("");
@@ -23,7 +24,8 @@
   let chatContainer;
   let showImageSlice = $state(false);
   let fileInput;
-  let imageCanvas;
+  let previewUrl = $state("");
+  let isUploading = $state(false);
 
   $effect(() => {
     if (teamId) {
@@ -53,31 +55,38 @@
     fileInput && fileInput.click();
   }
 
-  function handleFileChange(e) {
+  async function handleFileChange(e) {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new window.Image();
-      img.src = event.target.result;
-      img.onload = () => {
-        const canvas = imageCanvas;
-        if (!canvas) return;
-        const maxW = Math.min(img.width, 800);
-        const scale = maxW / img.width;
-        canvas.width = img.width * scale;
-        canvas.height = img.height * scale;
-        const ctx = canvas.getContext("2d");
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    try {
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        previewUrl = await resizer(event.target.result, 400);
         showImageSlice = true;
       };
-    };
-    reader.readAsDataURL(file);
-    // reset input
+      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error("Error resizing image", error);
+    }
     e.target.value = null;
+  }
+
+  async function handleSendImage() {
+    if (!previewUrl || isUploading) return;
+    isUploading = true;
+    try {
+      const imageUrl = await uploader(previewUrl);
+      await sendTeamMessage(teamId, "", $userStore, imageUrl);
+      showImageSlice = false;
+      previewUrl = "";
+    } catch (error) {
+      console.error("Error uploading image", error);
+      alert("Error al enviar la imagen");
+    } finally {
+      isUploading = false;
+    }
   }
 
   function handleKeydown(e) {
@@ -114,7 +123,12 @@
             <span class="sender-name">{msg.senderName}</span>
           {/if}
           <div class="message-bubble">
-            {msg.text}
+            {#if msg.imageUrl}
+              <img src={msg.imageUrl} alt="Imagen" class="chat-image" />
+            {/if}
+            {#if msg.text}
+              <p>{msg.text}</p>
+            {/if}
           </div>
           <span class="timestamp">
             {new Date(msg.createdAt).toLocaleTimeString([], {
@@ -156,12 +170,25 @@
 <div class="space"></div>
 <SliceContainer bind:show={showImageSlice} bg="var(--bg-card)">
   <div
-    style="padding:16px; display:flex; flex-direction:column; align-items:center; gap:12px;"
+    style="padding:24px; display:flex; flex-direction:column; align-items:center; gap:20px;"
   >
-    <canvas
-      bind:this={imageCanvas}
-      style="max-width:90%; border-radius:8px; box-shadow:var(--shadow-card);"
-    ></canvas>
+    <img
+      src={previewUrl}
+      alt="Vista previa"
+      style="max-width:100%; border-radius:16px; box-shadow:var(--shadow-card);"
+    />
+    <button
+      class="send-image-btn"
+      onclick={handleSendImage}
+      disabled={isUploading}
+    >
+      {#if isUploading}
+        <span>Enviando...</span>
+      {:else}
+        <Send size={18} />
+        <span>Enviar Imagen</span>
+      {/if}
+    </button>
   </div>
 </SliceContainer>
 
@@ -312,5 +339,35 @@
   .send-btn:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+
+  .chat-image {
+    max-width: 100%;
+    border-radius: 8px;
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  .message-bubble p {
+    margin: 0;
+  }
+
+  .send-image-btn {
+    width: 100%;
+    background: var(--accent-strong);
+    color: var(--bg-card);
+    border: none;
+    padding: 14px;
+    border-radius: 12px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    cursor: pointer;
+  }
+
+  .send-image-btn:disabled {
+    opacity: 0.6;
   }
 </style>

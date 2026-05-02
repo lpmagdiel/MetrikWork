@@ -22,11 +22,12 @@ export function subscribeToTeamChat(teamId) {
     });
 }
 
-export async function sendTeamMessage(teamId, content, user) {
+export async function sendTeamMessage(teamId, content, user, imageUrl = null) {
     if (!user || !teamId) return;
     try {
         await addDoc(collection(db, 'teams', teamId, 'messages'), {
             text: content,
+            imageUrl: imageUrl,
             senderId: user.uid,
             senderName: user.name || user.email,
             createdAt: new Date().toISOString()
