@@ -843,6 +843,22 @@
     font-weight: 700;
   }
 
+  fieldset {
+    border-radius: 12px;
+    border-color: var(--border-color);
+    padding: 12px 16px;
+  }
+
+  legend {
+    color: var(--text-secondary);
+    padding: 0 6px;
+    margin-left: -6px;
+    font-weight: 600;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
   /* Member checkboxes */
   .member-list {
     display: flex;

@@ -216,7 +216,12 @@
   async function handleRegisterWorkday() {
     if (!team?.id || !$userStore?.uid) return;
     try {
-      await registerWorkday(team.id, $userStore.uid, $userStore.name || $userStore.email, workDay);
+      await registerWorkday(
+        team.id,
+        $userStore.uid,
+        $userStore.name || $userStore.email,
+        workDay,
+      );
       showWorkdayForm = false;
       showNotification("Jornada registrada correctamente", "success");
     } catch (error) {
@@ -232,7 +237,13 @@
         const settings = team.memberSettings?.[$userStore.uid] || {};
         const dailyRate = Number(settings.dailyRate) || 0;
         const extraHourRate = Number(settings.extraHourRate) || 0;
-        stats = await getTeamStats(team.id, $userStore.uid, statsMode, dailyRate, extraHourRate);
+        stats = await getTeamStats(
+          team.id,
+          $userStore.uid,
+          statsMode,
+          dailyRate,
+          extraHourRate,
+        );
       } catch (error) {
         console.error("Error loading stats:", error);
         messageToast = "Error al cargar estadísticas";
@@ -247,7 +258,13 @@
       const settings = team.memberSettings?.[$userStore.uid] || {};
       const dailyRate = Number(settings.dailyRate) || 0;
       const extraHourRate = Number(settings.extraHourRate) || 0;
-      getTeamStats(team.id, $userStore.uid, statsMode, dailyRate, extraHourRate).then((result) => {
+      getTeamStats(
+        team.id,
+        $userStore.uid,
+        statsMode,
+        dailyRate,
+        extraHourRate,
+      ).then((result) => {
         stats = result;
       });
     }
@@ -325,7 +342,10 @@
             </div>
             <span>Chat</span>
           </button>
-          <button class="menu-card" onclick={() => ($currentPath = `#/teams/${team.id}/tasks`)}>
+          <button
+            class="menu-card"
+            onclick={() => ($currentPath = `#/teams/${team.id}/tasks`)}
+          >
             <div class="menu-icon tasks">
               <CheckSquare size={24} />
             </div>
@@ -359,7 +379,10 @@
               </div>
               <span>Ajustes</span>
             </button>
-            <button class="menu-card" onclick={() => ($currentPath = `#/teams/${team.id}/payments`)}>
+            <button
+              class="menu-card"
+              onclick={() => ($currentPath = `#/teams/${team.id}/payments`)}
+            >
               <div class="menu-icon payments">
                 <DollarSign size={24} />
               </div>
@@ -733,7 +756,7 @@
     color: var(--text-primary);
     transition: all 0.2s ease;
   }
-  
+
   .back-btn:hover {
     transform: translateY(-2px);
     border-color: var(--accent-color);
@@ -784,7 +807,7 @@
   .center {
     gap: 1rem;
   }
-  
+
   .admin-badge {
     display: flex;
     align-items: center;
@@ -820,7 +843,7 @@
     cursor: pointer;
     transition: all 0.2s ease;
   }
-  
+
   .menu-card:hover {
     transform: translateY(-2px);
     box-shadow: var(--shadow-soft);
@@ -839,7 +862,7 @@
     align-items: center;
     justify-content: center;
   }
-  
+
   .menu-card:hover .menu-icon {
     transform: scale(1.1);
   }
@@ -911,7 +934,7 @@
     cursor: pointer;
     transition: all 0.2s ease;
   }
-  
+
   .add-member-btn:hover {
     background: var(--accent-color);
     color: #ffffff;
@@ -1034,7 +1057,7 @@
     border: 1px solid var(--border-color);
     transition: border-color 0.2s ease;
   }
-  
+
   .input-with-icon:focus-within {
     border-color: var(--accent-color);
   }
@@ -1067,7 +1090,7 @@
     box-shadow: var(--shadow-button);
     transition: all 0.2s ease;
   }
-  
+
   .save-settings-btn:hover:not(:disabled) {
     background: var(--accent-strong);
     transform: translateY(-2px);
@@ -1095,7 +1118,7 @@
     margin-top: 16px;
     transition: all 0.2s ease;
   }
-  
+
   .delete-team-btn:hover {
     background: var(--danger-color);
     color: #ffffff;
@@ -1111,22 +1134,33 @@
     color: var(--text-secondary);
   }
 
-  /* Workday Form Styles */
+  /* Workday Form Styles - Premium Alignment */
   .workday-form {
     padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
   }
 
   .workday-form h3 {
-    margin: 0 0 12px;
-    font-size: 20px;
-    font-weight: 700;
+    margin: 0;
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--text-primary);
+  }
+
+  .workday-form .form-instruction {
+    margin: 0;
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.5;
   }
 
   .workday-options {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    margin-bottom: 24px;
+    margin: 8px 0 20px;
   }
 
   .workday-option {
@@ -1138,42 +1172,57 @@
     align-items: center;
     gap: 16px;
     cursor: pointer;
-    transition: all 0.2s;
-  }
-  .work-option-active {
-    border-color: #e3654e;
-  }
-  .workday-option:not(.overtime):hover {
-    border-color: #e3654e;
-    background: #fff8f7;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    text-align: left;
+    width: 100%;
+    position: relative;
+    overflow: hidden;
   }
 
-  .workday-option.overtime {
-    cursor: default;
+  .workday-option:hover:not(.overtime) {
+    transform: translateY(-3px);
+    border-color: var(--accent-color);
+    box-shadow: var(--shadow-card);
+  }
+
+  .workday-option:active:not(.overtime) {
+    transform: scale(0.98);
+  }
+
+  .work-option-active {
+    border-color: var(--accent-color) !important;
+    background: var(--bg-accent-subtle) !important;
+    box-shadow: 0 0 0 1px var(--accent-color), var(--shadow-card);
   }
 
   .option-icon {
-    width: 48px;
-    height: 48px;
-    border-radius: 12px;
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
+    transition: transform 0.2s;
+  }
+
+  .workday-option:hover .option-icon {
+    transform: scale(1.1) rotate(-3deg);
   }
 
   .option-icon.full-day {
-    background: #e8f5e9;
-    color: #4caf50;
+    background: var(--bg-success-subtle);
+    color: var(--success-color);
   }
 
   .option-icon.half-day {
     background: var(--bg-warning-subtle);
-    color: #ff9800;
+    color: var(--warning-color);
   }
 
   .option-icon.overtime-icon {
-    background: #f3e5f5;
-    color: #9c27b0;
+    background: var(--bg-purple-subtle);
+    color: var(--purple-color);
   }
 
   .option-text {
@@ -1182,23 +1231,29 @@
 
   .option-title {
     display: block;
-    font-size: 16px;
-    font-weight: 600;
-    color: #333;
-    margin-bottom: 4px;
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 2px;
   }
 
   .option-desc {
     margin: 0;
     font-size: 13px;
-    color: #878787;
+    color: var(--text-secondary);
+    font-weight: 500;
   }
 
   .overtime-counter {
     display: flex;
     align-items: center;
-    gap: 16px;
-    margin-top: 8px;
+    gap: 12px;
+    margin-top: 12px;
+    background: var(--bg-input);
+    padding: 8px 12px;
+    border-radius: 100px;
+    width: fit-content;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.05);
   }
 
   .counter-btn {
@@ -1206,49 +1261,68 @@
     height: 36px;
     border-radius: 50%;
     border: none;
-    background: #f5f5f5;
-    color: #333;
+    background: var(--bg-card);
+    color: var(--text-primary);
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     transition: all 0.2s;
+    box-shadow: var(--shadow-sm);
   }
 
   .counter-btn:hover:not(:disabled) {
-    background: #e3654e;
+    background: var(--accent-color);
     color: white;
+    transform: scale(1.1);
+  }
+
+  .counter-btn:active:not(:disabled) {
+    transform: scale(0.9);
   }
 
   .counter-btn:disabled {
-    opacity: 0.3;
+    opacity: 0.4;
     cursor: not-allowed;
   }
 
   .counter-value {
     font-size: 18px;
-    font-weight: 700;
-    color: #333;
+    font-weight: 800;
+    color: var(--text-primary);
     min-width: 40px;
     text-align: center;
   }
 
   .register-workday-btn {
     width: 100%;
-    padding: 16px;
-    background: #e3654e;
+    padding: 18px;
+    background: var(--accent-color);
     color: white;
     border: none;
-    border-radius: 16px;
+    border-radius: var(--radius-lg);
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
-    font-size: 16px;
-    font-weight: 600;
+    gap: 12px;
+    font-size: 17px;
+    font-weight: 700;
     cursor: pointer;
-    box-shadow: 0 4px 12px rgba(227, 101, 78, 0.2);
+    margin-top: 8px;
+    box-shadow: var(--shadow-button);
+    transition: all 0.2s ease;
   }
+
+  .register-workday-btn:hover {
+    background: var(--accent-strong);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .register-workday-btn:active {
+    transform: translateY(0);
+  }
+
 
   /* Statistics Styles */
   .stats-container {

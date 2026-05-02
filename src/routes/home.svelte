@@ -199,7 +199,7 @@
   .content-wrapper {
     position: relative;
     z-index: 1;
-    padding: 24px 20px;
+    padding: 18px 20px 24px 20px;
     display: flex;
     flex-direction: column;
     gap: 24px;
