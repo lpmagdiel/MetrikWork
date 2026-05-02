@@ -167,8 +167,8 @@
                         {#each filteredMembers as member}
                             <tr>
                                 <td class="member-cell">
-                                    <div class="avatar">{member.name.charAt(0).toUpperCase()}</div>
-                                    <span>{member.name}</span>
+                                    <div class="avatar">{(member?.name || member?.email || "?").charAt(0).toUpperCase()}</div>
+                                    <span>{member?.name || member?.email || "Usuario"}</span>
                                 </td>
                                 <td>{member.totalWorkDays}</td>
                                 <td>{member.totalOvertimeHours}h</td>

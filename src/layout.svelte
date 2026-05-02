@@ -78,6 +78,10 @@ import Timer from "./routes/Timer.svelte";
   // Derived component to render
   let Component = $derived(routeInfo.component);
 
+  let canRender = $derived(
+    () => $authReady && ($userStore || $currentPath === "#/hello" || $currentPath === "#/login")
+  );
+
   // Sync selectedTeamId store
   $effect(() => {
     if (routeInfo.teamId) {
@@ -109,7 +113,7 @@ import Timer from "./routes/Timer.svelte";
 </script>
 
 <main>
-  {#if !$authReady}
+  {#if !canRender}
     <LoadingSpinner show={true} />
   {:else}
     <Component />

@@ -78,5 +78,8 @@ function stripeApiPlugin() {
 
 // https://vite.dev/config/
 export default defineConfig({
+    build: {
+    sourcemap: true
+  },
   plugins: [svelte(), stripeApiPlugin()],
 })

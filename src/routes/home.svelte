@@ -92,10 +92,10 @@
   <div class="content-wrapper">
     <div class="home-page-user-toSay">
       <div>
-        <TextAvatar fullName={$userStore.name} />
+        <TextAvatar fullName={$userStore?.name || $userStore?.email || "Usuario"} />
         <div class="greeting-section">
           <p class="greeting-text">{getGreeting()}</p>
-          <h1 class="user-name">{$userStore.name}</h1>
+          <h1 class="user-name">{$userStore?.name || $userStore?.email || "Usuario"}</h1>
         </div>
       </div>
       <div class="header-actions">

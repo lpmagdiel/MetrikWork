@@ -390,7 +390,7 @@
               </div>
               <div class="member-info">
                 <p class="member-id">
-                  {member.name}
+                  {member?.name || member?.email || "Usuario"}
                 </p>
               </div>
               {#if isAdmin}
