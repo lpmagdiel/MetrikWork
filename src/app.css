@@ -1,4 +1,5 @@
 :root {
+  --page-top-safe: env(safe-area-inset-top, 0px);
   --bg-page: #f9f9f9;
   --bg-card: #ffffff;
   --bg-card-raised: #ffffff;
@@ -30,7 +31,7 @@
   --radius-md: 16px;
   --radius-sm: 12px;
   --bottom-nav-height: 64px;
-  --bottom-nav-gap: 20px;
+  --bottom-nav-gap: 10px;
   --bottom-nav-occupied: calc(
     var(--bottom-nav-height) + var(--bottom-nav-gap) + env(safe-area-inset-bottom, 0px)
   );

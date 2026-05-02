@@ -183,6 +183,7 @@
     flex-direction: column;
     position: relative;
     padding-bottom: var(--bottom-nav-clearance);
+    padding-top: var(--page-top-safe);
   }
 
   .top-bg {
