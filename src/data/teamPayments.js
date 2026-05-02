@@ -27,7 +27,7 @@ export async function getTeamPaymentsData(teamId) {
             const dailyRate = Number(settings.dailyRate) || 0;
             const extraHourRate = Number(settings.extraHourRate) || 0;
 
-            const userWorks = works.filter(w => w.userId === userId);
+            const userWorks = works[userId] || [];
             const userPayments = payments.filter(p => p.userId === userId);
 
             let totalFullDays = 0;

@@ -341,7 +341,7 @@
             <div class="menu-icon stats">
               <BarChart2 size={24} />
             </div>
-            <span>Estadísticas</span>
+            <span>Mis estadísticas</span>
           </button>
           <button
             class="menu-card"
@@ -1253,36 +1253,43 @@
   /* Statistics Styles */
   .stats-container {
     padding: 24px;
-    background: linear-gradient(135deg, #fcfaf6 0%, #fff 100%);
+    background: linear-gradient(135deg, #fcfaf6 0%, #ffffff 100%);
+    border-radius: 8px;
   }
 
   .stats-container h3 {
-    margin: 0 0 20px;
-    font-size: 22px;
-    font-weight: 700;
-    color: #333;
+    margin: 0 0 24px;
+    font-size: 24px;
+    font-weight: 800;
+    color: #1a1a1a;
     text-align: center;
+    background: linear-gradient(135deg, #e3654e 0%, #d85845 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
   }
 
   .calendar-section {
-    margin-bottom: 20px;
+    margin-bottom: 24px;
     background: white;
     padding: 16px;
     border-radius: 16px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    border: 1px solid #e8e8e8;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
   }
 
   .date-range-display {
-    margin-top: 12px;
-    padding: 12px;
-    background: #fff3f0;
+    margin-top: 16px;
+    padding: 14px;
+    background: linear-gradient(135deg, #fff3f0 0%, #fffbf9 100%);
     border-radius: 12px;
+    border: 1px solid #ffe0d5;
     text-align: center;
   }
 
   .range-text {
     margin: 0;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     color: #e3654e;
   }
@@ -1290,9 +1297,9 @@
   .period-selector {
     display: flex;
     gap: 8px;
-    margin-bottom: 20px;
-    background: linear-gradient(135deg, #f8f8f8 0%, #f0f0f0 100%);
-    padding: 6px;
+    margin-bottom: 24px;
+    background: linear-gradient(135deg, #f5f5f5 0%, #f0f0f0 100%);
+    padding: 8px;
     border-radius: 16px;
     box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.06);
   }
@@ -1303,9 +1310,9 @@
     background: transparent;
     border: none;
     border-radius: 12px;
-    font-size: 15px;
-    font-weight: 600;
-    color: #878787;
+    font-size: 14px;
+    font-weight: 700;
+    color: #999;
     cursor: pointer;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
@@ -1314,33 +1321,43 @@
   .period-btn.active {
     background: linear-gradient(135deg, #e3654e 0%, #d85845 100%);
     color: white;
-    box-shadow: 0 4px 12px rgba(227, 101, 78, 0.3);
+    box-shadow: 0 6px 16px rgba(227, 101, 78, 0.35);
     transform: translateY(-2px);
   }
 
   .period-btn:hover:not(.active) {
-    background: rgba(255, 255, 255, 0.5);
+    background: rgba(255, 255, 255, 0.7);
+    color: #666;
   }
 
   .stats-grid {
     display: grid;
-    grid-template-columns: 1fr;
-    gap: 10px;
-    margin-bottom: 20px;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  @media (max-width: 768px) {
+    .stats-grid {
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
   }
 
   .stat-card {
-    background: var(--bg-card);
-    border: none;
-    padding: 12px 16px;
+    background: white;
+    border: 1px solid #e8e8e8;
+    padding: 20px 16px;
     border-radius: 16px;
     display: flex;
+    flex-direction: column;
     align-items: center;
     gap: 12px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: hidden;
+    text-align: center;
   }
 
   .stat-card::before {
@@ -1349,15 +1366,16 @@
     top: 0;
     left: 0;
     right: 0;
-    height: 4px;
+    height: 3px;
     background: linear-gradient(90deg, #e3654e 0%, #f39c12 100%);
     opacity: 0;
     transition: opacity 0.3s;
   }
 
   .stat-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    transform: translateY(-4px);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.12);
+    border-color: #e0e0e0;
   }
 
   .stat-card:hover::before {
@@ -1365,80 +1383,86 @@
   }
 
   .stat-icon {
-    width: 40px;
-    height: 40px;
-    border-radius: 12px;
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
     display: flex;
     align-items: center;
     justify-content: center;
     position: relative;
-    transition: transform 0.3s;
+    transition: all 0.3s;
     flex-shrink: 0;
   }
 
   .stat-card:hover .stat-icon {
-    transform: scale(1.1) rotate(5deg);
+    transform: scale(1.15) rotate(-5deg);
   }
 
   .stat-card.earnings .stat-icon {
     background: linear-gradient(135deg, #81c784 0%, #66bb6a 100%);
     color: white;
-    box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+    box-shadow: 0 6px 16px rgba(76, 175, 80, 0.35);
   }
 
   .stat-card.workdays .stat-icon {
     background: linear-gradient(135deg, #ffb74d 0%, #ffa726 100%);
     color: white;
-    box-shadow: 0 4px 12px rgba(255, 152, 0, 0.3);
+    box-shadow: 0 6px 16px rgba(255, 152, 0, 0.35);
   }
 
   .stat-card.overtime .stat-icon {
     background: linear-gradient(135deg, #ba68c8 0%, #ab47bc 100%);
     color: white;
-    box-shadow: 0 4px 12px rgba(156, 39, 176, 0.3);
+    box-shadow: 0 6px 16px rgba(156, 39, 176, 0.35);
   }
 
   .stat-content {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 6px;
+    width: 100%;
   }
 
   .stat-label {
-    font-size: 11px;
-    color: #878787;
+    font-size: 12px;
+    color: #999;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
 
   .stat-value {
-    font-size: 20px;
+    font-size: 28px;
     font-weight: 800;
-    color: #333;
+    color: #1a1a1a;
     line-height: 1;
   }
 
   .stat-detail {
-    font-size: 11px;
-    color: #aaa;
+    font-size: 12px;
+    color: #bbb;
     font-weight: 500;
   }
 
   .chart-section {
-    background: var(--bg-card);
-    border: none;
-    padding: 16px;
+    background: white;
+    border: 1px solid #e8e8e8;
+    padding: 20px;
     border-radius: 16px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .chart-section:hover {
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
   }
 
   .chart-section h4 {
-    margin: 0 0 16px;
-    font-size: 15px;
+    margin: 0 0 20px;
+    font-size: 16px;
     font-weight: 700;
-    color: #333;
+    color: #1a1a1a;
     text-align: center;
   }
 
@@ -1446,10 +1470,28 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 60px;
-    color: #878787;
+    padding: 60px 20px;
+    color: #999;
     font-size: 15px;
     font-weight: 500;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .loading-stats::before {
+    content: "";
+    width: 40px;
+    height: 40px;
+    border: 3px solid #f0f0f0;
+    border-top-color: #e3654e;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   /* ── Tasks Panel ── */
