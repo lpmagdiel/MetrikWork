@@ -4,6 +4,7 @@
   import { currentPath } from "../router";
   import LoadingSpinner from "../components/LoadingSpinner.svelte";
   import SliceContainer from "../components/SliceContainer.svelte";
+  import Alert from "../components/Alert.svelte";
   import { userStore } from "../data/stores";
   import { auth, googleProvider } from "../data/firebase";
   import {
@@ -15,12 +16,29 @@
 
   let loadingShow = $state(false);
   let openMailForm = $state(false);
+  let showAlert = $state(false);
+  let alertType = $state('info');
+  let alertTitle = $state('');
+  let alertMessage = $state('');
 
   let email = $state("");
   let password = $state("");
   let name = $state("");
   let isRegistering = $state(false);
-  let errorMessage = $state("");
+
+  function showErrorAlert(title, message) {
+    alertType = 'error';
+    alertTitle = title;
+    alertMessage = message;
+    showAlert = true;
+  }
+
+  function showSuccessAlert(title, message) {
+    alertType = 'success';
+    alertTitle = title;
+    alertMessage = message;
+    showAlert = true;
+  }
 
   onMount(() => {
     const unsubscribe = userStore.subscribe((value) => {
@@ -34,17 +52,15 @@
   const handleLogin = async (provider) => {
     if (provider === "mail") {
       openMailForm = true;
-      errorMessage = "";
     } else if (provider === "google") {
       loadingShow = true;
-      errorMessage = "";
       try {
         await signInWithPopup(auth, googleProvider);
         // Auth state listener in stores.js will handle the rest
         $currentPath = "#/";
       } catch (error) {
         console.error("Google login failed", error);
-        errorMessage = error.message;
+        showErrorAlert("Error", error.message);
       } finally {
         loadingShow = false;
       }
@@ -53,11 +69,10 @@
 
   const handleMailLogin = async () => {
     if (!email || !password) {
-      errorMessage = "Por favor ingresa correo y contraseña";
+      showErrorAlert("Campos requeridos", "Por favor ingresa correo y contraseña");
       return;
     }
     loadingShow = true;
-    errorMessage = "";
 
     try {
       if (isRegistering) {
@@ -71,19 +86,23 @@
           await updateProfile(userCredential.user, {
             displayName: name,
           });
-          // Trigger store update manually or wait for listener? Listener should check displayName.
-          // But onAuthStateChanged might fire before updateProfile completes.
-          // For now, let's rely on the listener.
         }
+        showSuccessAlert("¡Bienvenido!", "Tu cuenta ha sido creada exitosamente");
       } else {
         // Login
         await signInWithEmailAndPassword(auth, email, password);
+        showSuccessAlert("¡Éxito!", "Has iniciado sesión correctamente");
       }
-      openMailForm = false;
-      $currentPath = "#/";
+      setTimeout(() => {
+        openMailForm = false;
+        email = "";
+        password = "";
+        name = "";
+        $currentPath = "#/";
+      }, 1500);
     } catch (error) {
       console.error("Mail login failed", error);
-      errorMessage = error.message;
+      showErrorAlert("Error de autenticación", error.message);
     } finally {
       loadingShow = false;
     }
@@ -92,146 +111,333 @@
 
 <div class="hello-page">
   <LoadingSpinner show={loadingShow} />
-  <h1>MetricWork</h1>
-  <div class="center">
-    <h2>Trabaja en equipo!</h2>
-    <img src="/team.png" alt="Trabajo en equipo" />
-    <p><b>Planea, organiza, colabora...</b></p>
-  </div>
-  <div class="center">
-    <small>Iniciar sesión con:</small>
-    <div class="login-form">
-      <button class="log-icon" onclick={() => handleLogin("mail")}>
-        <Mail size={28} color="#ffffff" strokeWidth={2} />
-      </button>
-      <div class="spacer">|</div>
-      <button class="log-icon" onclick={() => handleLogin("google")}>
-        <img src="/google.png" alt="Google" width="28" />
+  <Alert bind:show={showAlert} type={alertType} title={alertTitle} message={alertMessage} duration={4000} />
+  <div class="hello-card">
+    <div class="hero-row">
+      <div class="hero-copy">
+        <h1>Gestiona tus equipos con claridad y ritmo.</h1>
+        <p>
+          Controla tareas, métricas y pagos en una sola vista optimizada para equipos modernos.
+        </p>
+      </div>
+      <div class="hero-visual">
+        <img src="/team.png" alt="Trabajo en equipo" />
+      </div>
+    </div>
+
+    <div class="auth-card">
+
+      <div class="login-actions">
+        <div class="center">
+          <small>
+            {isRegistering
+              ? "Regístrate con tu método preferido"
+              : "Inicia sesión con tu método preferido"}
+          </small>
+        </div>
+        <div class="login-form">
+          <button class="login-option" onclick={() => handleLogin("mail")}> 
+            <Mail size={24} />
+            <span>Email</span>
+          </button>
+
+          <button class="login-option google" onclick={() => handleLogin("google")}>
+            <img src="/google.png" alt="Google" width="22" />
+            <span>Google</span>
+          </button>
+        </div>
+      </div>
+
+      <button class="toggle-mode" type="button" onclick={() => (isRegistering = !isRegistering)}>
+        {isRegistering
+          ? "¿Ya tienes cuenta? Inicia sesión"
+          : "¿No tienes cuenta? Regístrate"}
       </button>
     </div>
   </div>
 
   <SliceContainer bind:show={openMailForm}>
-    <div style="padding: 20px;">
-      <h2>{isRegistering ? "Registro" : "Inicio de Sesión"}</h2>
+    <div class="mail-form-container">
+      <h2>{isRegistering ? "Regístrate" : "Inicia Sesión"}</h2>
+      <p class="form-subtitle">{isRegistering
+        ? "Crea tu cuenta con tu correo"
+        : "Accede con tu correo y contraseña"}
+      </p>
 
-      <div style="margin-bottom: 15px;">
-        <label for="email" style="display: block; margin-bottom: 5px;"
-          >Correo electrónico</label
-        >
+      <form class="mail-form" onsubmit={(e) => { e.preventDefault(); handleMailLogin(); }}>
+        <label for="email">Correo electrónico</label>
         <input
           type="email"
           id="email"
           bind:value={email}
           placeholder="correo@ejemplo.com"
-          style="width: 100%; padding: 10px; border-radius: 5px; border: 1px solid #ccc; background: rgba(255,255,255,0.1);"
         />
-      </div>
 
-      <div style="margin-bottom: 15px;">
-        <label for="password" style="display: block; margin-bottom: 5px;"
-          >Contraseña</label
-        >
+        <label for="password">Contraseña</label>
         <input
           type="password"
           id="password"
           bind:value={password}
           placeholder="Contraseña"
-          style="width: 100%; padding: 10px; border-radius: 5px; border: 1px solid #ccc; background: rgba(255,255,255,0.1);"
         />
-      </div>
 
-      {#if isRegistering}
-        <div style="margin-bottom: 15px;">
-          <label for="name" style="display: block; margin-bottom: 5px;"
-            >Nombre completo</label
-          >
+        {#if isRegistering}
+          <label for="name">Nombre completo</label>
           <input
             type="text"
             id="name"
             bind:value={name}
             placeholder="Tu nombre"
-            style="width: 100%; padding: 10px; border-radius: 5px; border: 1px solid #ccc; background: rgba(255,255,255,0.1);"
           />
-        </div>
-      {/if}
+        {/if}
 
-      {#if errorMessage}
-        <div style="color: #ff6b6b; margin-bottom: 10px; font-size: 0.9em;">
-          {errorMessage}
-        </div>
-      {/if}
-
-      <div style="display: flex; gap: 10px; margin-top: 20px;">
-        <button
-          onclick={handleMailLogin}
-          style="flex: 1; padding: 10px; background: #6b4c7b; border: none; border-radius: 5px; cursor: pointer;"
-        >
+        <button class="submit-btn" type="submit">
           {isRegistering ? "Registrarse" : "Entrar"}
         </button>
-      </div>
+      </form>
 
-      <div style="margin-top: 15px; text-align: center;">
-        <button
-          onclick={() => (isRegistering = !isRegistering)}
-          style="background: none; border: none; color: #ccc; cursor: pointer; text-decoration: underline;"
-        >
-          {isRegistering
-            ? "¿Ya tienes cuenta? Inicia sesión"
-            : "¿No tienes cuenta? Regístrate"}
-        </button>
-      </div>
+      <button class="toggle-auth-mode" type="button" onclick={() => (isRegistering = !isRegistering)}>
+        {isRegistering
+          ? "¿Ya tienes cuenta? Inicia sesión"
+          : "¿No tienes cuenta? Regístrate"}
+      </button>
     </div>
   </SliceContainer>
 </div>
 
 <style>
   .hello-page {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    flex-direction: column;
-    height: 100vh;
     width: 100%;
-    background: linear-gradient(to right, #4d2e52 0%, #372741 100%);
-    color: white;
-  }
-  .hello-page .center {
+    height: 100%;
+    display: flex;
     flex-direction: column;
+    align-items: center;
+    padding: 32px 16px;
+    background: radial-gradient(circle at top, rgba(167, 243, 208, 0.28), transparent 35%),
+      linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+    color: var(--text-primary);
+    overflow-y: auto;
+    overflow-x: hidden;
+    box-sizing: border-box;
   }
-  h1 {
-    background-color: rgba(0, 0, 0, 0.3);
-    padding: 8px 16px;
+
+  .hello-card {
+    width: min(100%, 1040px);
+    display: grid;
+    gap: 18px;
   }
-  img {
-    max-width: 300px;
+
+  .hero-row {
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr;
+    gap: 32px;
+    align-items: center;
   }
-  .login-form {
-    margin-top: 5px;
+
+  .hero-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .hero-copy h1 {
+    font-size: clamp(2rem, 3vw, 3rem);
+    line-height: 1.05;
+  }
+
+  .hero-copy p {
+    color: var(--text-secondary);
+    max-width: 560px;
+  }
+
+  .hero-visual {
     display: flex;
     justify-content: center;
     align-items: center;
+  }
+
+  .hero-visual img {
+    width: min(100%, 320px);
+    border-radius: 24px;
+  }
+
+  .auth-card {
+    padding: 28px;
+    display: grid;
     gap: 20px;
+  }
+
+  .auth-header h2 {
+    margin-bottom: 8px;
+    font-size: 1.5rem;
+  }
+
+  .auth-header p {
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+
+  .login-actions small {
+    color: var(--text-secondary);
+    display: block;
+    margin-bottom: 12px;
+  }
+
+  .login-form {
+    display: flex;
+    justify-content: center;
+    align-items: center;
     flex-direction: row;
-    margin-bottom: 40px;
-    width: 100%;
+    gap: 20px;
+    margin: 12px 0;
   }
-  .login-form{
-    color: #383737 !important;
-  }
-  label{
-    color: #383737 !important;
-  }
-  .log-icon {
-    background: none;
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    width: 44px;
-    height: 44px;
+
+  .login-option {
+    width: 48px;
+    height: 48px;
+    border: 1px solid rgba(0, 0, 0, 0.2);
+    background: var(--bg-card);
     border-radius: 50%;
-    cursor: pointer;
     padding: 0;
     display: flex;
     align-items: center;
     justify-content: center;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  }
+
+  .login-option:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent-color);
+    box-shadow: var(--shadow-button);
+  }
+
+  .login-option span {
+    display: none;
+  }
+
+  .login-option.google {
+    background: #ffffff;
+  }
+
+  .divider {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    margin: 8px 0 4px;
+  }
+
+  .mail-form {
+    display: grid;
+    gap: 14px;
+  }
+
+  label {
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+  }
+
+  input {
+    width: 100%;
+    padding: 14px 16px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    background: var(--bg-input);
+    color: var(--text-primary);
+  }
+
+  input:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 4px rgba(167, 243, 208, 0.18);
+  }
+
+  .submit-btn {
+    width: 100%;
+    padding: 14px 18px;
+    border-radius: 16px;
+    border: none;
+    background: var(--accent-strong);
+    color: var(--bg-page);
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: var(--shadow-button);
+    transition: transform 0.2s ease, opacity 0.2s ease;
+  }
+
+  .submit-btn:hover {
+    transform: translateY(-1px);
+    opacity: 0.95;
+  }
+
+  .toggle-mode {
+    width: 100%;
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 12px 0 0;
+  }
+
+  .error-message {
+    color: var(--danger-color);
+    font-size: 0.95rem;
+  }
+
+  .mail-form-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .mail-form-container h2 {
+    font-size: 1.5rem;
+    margin-bottom: 8px;
+  }
+
+  .form-subtitle {
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+
+  .toggle-auth-mode {
+    width: 100%;
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 12px 0 0;
+    font-size: 0.95rem;
+  }
+
+  .toggle-auth-mode:hover {
+    color: var(--text-primary);
+  }
+
+  @media (max-width: 900px) {
+    .hero-row {
+      grid-template-columns: 1fr;
+    }
+
+    .hero-copy h1 {
+      font-size: 2.4rem;
+    }
+
+    .hero-visual img {
+      width: 100%;
+      max-width: 100%;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .hello-page {
+      padding: 20px 12px;
+    }
+
+    .hello-card {
+      padding: 24px;
+    }
   }
 </style>
