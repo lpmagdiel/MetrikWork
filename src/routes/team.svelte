@@ -25,6 +25,7 @@
     Loader,
     Edit2,
     X,
+    User,
   } from "lucide-svelte";
   import {
     selectedTeam,
@@ -45,6 +46,7 @@
   import Toast from "../components/Toast.svelte";
   import Chart from "../components/Chart.svelte";
   import Calendar from "../components/Calendar.svelte";
+  import AvatarCircle from "../components/AvatarCircle.svelte";
 
   let team = $derived($selectedTeam);
   let isAdmin = $derived(team?.admin === $userStore?.uid);
@@ -409,7 +411,16 @@
           {#each memberList as member}
             <div class="member-item">
               <div class="member-avatar">
-                {member.avatar || "👤"}
+                {#if member.avatar&& member.avatar.length>10}
+                  <img
+                    src={member.avatar}
+                    alt={member?.name || member?.email}
+                    width="40px"
+                    height="40px"
+                  />
+                {:else}
+                  <User size={24} color="#94a3b8" />
+                {/if}
               </div>
               <div class="member-info">
                 <p class="member-id">
@@ -970,6 +981,8 @@
     font-size: 14px;
     font-weight: 600;
     color: var(--accent-color);
+    overflow: hidden;
+    object-fit: cover;
   }
 
   .member-info p {

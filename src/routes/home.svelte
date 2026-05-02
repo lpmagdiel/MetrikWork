@@ -1,6 +1,7 @@
 <script>
-  import { userStore, notificationsStore, selectedTeam } from "../data/stores";
-  import TextAvatar from "../components/TextAvatar.svelte";
+  import { onMount } from "svelte";
+  import { userStore, notificationsStore, selectedTeam, getUserProfile } from "../data/stores";
+  import AvatarCircle from "../components/AvatarCircle.svelte";
   import {
     Bell,
     Calendar,
@@ -13,6 +14,15 @@
   } from "lucide-svelte";
 
   let hasUnread = $derived($notificationsStore.some((n) => !n.opened));
+
+  onMount(async () => {
+    if ($userStore?.uid) {
+      const profile = await getUserProfile($userStore.uid);
+      if (profile) {
+        userStore.update(u => ({ ...u, ...profile }));
+      }
+    }
+  });
 
   // Estadísticas del mes
   let workDaysThisMonth = $state(0);
@@ -92,7 +102,7 @@
   <div class="content-wrapper">
     <div class="home-page-user-toSay">
       <div>
-        <TextAvatar fullName={$userStore?.name || $userStore?.email || "Usuario"} />
+        <AvatarCircle editable={false} size={40}/>
         <div class="greeting-section">
           <p class="greeting-text">{getGreeting()}</p>
           <h1 class="user-name">{$userStore?.name || $userStore?.email || "Usuario"}</h1>

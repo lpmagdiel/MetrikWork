@@ -39,10 +39,10 @@
   });
 
   async function handleSendMessage() {
-    if (!messageInput.trim() || !teamId) return;
+    if (!messageInput.trim() || !teamId || !$userStore) return;
 
     try {
-      await sendTeamMessage(teamId, messageInput.trim());
+      await sendTeamMessage(teamId, messageInput.trim(), $userStore);
       messageInput = "";
     } catch (error) {
       console.error("Error sending message", error);

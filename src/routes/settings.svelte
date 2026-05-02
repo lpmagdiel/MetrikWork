@@ -12,6 +12,7 @@
     Save,
     Camera,
     Info,
+    Album,
   } from "lucide-svelte";
   import {
     userStore,
@@ -23,43 +24,12 @@
   } from "../data/stores.js";
   import { currentPath } from "../router.js";
 
+  import AvatarCircle from "../components/AvatarCircle.svelte";
+
   let name = $state("");
   let email = $state("");
-  let avatar = $state("👤");
   let isSaving = $state(false);
-  let showEmojiPicker = $state(false);
 
-  const emojis = [
-    "👤",
-    "👨‍💻",
-    "👩‍💻",
-    "🚀",
-    "🔥",
-    "✨",
-    "🌟",
-    "💼",
-    "🎯",
-    "⚡️",
-    "🌈",
-    "🍀",
-    "🐱",
-    "🐶",
-    "🦊",
-    "🦁",
-    "👻",
-    "👾",
-    "🤖",
-    "👽",
-    "🤡",
-    "🤠",
-    "🤑",
-    "👺",
-    "😼",
-    "🧙‍♂️",
-    "🧝‍♀️",
-    "🧟‍♀️",
-    "🧟‍♂️",
-  ];
 
   onMount(async () => {
     if ($userStore) {
@@ -69,7 +39,8 @@
       const profile = await getUserProfile($userStore.uid);
       if (profile) {
         if (profile.name) name = profile.name;
-        if (profile.avatar) avatar = profile.avatar;
+        // Actualizamos el store para que AvatarCircle reaccione
+        userStore.update(u => ({ ...u, ...profile }));
       }
     }
   });
@@ -99,10 +70,6 @@
     }
   }
 
-  function selectEmoji(emoji) {
-    avatar = emoji;
-    showEmojiPicker = false;
-  }
 
   async function toggleDarkMode() {
     if (!$userStore) return;
@@ -117,6 +84,8 @@
       console.error("Error toggling dark mode:", error);
     }
   }
+
+
 </script>
 
 <div class="settings-page">
@@ -126,28 +95,7 @@
 
   <div class="content">
     <section class="profile-card">
-      <div class="avatar-container">
-        <div class="avatar-circle">
-          {avatar}
-        </div>
-        <button
-          class="edit-avatar-btn"
-          onclick={() => (showEmojiPicker = !showEmojiPicker)}
-          aria-label="Cambiar avatar"
-        >
-          <Camera size={14} />
-        </button>
-      </div>
-
-      {#if showEmojiPicker}
-        <div class="emoji-grid">
-          {#each emojis as emoji}
-            <button class="emoji-btn" onclick={() => selectEmoji(emoji)}
-              >{emoji}</button
-            >
-          {/each}
-        </div>
-      {/if}
+      <AvatarCircle/>
 
       <div class="profile-form">
         <div class="input-group">
@@ -232,6 +180,16 @@
           </div>
           <ChevronRight size={18} class="chevron" />
         </button>
+                <button class="settings-item actionable">
+          <div class="item-icon album">
+            <Album size={18} />
+          </div>
+          <div class="item-info">
+            <span>Tutorial</span>
+            <p>Aprende a usar MetricWork</p>
+          </div>
+          <ChevronRight size={18} class="chevron" />
+        </button>
       </div>
     </section>
 
@@ -287,61 +245,6 @@
     margin-bottom: 24px;
   }
 
-  .avatar-circle {
-    width: 100px;
-    height: 100px;
-    background: var(--accent-color);
-    border: 3px solid var(--bg-card);
-    box-shadow: var(--shadow-button);
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 48px;
-  }
-
-  .edit-avatar-btn {
-    position: absolute;
-    bottom: 0;
-    right: 0;
-    background: var(--text-primary);
-    color: var(--bg-card);
-    border: none;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    box-shadow: var(--shadow-card);
-  }
-
-  .emoji-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 12px;
-    background: var(--bg-card-raised);
-    padding: 16px;
-    border-radius: 16px;
-    margin-bottom: 24px;
-    border: 1px dashed var(--border-color);
-  }
-
-  .emoji-btn {
-    background: none;
-    border: none;
-    font-size: 24px;
-    padding: 8px;
-    cursor: pointer;
-    border-radius: 10px;
-    transition: background 0.2s;
-    color: var(--text-primary);
-  }
-
-  .emoji-btn:hover {
-    background: var(--bg-input);
-  }
 
   .profile-form {
     width: 100%;
@@ -472,6 +375,10 @@
   .item-icon.info {
     background: var(--bg-info-subtle);
     color: var(--info-color);
+  }
+  .item-icon.album {
+    background: var(--bg-success-subtle);
+    color: var(--success-color);
   }
 
   .item-info {

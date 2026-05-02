@@ -76,10 +76,73 @@ function stripeApiPlugin() {
   };
 }
 
+function cloudinaryApiPlugin() {
+  let cloudName, apiKey, apiSecret;
+
+  return {
+    name: 'cloudinary-api',
+    configResolved(config) {
+      const env = loadEnv('', config.root, '');
+      cloudName = env.CLOUDINARY_CLOUD_NAME;
+      apiKey = env.CLOUDINARY_API_PUBLIC || env.CLOUDINARY_API_KEY;
+      apiSecret = env.CLOUDINARY_API_SECRET;
+    },
+    configureServer(server) {
+      server.middlewares.use('/api/delete-cloudinary', async (req, res) => {
+        if (req.method !== 'POST') {
+          res.statusCode = 405;
+          res.end(JSON.stringify({ error: 'Method not allowed' }));
+          return;
+        }
+
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const { publicId } = JSON.parse(body);
+
+        if (!cloudName || !apiKey || !apiSecret) {
+          res.statusCode = 500;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ error: 'Cloudinary credentials not configured in .env' }));
+          return;
+        }
+
+        try {
+          const timestamp = Math.round(new Date().getTime() / 1000);
+          const crypto = await import('node:crypto');
+          
+          // Generate signature: public_id=...&timestamp=...API_SECRET
+          const str = `public_id=${publicId}&timestamp=${timestamp}${apiSecret}`;
+          const signature = crypto.createHash('sha1').update(str).digest('hex');
+
+          const formData = new URLSearchParams();
+          formData.append('public_id', publicId);
+          formData.append('timestamp', timestamp.toString());
+          formData.append('api_key', apiKey);
+          formData.append('signature', signature);
+
+          const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/destroy`, {
+            method: 'POST',
+            body: formData,
+          });
+
+          const result = await response.json();
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify(result));
+        } catch (error) {
+          console.error('Cloudinary delete error:', error);
+          res.statusCode = 500;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ error: error.message }));
+        }
+      });
+    },
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig({
     build: {
     sourcemap: true
   },
-  plugins: [svelte(), stripeApiPlugin()],
+  plugins: [svelte(), stripeApiPlugin(), cloudinaryApiPlugin()],
 })
