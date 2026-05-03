@@ -372,6 +372,7 @@
 <style>
   .calendar-page {
     padding: 22px 18px var(--bottom-nav-clearance);
+    padding-top: var(--page-top-safe);
     height: 100%;
     box-sizing: border-box;
     display: flex;

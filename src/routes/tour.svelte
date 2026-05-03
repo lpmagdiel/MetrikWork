@@ -241,6 +241,7 @@
     flex-direction: column;
     z-index: 1000;
     overflow: hidden;
+    padding-top: var(--page-top-safe);
   }
 
   .tour-header {

@@ -296,6 +296,7 @@
 <style>
   .page-container {
     padding: 24px 20px var(--bottom-nav-clearance);
+    padding-top: var(--page-top-safe);
     height: 100%;
     display: flex;
     flex-direction: column;

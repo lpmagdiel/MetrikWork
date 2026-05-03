@@ -411,6 +411,7 @@
     height: 100%;
     background: var(--bg-page);
     overflow: hidden;
+    padding-top: var(--page-top-safe);
   }
 
   /* Header */

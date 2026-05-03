@@ -18,6 +18,7 @@
     height: 100%;
     overflow-y: auto;
     padding-bottom: var(--bottom-nav-clearance);
+    padding-top: var(--page-top-safe);
     background-color: var(--bg-page);
     display: flex;
     flex-direction: column;

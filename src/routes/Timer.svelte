@@ -89,6 +89,7 @@
 <style>
   .timer-page {
     padding: 24px 24px var(--bottom-nav-clearance);
+    padding-top: var(--page-top-safe);
     min-height: 100%;
     display: flex;
     flex-direction: column;

@@ -199,6 +199,7 @@
     height: 100%;
     background-color: var(--bg-page);
     box-sizing: border-box;
+    padding-top: var(--page-top-safe);
   }
 
   header {

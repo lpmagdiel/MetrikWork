@@ -230,6 +230,7 @@
     flex-direction: column;
     align-items: center;
     padding: 32px 16px;
+    padding-top: var(--page-top-safe);
     background: radial-gradient(circle at top, rgba(167, 243, 208, 0.28), transparent 35%),
       linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
     color: var(--text-primary);

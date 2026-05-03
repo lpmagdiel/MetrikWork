@@ -67,6 +67,7 @@
     height: 100%;
     overflow-y: auto;
     padding: 24px 20px calc(var(--bottom-nav-clearance) + 96px);
+    padding-top: var(--page-top-safe);
     background: var(--bg-page);
   }
 
