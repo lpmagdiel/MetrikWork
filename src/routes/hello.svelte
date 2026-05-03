@@ -100,7 +100,6 @@
         } else {
           $currentPath = "/";
         }
-        loadingShow = false;
       } catch (error) {
         console.log(error);
         if (error.code === 'auth/popup-blocked') {
@@ -112,13 +111,11 @@
             console.error("Redirect login failed", redirectError);
             showErrorAlert("Error", redirectError.message);
           }
-            console.error("Redirect login failed", redirectError);
-            showErrorAlert("Error", redirectError.message);
-          }
         } else {
           console.error("Google login failed", error);
           showErrorAlert("Error", error.message);
         }
+      } finally {
         skipAutoRedirect = false;
         loadingShow = false;
       }
