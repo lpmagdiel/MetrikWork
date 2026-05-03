@@ -232,7 +232,7 @@
 
   .messages-container {
     overflow-y: auto;
-    padding: 24px 24px calc(var(--bottom-nav-clearance) + 90px);
+    padding: 24px;
     display: flex;
     flex: 1;
     flex-direction: column;
@@ -299,12 +299,12 @@
     align-items: center;
     gap: 12px;
     border-top: 1px solid var(--border-color);
-    position: absolute;
-    bottom: var(--bottom-nav-occupied);
-    left: 0;
+    flex-shrink: 0;
     width: 100%;
-    height: 90px;
+    min-height: 90px;
     z-index: 90;
+    box-sizing: border-box;
+    padding-bottom: calc(16px + var(--bottom-nav-clearance, 0px));
   }
 
   input {

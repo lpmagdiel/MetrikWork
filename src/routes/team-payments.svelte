@@ -270,8 +270,8 @@
         <SliceContainer bind:show={showDetailsModal}>
             <div class="details-modal">
                 <div class="modal-header">
-                    <div class="avatar large">{selectedMemberDetails?.name.charAt(0).toUpperCase()}</div>
-                    <h3>Historial de {selectedMemberDetails?.name}</h3>
+                    <div class="avatar large">{(selectedMemberDetails?.name || selectedMemberDetails?.email || "?").charAt(0).toUpperCase()}</div>
+                    <h3>Historial de {selectedMemberDetails?.name || selectedMemberDetails?.email || "Usuario"}</h3>
                 </div>
 
                 <div class="details-tabs">

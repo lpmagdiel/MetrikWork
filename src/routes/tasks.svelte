@@ -27,6 +27,7 @@
   import { currentPath, navigateTo } from "../router.js";
   import SliceContainer from "../components/SliceContainer.svelte";
   import Toast from "../components/Toast.svelte";
+    import AvatarCircle from "../components/AvatarCircle.svelte";
 
   let team = $derived($selectedTeam);
   let isAdmin = $derived($userStore?.uid === team?.admin);
@@ -35,13 +36,19 @@
   let memberList = $state([]);
 
   $effect(() => {
+    let active = true;
     if (team?.members) {
       Promise.all(team.members.map((id) => getUserProfile(id))).then(
         (users) => {
-          memberList = users.filter(Boolean);
+          if (active) {
+            memberList = users.filter(Boolean);
+          }
         },
       );
     }
+    return () => {
+      active = false;
+    };
   });
 
   $effect(() => {
@@ -374,7 +381,11 @@
                 : ''}"
               onclick={() => toggleAssignedMember(member.id)}
             >
-              <div class="m-avatar">{member.avatar || "👤"}</div>
+            {#if member.avatar && member.avatar.length>10}
+            <img src={member.avatar} alt={member.name} class="m-avatar" width="32"/>
+            {:else}
+            <div class="m-avatar">{member.avatar || "👤"}</div>
+            {/if}
               <span class="m-name">{member.name || member.email}</span>
               {#if taskForm.assignedTo.includes(member.id)}
                 <CheckCircle2 size={18} color="var(--accent-strong)" />

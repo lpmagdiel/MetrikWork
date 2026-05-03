@@ -146,7 +146,7 @@
       if (editingTaskId) {
         await updateTeamTask(team.id, editingTaskId, data);
       } else {
-        await addTeamTask(team.id, data);
+        await addTeamTask(team.id, data, $userStore, team.name);
       }
       showAddTask = false;
     } catch (e) {
@@ -188,14 +188,20 @@
   }
 
   $effect(() => {
-    if (team.members) {
+    let active = true;
+    if (team?.members) {
       const userPromises = team.members.map(async (memberId) =>
         getUserProfile(memberId),
       );
       Promise.all(userPromises).then((users) => {
-        memberList = users.filter(Boolean);
+        if (active) {
+          memberList = users.filter(Boolean);
+        }
       });
     }
+    return () => {
+      active = false;
+    };
   });
   async function openMemberSettings(memberId, email) {
     selectedMemberId = memberId;

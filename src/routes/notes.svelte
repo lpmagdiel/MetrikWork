@@ -26,6 +26,7 @@
   let searchQuery = $state("");
   let showAddMenu = $state(false);
   let showEditor = $state(false);
+  let showColorOptions = $state(false);
 
   // Editor state
   let currentNoteId = $state(null);
@@ -286,21 +287,26 @@
         </button>
         <div class="editor-actions">
           <div class="color-picker-wrapper">
-            <button class="icon-btn" aria-label="Color">
+            <button class="icon-btn" aria-label="Color" onclick={() => (showColorOptions = !showColorOptions)}>
               <Palette size={22} color="#333" />
             </button>
-            <div class="color-options">
-              {#each colors as color}
-                <button
-                  class="color-circle"
-                  style="background-color: {color}; border: {noteColor === color
-                    ? '2px solid #333'
-                    : '1px solid #ddd'}"
-                  onclick={() => (noteColor = color)}
-                  aria-label="Color"
-                ></button>
-              {/each}
-            </div>
+            {#if showColorOptions}
+              <div class="color-options">
+                {#each colors as color}
+                  <button
+                    class="color-circle"
+                    style="background-color: {color}; border: {noteColor === color
+                      ? '2px solid #333'
+                      : '1px solid #ddd'}"
+                    onclick={() => {
+                      noteColor = color;
+                      showColorOptions = false;
+                    }}
+                    aria-label="Color"
+                  ></button>
+                {/each}
+              </div>
+            {/if}
           </div>
           <button class="icon-btn save-btn" onclick={saveNote} aria-label="Guardar">
             <Check size={22} color="#333" />
@@ -489,6 +495,7 @@
     font-weight: 700;
     color: var(--text-primary);
     display: -webkit-box;
+    -webkit-line-clamp: 2;
     line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
@@ -505,6 +512,7 @@
     color: var(--text-secondary);
     line-height: 1.4;
     display: -webkit-box;
+    -webkit-line-clamp: 5;
     line-clamp: 5;
     -webkit-box-orient: vertical;
     overflow: hidden;
@@ -695,12 +703,8 @@
     position: relative;
   }
 
-  .color-picker-wrapper:hover .color-options {
-    display: flex;
-  }
-
   .color-options {
-    display: none;
+    display: flex;
     position: absolute;
     top: 100%;
     right: 0;
