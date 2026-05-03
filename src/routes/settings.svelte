@@ -30,7 +30,6 @@
   let email = $state("");
   let isSaving = $state(false);
 
-
   onMount(async () => {
     if ($userStore) {
       email = $userStore.email;
@@ -40,7 +39,7 @@
       if (profile) {
         if (profile.name) name = profile.name;
         // Actualizamos el store para que AvatarCircle reaccione
-        userStore.update(u => ({ ...u, ...profile }));
+        userStore.update((u) => ({ ...u, ...profile }));
       }
     }
   });
@@ -64,12 +63,11 @@
   async function handleLogout() {
     try {
       await logout();
-      $currentPath = "#/hello";
+      $currentPath = "/hello";
     } catch (error) {
       alert("Error al cerrar sesión");
     }
   }
-
 
   async function toggleDarkMode() {
     if (!$userStore) return;
@@ -84,8 +82,6 @@
       console.error("Error toggling dark mode:", error);
     }
   }
-
-
 </script>
 
 <div class="settings-page">
@@ -95,7 +91,7 @@
 
   <div class="content">
     <section class="profile-card">
-      <AvatarCircle/>
+      <AvatarCircle />
 
       <div class="profile-form">
         <div class="input-group">
@@ -180,16 +176,18 @@
           </div>
           <ChevronRight size={18} class="chevron" />
         </button>
-                <button class="settings-item actionable">
-          <div class="item-icon album">
-            <Album size={18} />
-          </div>
-          <div class="item-info">
-            <span>Tutorial</span>
-            <p>Aprende a usar MetricWork</p>
-          </div>
-          <ChevronRight size={18} class="chevron" />
-        </button>
+        <a href="/tour">
+          <button class="settings-item actionable">
+            <div class="item-icon album">
+              <Album size={18} />
+            </div>
+            <div class="item-info">
+              <span>Tutorial</span>
+              <p>Aprende a usar MetricWork</p>
+            </div>
+            <ChevronRight size={18} class="chevron" />
+          </button>
+        </a>
       </div>
     </section>
 
@@ -244,7 +242,6 @@
     position: relative;
     margin-bottom: 24px;
   }
-
 
   .profile-form {
     width: 100%;
@@ -383,6 +380,9 @@
 
   .item-info {
     flex: 1;
+  }
+  a {
+    text-decoration: none;
   }
 
   .item-info span {

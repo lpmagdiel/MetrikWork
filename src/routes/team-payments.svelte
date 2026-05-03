@@ -107,7 +107,7 @@
     <Toast message={messageToast} type={typeToast} show={showToast} />
     
     <header>
-        <button class="back-btn" onclick={() => ($currentPath = `#/teams/${team?.id}`)}>
+        <button class="back-btn" onclick={() => ($currentPath = `/teams/${team?.id}`)}>
             <ChevronLeft size={24} />
         </button>
         <div class="header-text">

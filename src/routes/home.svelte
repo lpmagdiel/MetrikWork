@@ -10,7 +10,8 @@
     MessageSquare,
     Calculator,
     StickyNote,
-    Timer
+    Timer,
+    Sparkles
   } from "lucide-svelte";
 
   let hasUnread = $derived($notificationsStore.some((n) => !n.opened));
@@ -109,7 +110,7 @@
         </div>
       </div>
       <div class="header-actions">
-        <a href="#/notifications" class="notification-link">
+        <a href="/notifications" class="notification-link">
           <Bell size={24} color={hasUnread ? "var(--inactive-color)" : "var(--accent-ink)"} />
           {#if hasUnread}
             <span class="badget"></span>
@@ -129,25 +130,25 @@
 
     <!-- Quick Actions Row -->
     <div class="quick-actions-row">
-      <a href="#/teams" class="action-btn">
+      <a href="/teams" class="action-btn">
         <div class="action-icon-box">
           <Users size={28} />
         </div>
         <span class="action-label">Equipos</span>
       </a>
-            <a href="#/timer" class="action-btn">
+            <a href="/timer" class="action-btn">
         <div class="action-icon-box">
           <Timer size={28} />
         </div>
         <span class="action-label">Timer</span>
       </a>
-      <a href="#/calculator" class="action-btn">
+      <a href="/calculator" class="action-btn">
         <div class="action-icon-box">
           <Calculator size={28} />
         </div>
         <span class="action-label">Calculadora</span>
       </a>
-      <a href="#/notes" class="action-btn">
+      <a href="/notes" class="action-btn">
         <div class="action-icon-box">
           <StickyNote size={28} />
         </div>
@@ -180,6 +181,20 @@
         </div>
       </div>
     </div>
+
+    <!-- Tutorial Banner -->
+    <a href="/tour" class="tutorial-card">
+      <div class="tutorial-icon">
+        <Sparkles size={32} />
+      </div>
+      <div class="tutorial-text">
+        <h3>Aprende a usar MetricWork</h3>
+        <p>Domina el calendario, tareas y equipos en 1 minuto.</p>
+      </div>
+      <div class="tutorial-arrow">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+      </div>
+    </a>
   </div>
 </div>
 
@@ -432,5 +447,59 @@
     font-weight: 600;
     font-size: 14px;
     cursor: pointer;
+  }
+
+  /* Tutorial Card */
+  .tutorial-card {
+    background: linear-gradient(135deg, var(--accent-color) 0%, #ffffff 100%);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    text-decoration: none;
+    box-shadow: var(--shadow-card);
+    border: 1px solid var(--border-color);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .tutorial-card:active {
+    transform: scale(0.98);
+  }
+
+  .tutorial-icon {
+    width: 56px;
+    height: 56px;
+    background: var(--accent-strong);
+    color: white;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .tutorial-text {
+    flex: 1;
+  }
+
+  .tutorial-text h3 {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 4px;
+    color: var(--accent-ink);
+  }
+
+  .tutorial-text p {
+    font-size: 13px;
+    color: var(--accent-ink);
+    opacity: 0.7;
+    margin: 0;
+    line-height: 1.4;
+  }
+
+  .tutorial-arrow {
+    color: var(--accent-ink);
+    opacity: 0.5;
   }
 </style>

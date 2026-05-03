@@ -7,7 +7,6 @@
   } from "../data/stores.js";
   import { ChevronLeft, Bell, CheckCheck, Trash2 } from "lucide-svelte";
   import { currentPath } from "../router.js";
-  import { useSwipe } from "svelte-gestures";
   import { fly } from "svelte/transition";
   import Toast from "../components/Toast.svelte";
   import ConfirmToast from "../components/ConfirmToast.svelte";
@@ -20,6 +19,49 @@
   let typeToast = $state("");
   let unreadCount = $derived(notifications.filter((n) => !n.opened).length);
 
+  // --- Swipe logic (native touch/pointer) ---
+  const SWIPE_THRESHOLD = 60; // px mínimos para activar el swipe
+  let pointerStartX = 0;
+  let pointerStartY = 0;
+  let activePointerId = null;
+
+  function onPointerDown(e, notificationId) {
+    // Solo el primer dedo/puntero
+    if (activePointerId !== null) return;
+    activePointerId = e.pointerId;
+    pointerStartX = e.clientX;
+    pointerStartY = e.clientY;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function onPointerUp(e, notificationId) {
+    if (e.pointerId !== activePointerId) return;
+    activePointerId = null;
+
+    const dx = e.clientX - pointerStartX;
+    const dy = e.clientY - pointerStartY;
+
+    // Ignorar si el movimiento vertical domina (scroll)
+    if (Math.abs(dy) > Math.abs(dx)) return;
+
+    if (dx < -SWIPE_THRESHOLD) {
+      // Swipe izquierda → mostrar botón delete
+      swipedNotificationId = notificationId;
+    } else if (dx > SWIPE_THRESHOLD) {
+      // Swipe derecha → ocultar botón delete
+      if (swipedNotificationId === notificationId) {
+        swipedNotificationId = null;
+      }
+    }
+  }
+
+  function onPointerCancel(e) {
+    if (e.pointerId === activePointerId) {
+      activePointerId = null;
+    }
+  }
+
+  // --- Acciones ---
   function formatDate(isoString) {
     if (!isoString) return "";
     const date = new Date(isoString);
@@ -34,16 +76,6 @@
   async function handleNotificationClick(notification) {
     if (!notification.opened) {
       await markNotificationAsRead(notification.id);
-    }
-  }
-
-  function handleSwipe(event, notificationId) {
-    if (event.detail.direction === "left") {
-      swipedNotificationId = notificationId;
-    } else if (event.detail.direction === "right") {
-      if (swipedNotificationId === notificationId) {
-        swipedNotificationId = null;
-      }
     }
   }
 
@@ -77,7 +109,7 @@
   }
 
   function goBack() {
-    $currentPath = "#/";
+    $currentPath = "/";
   }
 </script>
 
@@ -139,8 +171,11 @@
         <div
           class="notification-wrapper"
           transition:fly={{ x: -200, duration: 300 }}
-          {...useSwipe((e) => handleSwipe(e, notification.id))}
+          onpointerdown={(e) => onPointerDown(e, notification.id)}
+          onpointerup={(e) => onPointerUp(e, notification.id)}
+          onpointercancel={onPointerCancel}
         >
+          <!-- Botón de fondo rojo que aparece al hacer swipe left -->
           <button
             class="delete-bg-btn"
             onclick={() => handleDelete(notification.id)}
@@ -148,14 +183,14 @@
           >
             <Trash2 size={22} />
           </button>
+
+          <!-- Tarjeta deslizante -->
           <div
             class="card-slider"
             class:swiped={swipedNotificationId === notification.id}
           >
             <button
-              class="notification-card {notification.opened
-                ? 'read'
-                : 'unread'}"
+              class="notification-card {notification.opened ? 'read' : 'unread'}"
               onclick={() => handleNotificationClick(notification)}
             >
               <div class="icon-container">
@@ -315,20 +350,24 @@
     padding-bottom: 8px;
   }
 
+  /* Wrapper que contiene la tarjeta y el fondo rojo */
   .notification-wrapper {
     position: relative;
     border-radius: var(--radius-lg);
     overflow: hidden;
+    touch-action: pan-y; /* permite scroll vertical, capturamos horizontal manualmente */
+    user-select: none;
   }
 
+  /* Botón rojo oculto detrás de la tarjeta */
   .delete-bg-btn {
     position: absolute;
     top: 0;
     bottom: 0;
     right: 0;
-    width: 76px;
-    background: var(--bg-danger-subtle);
-    color: var(--danger-color);
+    width: 80px;
+    background: var(--bg-danger-subtle, #fef2f2);
+    color: var(--danger-color, #ef4444);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -336,17 +375,27 @@
     border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
     cursor: pointer;
     z-index: 1;
+    transition: background 0.15s;
   }
 
+  .delete-bg-btn:active {
+    background: var(--danger-color, #ef4444);
+    color: white;
+  }
+
+  /* Tarjeta que se desliza para revelar el botón */
   .card-slider {
     position: relative;
     z-index: 2;
-    transition: transform 0.22s ease-out;
-    background: transparent;
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .card-slider.swiped {
-    transform: translateX(-76px);
+    transform: translateX(-80px);
+  }
+  .card-slider.swiped .notification-card{
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
   }
 
   .notification-card {
@@ -375,9 +424,29 @@
     box-shadow: var(--shadow-soft);
   }
 
+  /* Estado leído: sin opacidad (evita transparentar el fondo rojo),
+     se diferencia visualmente mediante colores apagados */
   .notification-card.read {
     background: var(--bg-card);
-    opacity: 0.74;
+    border-color: var(--border-color);
+  }
+
+  .notification-card.read .notification-content h3 {
+    color: var(--text-secondary);
+    font-weight: 600;
+  }
+
+  .notification-card.read .notification-content p {
+    color: var(--text-muted);
+  }
+
+  .notification-card.read .date {
+    color: var(--text-muted);
+  }
+
+  .notification-card.read .icon-container {
+    background: var(--bg-input);
+    color: var(--text-muted);
   }
 
   .icon-container {

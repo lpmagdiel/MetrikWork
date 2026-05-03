@@ -16,7 +16,7 @@
 
   function goToTeam(team) {
     selectedTeamId.set(team.id);
-    $currentPath = `#/teams/${team.id}`;
+    $currentPath = `/teams/${team.id}`;
   }
 
   async function handleCreateTeam() {
@@ -27,7 +27,7 @@
       const id = await createTeam(teamName.trim());
       if (id) {
         selectedTeamId.set(id);
-        $currentPath = `#/teams/${id}`;
+        $currentPath = `/teams/${id}`;
       }
     } catch (error) {
       alert("No se pudo crear el equipo");
@@ -82,7 +82,7 @@
     {/if}
   </div>
 
-  <a href="#/teams/create">
+  <a href="/teams/create">
   <button class="fab" aria-label="Crear equipo">
     <Plus size={30} />
   </button>

@@ -1,11 +1,30 @@
 <script>
   import { updateUserProfile, userStore } from "../data/stores.js";
-  import { cropToSquare, resizer, uploader, destroyer } from "../data/fileHelper.js";
-  import { Camera, Loader2 } from "lucide-svelte";
+  import {
+    cropToSquare,
+    resizer,
+    uploader,
+    destroyer,
+  } from "../data/fileHelper.js";
+  import { Camera, Loader2, User } from "lucide-svelte";
 
   const { editable = true, size = 100 } = $props();
 
   let isSaving = $state(false);
+  let isLoading = $state(true);
+  let hasError = $state(false);
+  let optimisticAvatar = $state(null);
+
+  // Optimiza la URL de Cloudinary para pedir el tamaño exacto y el formato más eficiente
+  function getOptimizedUrl(url, targetSize) {
+    if (!url || !url.includes("cloudinary.com")) return url;
+    if (url.includes("/upload/")) {
+      const parts = url.split("/upload/");
+      const transform = `f_auto,q_auto,w_${targetSize * 2},h_${targetSize * 2},c_fill,g_face`;
+      return `${parts[0]}/upload/${transform}/${parts[1]}`;
+    }
+    return url;
+  }
 
   // Helper to determine if the avatar is a URL/DataURI or an emoji/text
   function isImageUrl(url) {
@@ -19,11 +38,14 @@
       try {
         isSaving = true;
         const oldAvatar = $userStore?.avatar;
-        
+
+        // Optimistic UI: mostrar la imagen localmente antes de subirla
         const cropped = await cropToSquare(file);
-        const resized = await resizer(cropped, 200);
+        optimisticAvatar = cropped;
+
+        const resized = await resizer(cropped, 400); // 400px para pantallas retina
         const avatarUrl = await uploader(resized, "MetricWorkProfile");
-        
+
         await updateUserProfile($userStore.uid, { avatar: avatarUrl });
 
         // Si el avatar anterior era una imagen de Cloudinary, la eliminamos
@@ -31,12 +53,16 @@
           try {
             await destroyer(oldAvatar);
           } catch (deleteError) {
-            console.warn("No se pudo eliminar el avatar antiguo de Cloudinary:", deleteError);
+            console.warn(
+              "No se pudo eliminar el avatar antiguo de Cloudinary:",
+              deleteError,
+            );
           }
         }
       } catch (error) {
         console.error("Error processing image:", error);
         alert("No se pudo subir la imagen. Inténtalo de nuevo.");
+        optimisticAvatar = null;
       } finally {
         isSaving = false;
         // Reset the input so the same file can be uploaded again if needed
@@ -44,6 +70,18 @@
       }
     }
   }
+
+  // Resetear estados de carga cuando cambia el avatar en el store
+  $effect(() => {
+    if ($userStore?.avatar) {
+      isLoading = true;
+      hasError = false;
+      optimisticAvatar = null;
+    }
+  });
+
+  const displayAvatar = $derived(optimisticAvatar || $userStore?.avatar);
+  const isImage = $derived(isImageUrl(displayAvatar));
 </script>
 
 <div class="avatar-container" style="width: {size}px; height: {size}px;">
@@ -54,38 +92,54 @@
       </div>
     {/if}
 
-    {#if isImageUrl($userStore?.avatar)}
+    {#if isImage && !hasError}
+      {#if isLoading}
+        <div class="skeleton-pulse"></div>
+      {/if}
+
       <img
-        src={$userStore.avatar}
-        alt={$userStore.name || "Usuario"}
+        src={getOptimizedUrl(displayAvatar, size)}
+        alt={$userStore?.name || "Usuario"}
         class="img-avatar"
+        class:loading={isLoading}
+        onload={() => (isLoading = false)}
+        onerror={() => {
+          isLoading = false;
+          hasError = true;
+        }}
       />
     {:else}
-      <span class="avatar-emoji" style="font-size: {size * 0.48}px;">
-        {$userStore?.avatar || "👤"}
-      </span>
+      <div class="avatar-fallback" style="font-size: {size * 0.48}px;">
+        {#if hasError || !displayAvatar}
+          <User size={size * 0.5} />
+        {:else}
+          <span class="avatar-emoji">
+            {displayAvatar}
+          </span>
+        {/if}
+      </div>
     {/if}
   </div>
 
   {#if editable}
-  <input
-    type="file"
-    accept="image/*"
-    name="avatar-upload"
-    id="avatar-upload"
-    onchange={handleAvatarUpload}
-    style="display: none"
-    disabled={isSaving}
-  />
-  
-  <label
-    for="avatar-upload"
-    class="edit-avatar-btn"
-    class:disabled={isSaving}
-    aria-label="Cambiar avatar"
-  >
-    <Camera size={14} />
-  </label>
+    <input
+      type="file"
+      accept="image/*"
+      name="avatar-upload"
+      id="avatar-upload"
+      onchange={handleAvatarUpload}
+      style="display: none"
+      disabled={isSaving}
+    />
+
+    <label
+      for="avatar-upload"
+      class="edit-avatar-btn"
+      class:disabled={isSaving}
+      aria-label="Cambiar avatar"
+    >
+      <Camera size={14} />
+    </label>
   {/if}
 </div>
 
@@ -97,7 +151,7 @@
 
   .avatar-circle {
     position: relative;
-    background: var(--accent-color);
+    background: var(--bg-card-secondary, #f0f0f0);
     border: 3px solid var(--bg-card);
     box-shadow: var(--shadow-button);
     border-radius: 50%;
@@ -107,20 +161,53 @@
     overflow: hidden;
   }
 
+  .avatar-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    background: var(--accent-color);
+    color: var(--text-primary);
+  }
+
   .avatar-emoji {
-    font-size: 48px;
     user-select: none;
   }
 
   .loader-overlay {
     position: absolute;
     inset: 0;
-    background: rgba(255, 255, 255, 0.5);
+    background: rgba(255, 255, 255, 0.7);
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 2;
-    backdrop-filter: blur(2px);
+    z-index: 10;
+    backdrop-filter: blur(4px);
+  }
+
+  .skeleton-pulse {
+    position: absolute;
+    inset: 0;
+    background-color: var(--bg-card-secondary, #eee);
+    background-image: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0) 0%,
+      rgba(255, 255, 255, 0.4) 50%,
+      rgba(255, 255, 255, 0) 100%
+    );
+    background-size: 200% 100%;
+    animation: pulse 1.5s infinite;
+    z-index: 1;
+  }
+
+  @keyframes pulse {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
   }
 
   :global(.animate-spin) {
@@ -136,11 +223,18 @@
     }
   }
 
-  .avatar-circle .img-avatar {
+  .img-avatar {
     width: 100%;
     height: 100%;
     object-fit: cover;
     border-radius: 50%;
+    transition: opacity 0.3s ease;
+    z-index: 2;
+    position: relative;
+  }
+
+  .img-avatar.loading {
+    opacity: 0;
   }
 
   .edit-avatar-btn {
@@ -158,13 +252,14 @@
     justify-content: center;
     cursor: pointer;
     box-shadow: var(--shadow-card);
-    transition: all 0.2s ease;
-    z-index: 3;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 11;
   }
 
   .edit-avatar-btn:hover:not(.disabled) {
     transform: scale(1.1);
     background: var(--accent-strong);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   }
 
   .edit-avatar-btn.disabled {

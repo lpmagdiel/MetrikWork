@@ -9,24 +9,24 @@
 
   const isActive = (iconPath) => {
     const path = $currentPath;
-    if (iconPath === "#/") {
-      return path === "#/" || path === "";
+    if (iconPath === "/") {
+      return path === "/" || path === "";
     }
-    if (iconPath === "#/teams") {
+    if (iconPath === "/teams") {
       return (
-        path.startsWith("#/teams") ||
-        path.startsWith("#/chat") ||
-        path.startsWith("#/team-payments")
+        path.startsWith("/teams") ||
+        path.startsWith("/chat") ||
+        path.startsWith("/team-payments")
       );
     }
     return path.startsWith(iconPath);
   };
 
   const items = [
-    { href: "#/", label: "Inicio", icon: LayoutDashboard },
-    { href: "#/teams", label: "Equipos", icon: Users },
-    { href: "#/calendar", label: "Agenda", icon: CalendarDays },
-    { href: "#/settings", label: "Ajustes", icon: SlidersHorizontal },
+    { href: "/", label: "Inicio", icon: LayoutDashboard },
+    { href: "/teams", label: "Equipos", icon: Users },
+    { href: "/calendar", label: "Agenda", icon: CalendarDays },
+    { href: "/settings", label: "Ajustes", icon: SlidersHorizontal },
   ];
 </script>
 

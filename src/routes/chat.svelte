@@ -101,7 +101,7 @@
   <header>
     <button
       class="back-btn"
-      onclick={() => ($currentPath = `#/teams/${teamId}`)}
+      onclick={() => ($currentPath = `/teams/${teamId}`)}
     >
       <ChevronLeft size={24} />
     </button>

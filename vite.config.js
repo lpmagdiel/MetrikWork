@@ -145,4 +145,7 @@ export default defineConfig({
     sourcemap: true
   },
   plugins: [svelte(), stripeApiPlugin(), cloudinaryApiPlugin()],
+  server: {
+    historyApiFallback: true,
+  }
 })

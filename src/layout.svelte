@@ -9,7 +9,7 @@
   } from "./data/stores.js";
   import NavBar from "./components/NavBar.svelte";
   import LoadingSpinner from "./components/LoadingSpinner.svelte";
-  
+
   // Static Imports
   import Home from "./routes/home.svelte";
   import Login from "./routes/login.svelte";
@@ -26,33 +26,35 @@
   import Chat from "./routes/chat.svelte";
   import TeamPayments from "./routes/team-payments.svelte";
   import Pay from "./routes/pay.svelte";
-import Timer from "./routes/Timer.svelte";
+  import Timer from "./routes/Timer.svelte";
+  import Tour from "./routes/tour.svelte";
 
   // Basic Route Map
   const routes = {
-    "#/": Home,
-    "#/teams": Teams,
-    "#/login": Login,
-    "#/hello": Hello,
-    "#/settings": Settings,
-    "#/calendar": Calendar,
-    "#/notifications": Notifications,
-    "#/inventory": Inventory,
-    "#/calculator": Calculator,
-    "#/notes": Notes,
-    "#/tasks": Tasks,
-    "#/team": Team,
-    "#/chat": Chat,
-    "#/team-payments": TeamPayments,
-    "#/pay": Pay,
-    "#/timer": Timer,
+    "/": Home,
+    "/teams": Teams,
+    "/login": Login,
+    "/hello": Hello,
+    "/settings": Settings,
+    "/calendar": Calendar,
+    "/notifications": Notifications,
+    "/inventory": Inventory,
+    "/calculator": Calculator,
+    "/notes": Notes,
+    "/tasks": Tasks,
+    "/team": Team,
+    "/chat": Chat,
+    "/team-payments": TeamPayments,
+    "/pay": Pay,
+    "/timer": Timer,
+    "/tour": Tour,
   };
 
   let cleanPath = $derived($currentPath.split("?")[0]);
 
   let routeInfo = $derived.by(() => {
-    // 1. Handle nested team routes: #/teams/:teamId/:subpage
-    if (cleanPath.startsWith("#/teams/")) {
+    // 1. Handle nested team routes: /teams/:teamId/:subpage
+    if (cleanPath.startsWith("/teams/")) {
       const parts = cleanPath.split("/");
       const teamId = parts[2];
       const subpage = parts[3];
@@ -79,17 +81,21 @@ import Timer from "./routes/Timer.svelte";
   let Component = $derived(routeInfo.component);
 
   let canRender = $derived(
-    () => $authReady && ($userStore || $currentPath === "#/hello" || $currentPath === "#/login")
+    () =>
+      $authReady &&
+      ($userStore || $currentPath === "/hello" || $currentPath === "/login"),
   );
 
   // Sync selectedTeamId store
   $effect(() => {
     if (routeInfo.teamId) {
       selectedTeamId.set(routeInfo.teamId);
-    } else if (!cleanPath.startsWith("#/teams") && 
-               cleanPath !== "#/inventory" && 
-               cleanPath !== "#/tasks" && 
-               cleanPath !== "#/chat") {
+    } else if (
+      !cleanPath.startsWith("/teams") &&
+      cleanPath !== "/inventory" &&
+      cleanPath !== "/tasks" &&
+      cleanPath !== "/chat"
+    ) {
       selectedTeamId.set(null);
     }
   });
@@ -97,8 +103,12 @@ import Timer from "./routes/Timer.svelte";
   // Auth redirection
   $effect(() => {
     if (!$authReady) return;
-    if (!$userStore && $currentPath !== "#/hello" && $currentPath !== "#/login") {
-      $currentPath = "#/hello";
+    if (
+      !$userStore &&
+      $currentPath !== "/hello" &&
+      $currentPath !== "/login"
+    ) {
+      $currentPath = "/hello";
     }
   });
 
@@ -120,7 +130,7 @@ import Timer from "./routes/Timer.svelte";
   {/if}
 </main>
 
-{#if $authReady && $currentPath !== "#/hello" && $currentPath !== "#/login"}
+{#if $authReady && $currentPath !== "/hello" && $currentPath !== "/login" && $currentPath !== "/tour"}
   <NavBar />
 {/if}
 

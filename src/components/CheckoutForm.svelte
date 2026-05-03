@@ -74,7 +74,7 @@
       // Redirect to teams after 2 seconds
       setTimeout(() => {
         paymentStore.reset();
-        $currentPath = "#/teams";
+        $currentPath = "/teams";
       }, 2500);
     } catch (error) {
       errorMessage = error.message || "Error al procesar el pago";

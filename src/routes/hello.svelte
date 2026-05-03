@@ -43,7 +43,7 @@
   onMount(() => {
     const unsubscribe = userStore.subscribe((value) => {
       if (value && value.email) {
-        $currentPath = "#/";
+        $currentPath = "/";
       }
     });
     return unsubscribe;
@@ -57,7 +57,7 @@
       try {
         await signInWithPopup(auth, googleProvider);
         // Auth state listener in stores.js will handle the rest
-        $currentPath = "#/";
+        $currentPath = "/";
       } catch (error) {
         console.error("Google login failed", error);
         showErrorAlert("Error", error.message);
@@ -98,7 +98,7 @@
         email = "";
         password = "";
         name = "";
-        $currentPath = "#/";
+        $currentPath = "/";
       }, 1500);
     } catch (error) {
       console.error("Mail login failed", error);

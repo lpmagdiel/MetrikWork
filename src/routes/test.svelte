@@ -5,7 +5,7 @@
 
 <div class="test-page">
   <div class="nav-header">
-    <button class="back-button" onclick={() => navigateTo("")}>
+    <button class="back-button" onclick={() => navigateTo("/")}>
       <span class="icon">←</span> Volver al Home
     </button>
   </div>

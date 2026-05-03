@@ -19,7 +19,7 @@
       paymentStore.reset();
       step = 1;
     } else {
-      $currentPath = "#/teams";
+      $currentPath = "/teams";
     }
   }
 </script>

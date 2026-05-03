@@ -312,7 +312,7 @@
 <div class="team-detail">
   <Toast message={messageToast} type={typeToast} show={showToast} />
   <header>
-    <button class="back-btn" onclick={() => ($currentPath = "#/teams")}>
+    <button class="back-btn" onclick={() => ($currentPath = "/teams")}>
       <ChevronLeft size={24} />
     </button>
     <h1>Detalles del Equipo</h1>
@@ -337,7 +337,7 @@
         <div class="menu-grid">
           <button
             class="menu-card"
-            onclick={() => ($currentPath = `#/teams/${team.id}/chat`)}
+            onclick={() => ($currentPath = `/teams/${team.id}/chat`)}
           >
             <div class="menu-icon chat">
               <MessageSquare size={24} />
@@ -346,7 +346,7 @@
           </button>
           <button
             class="menu-card"
-            onclick={() => ($currentPath = `#/teams/${team.id}/tasks`)}
+            onclick={() => ($currentPath = `/teams/${team.id}/tasks`)}
           >
             <div class="menu-icon tasks">
               <CheckSquare size={24} />
@@ -367,7 +367,7 @@
           </button>
           <button
             class="menu-card"
-            onclick={() => ($currentPath = `#/teams/${team.id}/inventory`)}
+            onclick={() => ($currentPath = `/teams/${team.id}/inventory`)}
           >
             <div class="menu-icon inventory">
               <Package size={24} />
@@ -383,7 +383,7 @@
             </button>
             <button
               class="menu-card"
-              onclick={() => ($currentPath = `#/teams/${team.id}/payments`)}
+              onclick={() => ($currentPath = `/teams/${team.id}/payments`)}
             >
               <div class="menu-icon payments">
                 <DollarSign size={24} />
@@ -731,7 +731,7 @@
   {:else}
     <div class="empty-state">
       <p>No se seleccionó ningún equipo.</p>
-      <button onclick={() => ($currentPath = "#/teams")}>Volver</button>
+      <button onclick={() => ($currentPath = "/teams")}>Volver</button>
     </div>
   {/if}
 </div>
