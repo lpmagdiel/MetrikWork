@@ -9,7 +9,9 @@
     ArrowRight, 
     X,
     ChevronLeft,
-    Sparkles
+    Sparkles,
+    ShieldCheck,
+    Smartphone
   } from "lucide-svelte";
   import { navigateTo } from "../router";
 
@@ -50,6 +52,20 @@
       icon: DollarSign,
       color: "#bbf7d0", // Mint
       feature: "payments"
+    },
+    {
+      title: "Seguridad Garantizada",
+      description: "Toda la información que envías al servidor está cifrada para proteger tus datos y privacidad.",
+      icon: ShieldCheck,
+      color: "#fecdd3", // Rose
+      feature: "security"
+    },
+    {
+      title: "Instala la App",
+      description: "Añádela a tu inicio: En iOS toca Compartir y luego 'Añadir a inicio'. En Android abre el menú y toca 'Añadir a pantalla de inicio'.",
+      icon: Smartphone,
+      color: "#fde047", // Yellow
+      feature: "install"
     },
     {
       title: "¡Estás Listo!",
@@ -168,6 +184,26 @@
                 <div class="payment-row">
                   <span>Hora Extra</span>
                   <span class="price">$15.00</span>
+                </div>
+             </div>
+          {:else if steps[currentStep].feature === 'security'}
+             <div class="mock-ui security-mock" in:scale={{duration: 500, start: 0.9}}>
+                <div class="security-shield">
+                   <ShieldCheck size={40} color="var(--success-color)" />
+                </div>
+                <p>Cifrado Activo</p>
+             </div>
+          {:else if steps[currentStep].feature === 'install'}
+             <div class="mock-ui install-mock" in:scale={{duration: 500, start: 0.9}}>
+                <div class="install-phones">
+                  <div class="phone">
+                     <span class="os">iOS</span>
+                     <span class="action">Compartir ➔ Añadir</span>
+                  </div>
+                  <div class="phone">
+                     <span class="os">Android</span>
+                     <span class="action">⋮ Menú ➔ Añadir</span>
+                  </div>
                 </div>
              </div>
           {/if}
@@ -460,6 +496,64 @@
   .price {
     font-weight: 700;
     color: var(--success-color);
+  }
+
+  /* Mock Security */
+  .security-mock {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    font-weight: 600;
+  }
+  .security-shield {
+    background: #dcfce7;
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Mock Install */
+  .install-mock {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+  .install-phones {
+    display: flex;
+    gap: 12px;
+    width: 100%;
+  }
+  .phone {
+    flex: 1;
+    background: var(--bg-page);
+    border: 2px solid var(--border-color);
+    border-radius: 12px;
+    padding: 12px 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .phone .os {
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--text-primary);
+  }
+  .phone .action {
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: var(--bg-input);
+    padding: 6px;
+    border-radius: 6px;
+    text-align: center;
+    width: 100%;
   }
 
   .tour-footer {

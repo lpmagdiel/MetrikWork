@@ -12,6 +12,7 @@
     signInWithEmailAndPassword,
     createUserWithEmailAndPassword,
     updateProfile,
+    getAdditionalUserInfo,
   } from "firebase/auth";
 
   let loadingShow = $state(false);
@@ -40,9 +41,11 @@
     showAlert = true;
   }
 
+  let skipAutoRedirect = false;
+
   onMount(() => {
     const unsubscribe = userStore.subscribe((value) => {
-      if (value && value.email) {
+      if (value && value.email && !skipAutoRedirect) {
         $currentPath = "/";
       }
     });
@@ -54,11 +57,17 @@
       openMailForm = true;
     } else if (provider === "google") {
       loadingShow = true;
+      skipAutoRedirect = true;
       try {
-        await signInWithPopup(auth, googleProvider);
-        // Auth state listener in stores.js will handle the rest
-        $currentPath = "/";
+        const credential = await signInWithPopup(auth, googleProvider);
+        const additionalInfo = getAdditionalUserInfo(credential);
+        if (additionalInfo?.isNewUser) {
+          $currentPath = "/tour";
+        } else {
+          $currentPath = "/";
+        }
       } catch (error) {
+        skipAutoRedirect = false;
         console.error("Google login failed", error);
         showErrorAlert("Error", error.message);
       } finally {
@@ -75,6 +84,8 @@
     loadingShow = true;
 
     try {
+      skipAutoRedirect = true;
+      let isNewUser = false;
       if (isRegistering) {
         // Register
         const userCredential = await createUserWithEmailAndPassword(
@@ -82,6 +93,7 @@
           email,
           password,
         );
+        isNewUser = true;
         if (name) {
           await updateProfile(userCredential.user, {
             displayName: name,
@@ -98,9 +110,14 @@
         email = "";
         password = "";
         name = "";
-        $currentPath = "/";
+        if (isNewUser) {
+          $currentPath = "/tour";
+        } else {
+          $currentPath = "/";
+        }
       }, 1500);
     } catch (error) {
+      skipAutoRedirect = false;
       console.error("Mail login failed", error);
       showErrorAlert("Error de autenticación", error.message);
     } finally {
