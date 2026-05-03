@@ -8,6 +8,7 @@
     AlertTriangle,
     X,
     Save,
+    ChevronLeft
   } from "lucide-svelte";
   import {
     inventoryStore,
@@ -17,9 +18,11 @@
     selectedTeamId,
     subscribeToTeamInventory,
   } from "../data/stores.js";
+  import { currentPath } from "../router.js";
   import SliceContainer from "../components/SliceContainer.svelte";
 
   let searchTerm = $state("");
+  let teamId = $derived($selectedTeamId);
   let showModal = $state(false);
   let editingId = $state(null);
 
@@ -117,15 +120,17 @@
 </script>
 
 <div class="page-container">
+      <button class="fab" onclick={() => openModal()}>
+    <Plus size={30} />
+  </button>
   <div class="header">
     <div class="title-group">
+    <button class="back-btn"onclick={() => ($currentPath = `/teams/${teamId}`)}>
+    <ChevronLeft size={24} />
+    </button>
       <Package size={32} color="var(--text-primary)" />
       <h1>Inventario</h1>
     </div>
-    <button class="primary-btn" onclick={() => openModal()}>
-      <Plus size={20} />
-      <span>Nuevo Producto</span>
-    </button>
   </div>
 
   <div class="inventory-resum-container">
@@ -290,6 +295,7 @@
         </button>
       </div>
     </form>
+
   </div>
 </SliceContainer>
 
@@ -309,7 +315,19 @@
     justify-content: space-between;
     align-items: center;
   }
-
+  .back-btn {
+    background: var(--bg-card);
+    border: none;
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: var(--shadow-card);
+    cursor: pointer;
+    color: var(--text-primary);
+  }
   .title-group {
     display: flex;
     align-items: center;
@@ -323,30 +341,38 @@
     color: var(--text-primary);
   }
 
-  .primary-btn {
-    background: var(--accent-strong);
-    color: var(--bg-card);
-    border: none;
-    padding: 10px 20px;
-    border-radius: var(--radius-sm);
-    font-weight: 600;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    transition: all 0.2s;
-  }
-
-  .primary-btn:hover {
-    background: var(--text-primary);
-    transform: translateY(-1px);
-  }
 
   .inventory-resum-container {
     display: flex;
     gap: 8px;
   }
+  .fab {
+    position: fixed;
+    bottom: var(--floating-action-bottom);
+    right: 24px;
+    width: 60px;
+    height: 60px;
+    background: var(--accent-strong);
+    color: #ffffff;
+    border: none;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 80;
+  }
 
+  .fab:active {
+    transform: scale(0.9);
+  }
+
+  .fab:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+  }
   .stat-card {
     flex: 1;
     min-width: 0;
@@ -370,7 +396,7 @@
 
   .stat-value {
     margin: 0;
-    font-size: 28px;
+    font-size: 22px;
     font-weight: 700;
     color: var(--text-primary);
   }
@@ -586,16 +612,6 @@
     .header {
       align-items: flex-start;
       flex-direction: column;
-    }
-
-    .primary-btn {
-      width: 100%;
-      justify-content: center;
-    }
-
-    .inventory-resum-container {
-      display: grid;
-      grid-template-columns: 1fr;
     }
 
     .form-row {

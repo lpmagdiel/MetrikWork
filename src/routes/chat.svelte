@@ -105,7 +105,7 @@
     >
       <ChevronLeft size={24} />
     </button>
-    <h1>{teamName} chat</h1>
+    <h1>{teamName}</h1>
   </header>
 
   <div class="messages-container" bind:this={chatContainer}>
@@ -304,7 +304,7 @@
     min-height: 90px;
     z-index: 90;
     box-sizing: border-box;
-    padding-bottom: calc(16px + var(--bottom-nav-clearance, 0px));
+    padding-bottom: calc(2px + var(--bottom-nav-clearance, 0px));
   }
 
   input {
