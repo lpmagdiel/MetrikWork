@@ -167,7 +167,7 @@
     font-weight: 600;
   }
 
-  .card-center li svg {
+  .card-center li :global(svg) {
     color: var(--success-color);
     flex-shrink: 0;
   }

@@ -7,6 +7,7 @@
   import Alert from "../components/Alert.svelte";
   import { userStore } from "../data/stores";
   import { auth, googleProvider } from "../data/firebase";
+  import { BETA_TESTERS_MODE } from "../data/features.js";
   import {
     signInWithPopup,
     signInWithRedirect,
@@ -38,6 +39,13 @@
 
   function showSuccessAlert(title, message) {
     alertType = 'success';
+    alertTitle = title;
+    alertMessage = message;
+    showAlert = true;
+  }
+
+  function showInfoAlert(title, message) {
+    alertType = 'info';
     alertTitle = title;
     alertMessage = message;
     showAlert = true;
@@ -75,6 +83,13 @@
     if (provider === "mail") {
       openMailForm = true;
     } else if (provider === "google") {
+      if (BETA_TESTERS_MODE) {
+        showInfoAlert(
+          "No disponible",
+          "Esa opción no está disponible en la versión de pruebas.",
+        );
+        return;
+      }
       loadingShow = true;
       skipAutoRedirect = true;
       try {
@@ -197,8 +212,14 @@
             <span>Email</span>
           </button>
 
-          <button class="login-option google" onclick={() => handleLogin("google")}>
-            <img src="/google.png" alt="Google" width="22" />
+          <button
+            type="button"
+            class="login-option google"
+            class:google-disabled={BETA_TESTERS_MODE}
+            onclick={() => handleLogin("google")}
+            aria-disabled={BETA_TESTERS_MODE ? "true" : undefined}
+          >
+            <img src="/google.png" alt="" width="22" aria-hidden="true" />
             <span>Google</span>
           </button>
         </div>
@@ -324,16 +345,6 @@
     gap: 20px;
   }
 
-  .auth-header h2 {
-    margin-bottom: 8px;
-    font-size: 1.5rem;
-  }
-
-  .auth-header p {
-    color: var(--text-secondary);
-    line-height: 1.6;
-  }
-
   .login-actions small {
     color: var(--text-secondary);
     display: block;
@@ -377,11 +388,22 @@
     background: #ffffff;
   }
 
-  .divider {
-    text-align: center;
-    color: var(--text-muted);
-    font-size: 0.9rem;
-    margin: 8px 0 4px;
+  .login-option.google.google-disabled {
+    background: #e5e7eb;
+    border-color: rgba(0, 0, 0, 0.12);
+    opacity: 0.75;
+    cursor: pointer;
+  }
+
+  .login-option.google.google-disabled:hover {
+    transform: none;
+    box-shadow: none;
+    border-color: rgba(0, 0, 0, 0.12);
+  }
+
+  .login-option.google.google-disabled img {
+    filter: grayscale(1);
+    opacity: 0.65;
   }
 
   .mail-form {
@@ -435,11 +457,6 @@
     text-decoration: underline;
     cursor: pointer;
     padding: 12px 0 0;
-  }
-
-  .error-message {
-    color: var(--danger-color);
-    font-size: 0.95rem;
   }
 
   .mail-form-container {

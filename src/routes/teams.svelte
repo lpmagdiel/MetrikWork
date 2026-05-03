@@ -41,7 +41,9 @@
   <header>
     <h1>Equipos</h1>
     <div class="search-container">
-      <Search size={20} class="search-icon" />
+      <span class="search-icon" aria-hidden="true">
+        <Search size={20} />
+      </span>
       <input
         type="text"
         placeholder="Buscar equipos..."
@@ -71,7 +73,9 @@
               {team.members?.length === 1 ? "miembro" : "miembros"}
             </p>
           </div>
-          <ChevronRight size={20} class="chevron" />
+          <span class="chevron" aria-hidden="true">
+            <ChevronRight size={20} />
+          </span>
         </div>
       {/each}
     {:else}
@@ -129,6 +133,7 @@
   }
 
   .search-icon {
+    display: inline-flex;
     color: var(--text-primary);
     margin-right: 12px;
   }
@@ -215,6 +220,7 @@
   }
 
   .chevron {
+    display: inline-flex;
     color: var(--text-primary);
   }
 

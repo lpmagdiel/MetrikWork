@@ -220,14 +220,6 @@
     }
   }
 
-  .timer-display {
-    font-size: clamp(2.8rem, 5vw, 4rem);
-    font-weight: 800;
-    letter-spacing: -0.05em;
-    color: var(--text-primary);
-    text-align: center;
-  }
-
   .timer-copy {
     max-width: 560px;
     color: var(--text-secondary);
@@ -282,41 +274,10 @@
     transform: none;
   }
 
-  .summary-row {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 16px;
-  }
-
-  .summary-card {
-    padding: 20px;
-    border-radius: var(--radius-md);
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    box-shadow: var(--shadow-card);
-  }
-
-  .summary-card span {
-    display: block;
-    color: var(--text-muted);
-    margin-bottom: 10px;
-    font-size: 0.94rem;
-  }
-
-  .summary-card strong {
-    font-size: 1.35rem;
-    display: block;
-    color: var(--text-primary);
-  }
-
   @media (max-width: 520px) {
     .timer-header {
       flex-direction: column;
       align-items: flex-start;
-    }
-
-    .summary-row {
-      grid-template-columns: 1fr;
     }
   }
 </style>

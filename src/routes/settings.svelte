@@ -10,7 +10,6 @@
     Moon,
     ChevronRight,
     Save,
-    Camera,
     Info,
     Album,
   } from "lucide-svelte";
@@ -48,10 +47,7 @@
     if (!$userStore) return;
     isSaving = true;
     try {
-      await updateUserProfile($userStore.uid, {
-        name,
-        avatar,
-      });
+      await updateUserProfile($userStore.uid, { name });
       // Visual feedback or toast could be added here
     } catch (error) {
       alert("Error al guardar los cambios");
@@ -237,11 +233,6 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-  }
-
-  .avatar-container {
-    position: relative;
-    margin-bottom: 24px;
   }
 
   .profile-form {

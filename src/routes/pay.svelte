@@ -1,66 +1,95 @@
 <script>
   import { currentPath } from "../router.js";
-  import StripeTablePrices from "../components/StripeTablePrices.svelte";
-  import CheckoutForm from "../components/CheckoutForm.svelte";
-  import { ArrowRight, ChevronLeft, CreditCard } from "lucide-svelte";
-  import { paymentStore } from "../data/payments.svelte.js";
+  import { ChevronLeft, Users } from "lucide-svelte";
+  import { BETA_TESTERS_MODE } from "../data/features.js";
+  import { createTeam, selectedTeamId } from "../data/stores.js";
 
-  let step = $state(1); // 1 = select plan, 2 = checkout
-
-  function goToCheckout() {
-    if (!paymentStore.selectedPlan) {
-      return;
-    }
-    step = 2;
-  }
+  let betaTeamName = $state("");
+  let betaCreating = $state(false);
+  let betaError = $state("");
 
   function goBack() {
-    if (step === 2) {
-      paymentStore.reset();
-      step = 1;
-    } else {
-      $currentPath = "/teams";
+    $currentPath = "/teams";
+  }
+
+  async function handleBetaCreateTeam() {
+    betaError = "";
+    const name = betaTeamName.trim();
+    if (!name) {
+      betaError = "Escribe un nombre para el equipo.";
+      return;
+    }
+    betaCreating = true;
+    try {
+      const id = await createTeam(name);
+      if (id) {
+        selectedTeamId.set(id);
+        $currentPath = `/teams/${id}`;
+      }
+    } catch (e) {
+      betaError = e?.message || "No se pudo crear el equipo.";
+    } finally {
+      betaCreating = false;
     }
   }
 </script>
 
-<div class="pay-page" class:checkout-step={step === 2}>
-  <div class="nav-header">
-    <button class="back-button" onclick={goBack}>
-      <ChevronLeft size={20} />
-      <span>{step === 2 ? "Cambiar plan" : "Volver"}</span>
-    </button>
-    <div class="step-pill">
-      <CreditCard size={16} />
-      <span>{step === 1 ? "Planes" : "Pago"}</span>
-    </div>
-  </div>
-
-  {#if step === 1}
-    <section class="pay-intro">
-      <span class="eyebrow">MetricWork Teams</span>
-      <h1>Elige el plan de tu equipo</h1>
-      <p>Selecciona el tamaño que necesitas y continúa para crear tu equipo.</p>
-    </section>
-
-    <section class="plans-shell">
-      <StripeTablePrices />
-    </section>
-
-    <div class="payment-footer">
-      <button class="pay-button" onclick={goToCheckout}>
-        <span class="btn-content">
-          <span>Continuar con {paymentStore.selectedPlan?.name || "el plan"}</span>
-          <ArrowRight size={20} />
-        </span>
+{#if BETA_TESTERS_MODE}
+  <div class="pay-page">
+    <div class="nav-header">
+      <button type="button" class="back-button" onclick={goBack}>
+        <ChevronLeft size={20} />
+        <span>Volver</span>
       </button>
+      <div class="step-pill beta-pill">
+        <Users size={16} />
+        <span>Nuevo equipo</span>
+      </div>
     </div>
-  {:else}
-    <section class="checkout-shell">
-      <CheckoutForm />
+
+    <section class="pay-intro beta-intro">
+      <span class="eyebrow">Versión de pruebas</span>
+      <h1>Crear equipo</h1>
+      <p>Elige un nombre para tu equipo. En esta beta no se requiere pago.</p>
     </section>
-  {/if}
-</div>
+
+    <section class="beta-create-shell">
+      <label class="beta-label" for="beta-team-name">Nombre del equipo</label>
+      <input
+        id="beta-team-name"
+        class="beta-input"
+        type="text"
+        placeholder="Ej. Equipo diseño"
+        bind:value={betaTeamName}
+        disabled={betaCreating}
+        autocomplete="organization"
+      />
+      {#if betaError}
+        <p class="beta-error" role="alert">{betaError}</p>
+      {/if}
+      <button
+        type="button"
+        class="pay-button beta-submit"
+        onclick={handleBetaCreateTeam}
+        disabled={betaCreating}
+      >
+        {betaCreating ? "Creando…" : "Crear equipo"}
+      </button>
+    </section>
+  </div>
+{:else}
+  {#await import("./PayStripeFlow.svelte")}
+    <div class="pay-page pay-loading">
+      <p class="pay-loading-text">Cargando pago…</p>
+    </div>
+  {:then { default: PayStripeFlow }}
+    <PayStripeFlow />
+  {:catch}
+    <div class="pay-page pay-loading">
+      <p class="pay-loading-text">No se pudo cargar el pago. Vuelve a intentar.</p>
+    </div>
+  {/await}
+{/if}
 
 <style>
   .pay-page {
@@ -71,8 +100,18 @@
     background: var(--bg-page);
   }
 
-  .pay-page.checkout-step {
-    padding-bottom: var(--bottom-nav-clearance);
+  .pay-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40vh;
+  }
+
+  .pay-loading-text {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 15px;
+    font-weight: 600;
   }
 
   .nav-header {
@@ -154,24 +193,6 @@
     line-height: 1.45;
   }
 
-  .plans-shell,
-  .checkout-shell {
-    max-width: 500px;
-    margin: 0 auto;
-  }
-
-  .payment-footer {
-    position: fixed;
-    bottom: var(--bottom-nav-occupied);
-    left: 0;
-    right: 0;
-    padding: 18px 20px;
-    background: linear-gradient(to top, var(--bg-page) 80%, transparent);
-    display: flex;
-    justify-content: center;
-    z-index: 90;
-  }
-
   .pay-button {
     position: relative;
     background: var(--accent-strong);
@@ -199,13 +220,60 @@
     transform: translateY(-1px);
   }
 
-  .btn-content {
+  .beta-pill {
+    background: var(--text-muted);
+    color: var(--bg-card);
+  }
+
+  .beta-create-shell {
+    max-width: 500px;
+    margin: 0 auto;
     display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.75rem;
-    position: relative;
-    z-index: 1;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .beta-label {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+
+  .beta-input {
+    width: 100%;
+    padding: 14px 16px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font-size: 1rem;
+    box-sizing: border-box;
+  }
+
+  .beta-input:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 4px rgba(167, 243, 208, 0.18);
+  }
+
+  .beta-input:disabled {
+    opacity: 0.7;
+  }
+
+  .beta-error {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--danger-color);
+  }
+
+  .beta-submit {
+    margin-top: 8px;
+  }
+
+  .beta-submit:disabled {
+    opacity: 0.75;
+    cursor: not-allowed;
+    transform: none;
   }
 
   @media (max-width: 420px) {

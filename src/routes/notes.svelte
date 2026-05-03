@@ -18,8 +18,6 @@
     Check,
     Palette,
     ArrowLeft,
-    MoreVertical,
-    Clock,
     StickyNote,
   } from "lucide-svelte";
   import SliceContainer from "../components/SliceContainer.svelte";
@@ -406,25 +404,6 @@
     justify-content: space-between;
     align-items: center;
     margin-bottom: 16px;
-  }
-
-  .add-btn-header {
-    background: var(--bg-card);
-    border: none;
-    border-radius: 12px;
-    width: 40px;
-    height: 40px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-    cursor: pointer;
-    color: var(--text-primary);
-  }
-
-  .add-btn-header:active {
-    transform: scale(0.95);
-    background: #f5f5f5;
   }
 
   .search-bar {
