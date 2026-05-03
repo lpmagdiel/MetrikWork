@@ -9,6 +9,8 @@
   import { auth, googleProvider } from "../data/firebase";
   import {
     signInWithPopup,
+    signInWithRedirect,
+    getRedirectResult,
     signInWithEmailAndPassword,
     createUserWithEmailAndPassword,
     updateProfile,
@@ -44,6 +46,22 @@
   let skipAutoRedirect = false;
 
   onMount(() => {
+    // Revisa si regresamos de un inicio de sesión con redirección
+    getRedirectResult(auth).then((result) => {
+      if (result) {
+        skipAutoRedirect = true;
+        const additionalInfo = getAdditionalUserInfo(result);
+        if (additionalInfo?.isNewUser) {
+          $currentPath = "/tour";
+        } else {
+          $currentPath = "/";
+        }
+      }
+    }).catch((error) => {
+      console.error("Redirect login error:", error);
+      showErrorAlert("Error de autenticación", error.message);
+    });
+
     const unsubscribe = userStore.subscribe((value) => {
       if (value && value.email && !skipAutoRedirect) {
         $currentPath = "/";
@@ -53,6 +71,7 @@
   });
 
   const handleLogin = async (provider) => {
+    console.log(provider);
     if (provider === "mail") {
       openMailForm = true;
     } else if (provider === "google") {
@@ -66,11 +85,23 @@
         } else {
           $currentPath = "/";
         }
+        loadingShow = false;
       } catch (error) {
+        console.log(error);
+        if (error.code === 'auth/popup-blocked') {
+          console.warn("Popup bloqueado por el navegador, intentando con redirección...");
+          try {
+            await signInWithRedirect(auth, googleProvider);
+            return; // Detener aquí porque la página se va a recargar
+          } catch (redirectError) {
+            console.error("Redirect login failed", redirectError);
+            showErrorAlert("Error", redirectError.message);
+          }
+        } else {
+          console.error("Google login failed", error);
+          showErrorAlert("Error", error.message);
+        }
         skipAutoRedirect = false;
-        console.error("Google login failed", error);
-        showErrorAlert("Error", error.message);
-      } finally {
         loadingShow = false;
       }
     }
