@@ -393,7 +393,9 @@
     overflow-y: hidden; /* Header fixed, grid scrolls */
     position: relative;
   }
-
+  .editor-overlay{
+    padding-top: var(--page-top-safe);
+  }
   header {
     margin-bottom: 24px;
     flex-shrink: 0;
