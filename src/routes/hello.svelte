@@ -93,13 +93,14 @@
           try {
             const credential = await signInWithRedirect(auth, googleProvider);
             const additionalInfo = getAdditionalUserInfo(credential);
+            console.log(additionalInfo);
             if (additionalInfo?.isNewUser) {
               $currentPath = "/tour";
             } else {
               $currentPath = "/";
-        }
+            }
         loadingShow = false;
-            return; // Detener aquí porque la página se va a recargar
+            //return; // Detener aquí porque la página se va a recargar
           } catch (redirectError) {
             console.error("Redirect login failed", redirectError);
             showErrorAlert("Error", redirectError.message);
