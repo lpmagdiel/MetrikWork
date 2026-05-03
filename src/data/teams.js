@@ -27,12 +27,23 @@ export function getTeamMembers() {
     return teamMembers;
 }
 
+/**
+ * 
+ * @param {string} teamId 
+ * @returns 
+ */
 export async function getTeamMembersData(teamId) {
     const team = get(teamsStore);
     const teamData = team.find(t => t.id === teamId);
     return teamData?.membersData || [];
 }
 
+/**
+ * 
+ * @param {string} uid 
+ * @param {function} callback 
+ * @returns 
+ */
 export function subscribeToTeams(uid, callback) {
     if (teamsUnsubscribe) teamsUnsubscribe();
     
@@ -61,6 +72,12 @@ export function subscribeToTeams(uid, callback) {
     });
 }
 
+/**
+ * 
+ * @param {string} teamName 
+ * @param {Object|null} paymentData 
+ * @returns 
+ */
 export async function createTeam(teamName, paymentData = null) {
     const user = get(userStore);
     if (!user) return;
@@ -94,6 +111,12 @@ export async function createTeam(teamName, paymentData = null) {
     }
 }
 
+/**
+ * 
+ * @param {string} teamId 
+ * @param {string} email 
+ * @returns 
+ */
 export async function addMemberByEmail(teamId, email) {
     try {
         // 1. Search for user by email
@@ -140,6 +163,14 @@ export async function addMemberByEmail(teamId, email) {
     }
 }
 
+/**
+ * 
+ * @param {string} teamId 
+ * @param {string} memberId 
+ * @param {number} dailyRate 
+ * @param {number} extraHourRate 
+ * @returns 
+ */
 export async function updateMemberSettings(teamId, memberId, dailyRate, extraHourRate) {
     const user = get(userStore);
     if (!user) return;

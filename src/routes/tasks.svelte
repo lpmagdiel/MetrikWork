@@ -28,6 +28,7 @@
   import SliceContainer from "../components/SliceContainer.svelte";
   import Toast from "../components/Toast.svelte";
     import AvatarCircle from "../components/AvatarCircle.svelte";
+    import CircleAddButton from "../components/CircleAddButton.svelte";
 
   let team = $derived($selectedTeam);
   let isAdmin = $derived($userStore?.uid === team?.admin);
@@ -186,9 +187,7 @@
       <span class="tasks-total">{$teamTasksStore.length}</span>
     </div>
     {#if isAdmin}
-      <button class="fab" onclick={openAddTask} aria-label="Nueva tarea">
-        <Plus size={22} />
-      </button>
+      <CircleAddButton onClick={openAddTask} />
     {/if}
   </header>
 
@@ -470,26 +469,6 @@
     font-weight: 700;
     padding: 2px 8px;
     border-radius: 100px;
-  }
-
-  .fab {
-    width: 46px;
-    height: 46px;
-    border-radius: 50%;
-    background: var(--accent-strong);
-    color: var(--bg-card);
-    border: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    box-shadow: var(--shadow-button);
-    flex-shrink: 0;
-    transition: transform 0.15s;
-  }
-
-  .fab:active {
-    transform: scale(0.92);
   }
 
   /* Team badge */

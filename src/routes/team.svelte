@@ -26,6 +26,7 @@
     Edit2,
     X,
     User,
+    Calendar1,
   } from "lucide-svelte";
   import {
     selectedTeam,
@@ -41,7 +42,7 @@
     updateTeamTask,
     deleteTeamTask,
   } from "../data/stores.js";
-  import { currentPath } from "../router.js";
+  import { currentPath, navigateTo } from "../router.js";
   import SliceContainer from "../components/SliceContainer.svelte";
   import Toast from "../components/Toast.svelte";
   import Chart from "../components/Chart.svelte";
@@ -104,6 +105,7 @@
 
   $effect(() => {
     if (team?.id) {
+      console.log(team);
       subscribeToTeamTasks(team.id);
     }
     return () => subscribeToTeamTasks(null);
@@ -318,7 +320,7 @@
 <div class="team-detail">
   <Toast message={messageToast} type={typeToast} show={showToast} />
   <header>
-    <button class="back-btn" onclick={() => ($currentPath = "/teams")}>
+    <button class="back-btn" onclick={() => (navigateTo("/teams"))}>
       <ChevronLeft size={24} />
     </button>
     <h1>Detalles del Equipo</h1>
@@ -343,7 +345,7 @@
         <div class="menu-grid">
           <button
             class="menu-card"
-            onclick={() => ($currentPath = `/teams/${team.id}/chat`)}
+            onclick={() => (navigateTo(`/teams/${team.id}/chat`))}
           >
             <div class="menu-icon chat">
               <MessageSquare size={24} />
@@ -352,7 +354,7 @@
           </button>
           <button
             class="menu-card"
-            onclick={() => ($currentPath = `/teams/${team.id}/tasks`)}
+            onclick={() => (navigateTo(`/teams/${team.id}/tasks`))}
           >
             <div class="menu-icon tasks">
               <CheckSquare size={24} />
@@ -373,7 +375,7 @@
           </button>
           <button
             class="menu-card"
-            onclick={() => ($currentPath = `/teams/${team.id}/inventory`)}
+            onclick={() => (navigateTo(`/teams/${team.id}/inventory`))}
           >
             <div class="menu-icon inventory">
               <Package size={24} />
@@ -389,12 +391,22 @@
             </button>
             <button
               class="menu-card"
-              onclick={() => ($currentPath = `/teams/${team.id}/payments`)}
+              onclick={() => (navigateTo(`/teams/${team.id}/payments`))}
             >
               <div class="menu-icon payments">
                 <DollarSign size={24} />
               </div>
               <span>Pagos</span>
+            </button>
+            
+            <button
+              class="menu-card"
+              onclick={() => (navigateTo(`/teams/${team.id}/planning`))}
+            >
+              <div class="menu-icon planning">
+                <Calendar1 size={24} />
+              </div>
+              <span>Planning</span>
             </button>
           {/if}
         </div>
@@ -921,7 +933,10 @@
     background: var(--bg-success-subtle);
     color: var(--success-color);
   }
-
+  .menu-icon.planning {
+    background: var(--bg-danger-subtle);
+    color: var(--danger-color);
+  }
   .members-section {
     margin-bottom: 32px;
   }

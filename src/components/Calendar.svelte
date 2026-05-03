@@ -167,7 +167,7 @@
   }
 
   .nav-btn:hover {
-    background: #e3654e;
+    background: var(--success-color);
     color: white;
   }
 
@@ -216,16 +216,16 @@
   }
 
   .day:not(.empty):hover {
-    background: #fff3f0;
+    background: var(--bg-accent-subtle);
   }
 
   .day.in-range {
-    background: #fff3f0;
+    background: var(--bg-accent-subtle);
   }
 
   .day.range-start,
   .day.range-end {
-    background: #e3654e;
+    background: var(--success-color);
     color: white;
   }
 

@@ -28,6 +28,7 @@
   import Pay from "./routes/pay.svelte";
   import Timer from "./routes/Timer.svelte";
   import Tour from "./routes/tour.svelte";
+  import Planning from "./routes/planning.svelte";
 
   // Basic Route Map
   const routes = {
@@ -65,6 +66,7 @@
         else if (subpage === "inventory") component = Inventory;
         else if (subpage === "chat") component = Chat;
         else if (subpage === "payments") component = TeamPayments;
+        else if (subpage === "planning") component = Planning;
         return { component, teamId };
       }
 
@@ -81,13 +83,12 @@
   let Component = $derived(routeInfo.component);
 
   let canRender = $derived(
-    () =>
-      $authReady &&
+    $authReady &&
       ($userStore || $currentPath === "/hello" || $currentPath === "/login"),
   );
 
   // Sync selectedTeamId store
-  $effect(() => {
+  $effect.pre(() => {
     if (routeInfo.teamId) {
       selectedTeamId.set(routeInfo.teamId);
     } else if (
