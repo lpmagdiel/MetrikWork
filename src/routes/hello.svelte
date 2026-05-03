@@ -91,7 +91,14 @@
         if (error.code === 'auth/popup-blocked') {
           console.warn("Popup bloqueado por el navegador, intentando con redirección...");
           try {
-            await signInWithRedirect(auth, googleProvider);
+            const credential = await signInWithRedirect(auth, googleProvider);
+            const additionalInfo = getAdditionalUserInfo(credential);
+            if (additionalInfo?.isNewUser) {
+              $currentPath = "/tour";
+            } else {
+              $currentPath = "/";
+        }
+        loadingShow = false;
             return; // Detener aquí porque la página se va a recargar
           } catch (redirectError) {
             console.error("Redirect login failed", redirectError);
