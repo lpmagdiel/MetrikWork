@@ -1,6 +1,6 @@
 <script>
   import { AlertCircle, CheckCheck, Info, X } from "lucide-svelte";
-  let { type, message, duration=2000, show} = $props();
+  let { type, message, duration=2000, show = $bindable() } = $props();
 
     $effect(() => {
         if(show){

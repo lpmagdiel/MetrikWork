@@ -2,6 +2,7 @@
     import { ChevronLeft, DollarSign, Filter, Search, CheckCircle, AlertCircle, Eye, History } from "lucide-svelte";
     import { selectedTeam, userStore } from "../data/stores.js";
     import { getTeamPaymentsData, registerTeamPayment } from "../data/teamPayments.js";
+    import { createNotification } from "../data/notifications.js";
     import { currentPath } from "../router.js";
     import Toast from "../components/Toast.svelte";
     import SliceContainer from "../components/SliceContainer.svelte";
@@ -83,6 +84,12 @@
         isSaving = true;
         try {
             await registerTeamPayment(team.id, selectedMember.id, paymentAmount, paymentType);
+            
+            // Notificar al usuario
+            const title = "Pago Recibido";
+            const message = `Has recibido un pago de ${formatMoney(paymentAmount)} del equipo "${team.name}"`;
+            await createNotification(selectedMember.id, title, message);
+            
             showNotification("Pago registrado exitosamente");
             showPaymentModal = false;
             await loadData();

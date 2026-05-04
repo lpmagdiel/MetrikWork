@@ -24,10 +24,14 @@
   import { currentPath } from "../router.js";
 
   import AvatarCircle from "../components/AvatarCircle.svelte";
+  import Toast from "../components/Toast.svelte";
 
   let name = $state("");
   let email = $state("");
   let isSaving = $state(false);
+  let showToast = $state(false);
+  let toastMessage = $state("");
+  let toastType = $state("success");
 
   onMount(async () => {
     if ($userStore) {
@@ -47,10 +51,16 @@
     if (!$userStore) return;
     isSaving = true;
     try {
-      await updateUserProfile($userStore.uid, { name });
-      // Visual feedback or toast could be added here
+      const success = await updateUserProfile($userStore.uid, { name });
+      if (success) {
+        toastMessage = "Perfil actualizado correctamente";
+        toastType = "success";
+        showToast = true;
+      }
     } catch (error) {
-      alert("Error al guardar los cambios");
+      toastMessage = "Error al guardar los cambios";
+      toastType = "error";
+      showToast = true;
     } finally {
       isSaving = false;
     }
@@ -81,6 +91,7 @@
 </script>
 
 <div class="settings-page">
+  <Toast message={toastMessage} type={toastType} bind:show={showToast} />
   <header>
     <h1>Configuración</h1>
   </header>
