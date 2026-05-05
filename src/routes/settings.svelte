@@ -21,7 +21,7 @@
     settingsStore,
     updateSettings,
   } from "../data/stores.js";
-  import { currentPath } from "../router.js";
+  import { navigateTo } from "../router.js";
 
   import AvatarCircle from "../components/AvatarCircle.svelte";
   import Toast from "../components/Toast.svelte";
@@ -69,7 +69,7 @@
   async function handleLogout() {
     try {
       await logout();
-      $currentPath = "/hello";
+      navigateTo("/hello");
     } catch (error) {
       alert("Error al cerrar sesión");
     }

@@ -1,7 +1,7 @@
 <script>
   import { Search, Plus, Users, ChevronRight, X } from "lucide-svelte";
   import { teamsStore, createTeam, selectedTeamId } from "../data/stores.js";
-  import { currentPath } from "../router.js";
+  import { navigateTo } from "../router.js";
 
   let searchQuery = $state("");
   let isCreating = $state(false);
@@ -16,7 +16,7 @@
 
   function goToTeam(team) {
     selectedTeamId.set(team.id);
-    $currentPath = `/teams/${team.id}`;
+    navigateTo(`/teams/${team.id}`);
   }
 
   async function handleCreateTeam() {
@@ -27,7 +27,7 @@
       const id = await createTeam(teamName.trim());
       if (id) {
         selectedTeamId.set(id);
-        $currentPath = `/teams/${id}`;
+        navigateTo(`/teams/${id}`);
       }
     } catch (error) {
       alert("No se pudo crear el equipo");
@@ -63,9 +63,15 @@
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <div class="team-card" onclick={() => goToTeam(team)}>
+        {#if team.photoURL}
           <div class="team-icon">
+            <img src={team.photoURL} alt={team.name || team.team} />
+          </div>
+        {:else}
+        <div class="team-icon">
             <Users size={24} />
           </div>
+        {/if}
           <div class="team-info">
             <h3>{team.name || team.team}</h3>
             <p>
@@ -200,7 +206,12 @@
     justify-content: center;
     margin-right: 16px;
   }
-
+  .team-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 14px;
+  }
   .team-info {
     flex: 1;
   }

@@ -23,15 +23,19 @@
     updateTeamTask,
     deleteTeamTask,
     getUserProfile,
+    hasTeamPermission,
   } from "../data/stores.js";
-  import { currentPath, navigateTo } from "../router.js";
+  import { navigateTo } from "../router.js";
   import SliceContainer from "../components/SliceContainer.svelte";
   import Toast from "../components/Toast.svelte";
     import AvatarCircle from "../components/AvatarCircle.svelte";
     import CircleAddButton from "../components/CircleAddButton.svelte";
 
   let team = $derived($selectedTeam);
-  let isAdmin = $derived($userStore?.uid === team?.admin);
+  let canViewTasks = $derived(hasTeamPermission(team, $userStore?.uid, "tasks", "view"));
+  let canCreateTasks = $derived(hasTeamPermission(team, $userStore?.uid, "tasks", "create"));
+  let canEditTasks = $derived(hasTeamPermission(team, $userStore?.uid, "tasks", "edit"));
+  let canDeleteTasks = $derived(hasTeamPermission(team, $userStore?.uid, "tasks", "delete"));
 
   // Members list for assignee display
   let memberList = $state([]);
@@ -53,12 +57,12 @@
   });
 
   $effect(() => {
-    if (team?.id) subscribeToTeamTasks(team.id);
+    if (team?.id && canViewTasks) subscribeToTeamTasks(team.id);
     return () => subscribeToTeamTasks(null);
   });
 
   // UI state
-  let taskFilter = $state("all");
+  let taskFilter = $state("pending"); // pending, in-progress, completed, unassigned, all
   let showAddTask = $state(false);
   let editingTaskId = $state(null);
   let isSavingTask = $state(false);
@@ -113,6 +117,7 @@
 
   async function handleSaveTask() {
     if (!taskForm.title.trim() || !team?.id) return;
+    if ((editingTaskId && !canEditTasks) || (!editingTaskId && !canCreateTasks)) return;
     isSavingTask = true;
     try {
       const data = {
@@ -137,7 +142,7 @@
   }
 
   async function handleDeleteTask(taskId) {
-    if (!team?.id) return;
+    if (!team?.id || !canDeleteTasks) return;
     await deleteTeamTask(team.id, taskId);
   }
 
@@ -177,7 +182,7 @@
   <header>
     <button
       class="back-btn"
-      onclick={() => ($currentPath = "/teams/" + $selectedTeamId)}
+      onclick={() => navigateTo("/teams/" + $selectedTeamId)}
     >
       <ChevronLeft size={24} />
     </button>
@@ -186,7 +191,7 @@
       <h1>Tareas</h1>
       <span class="tasks-total">{$teamTasksStore.length}</span>
     </div>
-    {#if isAdmin}
+    {#if canCreateTasks}
       <CircleAddButton onClick={openAddTask} />
     {/if}
   </header>
@@ -198,28 +203,34 @@
     </div>
   {/if}
 
-  <!-- Filter pills -->
-  <div class="filter-scroll">
-    {#each Object.entries( { all: "Todas", unassigned: "Sin Asignar", pending: "Pendiente", "in-progress": "En Proceso", completed: "Completado" }, ) as [key, label]}
-      <button
-        class="filter-pill {taskFilter === key ? 'active' : ''}"
-        style={taskFilter === key && key !== "all"
-          ? `background:${statusConfig[key]?.color ?? "var(--accent-strong)"};`
-          : ""}
-        onclick={() => (taskFilter = key)}
-      >
-        {label}
-        {#if key !== "all"}
-          <span class="pill-count">
-            {$teamTasksStore.filter((t) => t.status === key).length}
-          </span>
-        {/if}
-      </button>
-    {/each}
-  </div>
+  {#if !canViewTasks}
+    <div class="empty-state">
+      <ClipboardList size={56} color="var(--text-muted)" />
+      <p>No tienes permiso para ver las tareas de este equipo.</p>
+    </div>
+  {:else}
+    <!-- Filter pills -->
+    <div class="filter-scroll">
+      {#each Object.entries( {pending: "Pendiente", "in-progress": "En Proceso", completed: "Completado", all: "Todas", unassigned: "Sin Asignar"}, ) as [key, label]}
+        <button
+          class="filter-pill {taskFilter === key ? 'active' : ''}"
+          style={taskFilter === key && key !== "all"
+            ? `background:${statusConfig[key]?.color ?? "var(--accent-strong)"};`
+            : ""}
+          onclick={() => (taskFilter = key)}
+        >
+          {label}
+          {#if key !== "all"}
+            <span class="pill-count">
+              {$teamTasksStore.filter((t) => t.status === key).length}
+            </span>
+          {/if}
+        </button>
+      {/each}
+    </div>
 
-  <!-- Task list -->
-  <div class="task-list">
+    <!-- Task list -->
+    <div class="task-list">
     {#if filteredTasks.length === 0}
       <div class="empty-state">
         <ClipboardList size={56} color="var(--text-muted)" />
@@ -228,7 +239,7 @@
             ? "No hay tareas en esta categoría"
             : "Aún no hay tareas"}
         </p>
-        {#if taskFilter === "all" && isAdmin}
+        {#if taskFilter === "all" && canCreateTasks}
           <button class="empty-cta" onclick={openAddTask}>
             <Plus size={16} />
             Crear primera tarea
@@ -256,14 +267,16 @@
               {/if}
             </div>
             <div class="card-actions">
-              <button
-                class="action-btn"
-                onclick={() => openEditTask(task)}
-                aria-label="Editar"
-              >
-                <Edit2 size={15} />
-              </button>
-              {#if isAdmin}
+              {#if canEditTasks}
+                <button
+                  class="action-btn"
+                  onclick={() => openEditTask(task)}
+                  aria-label="Editar"
+                >
+                  <Edit2 size={15} />
+                </button>
+              {/if}
+              {#if canDeleteTasks}
                 <button
                   class="action-btn danger"
                   onclick={() => handleDeleteTask(task.id)}
@@ -310,7 +323,8 @@
         </div>
       {/each}
     {/if}
-  </div>
+    </div>
+  {/if}
 </div>
 
 <!-- Add/Edit Task SliceContainer -->

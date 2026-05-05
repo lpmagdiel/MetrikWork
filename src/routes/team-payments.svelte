@@ -1,14 +1,15 @@
 <script>
     import { ChevronLeft, DollarSign, Filter, Search, CheckCircle, AlertCircle, Eye, History } from "lucide-svelte";
-    import { selectedTeam, userStore } from "../data/stores.js";
+    import { selectedTeam, userStore, hasTeamPermission } from "../data/stores.js";
     import { getTeamPaymentsData, registerTeamPayment } from "../data/teamPayments.js";
     import { createNotification } from "../data/notifications.js";
-    import { currentPath } from "../router.js";
+    import { navigateTo } from "../router.js";
     import Toast from "../components/Toast.svelte";
     import SliceContainer from "../components/SliceContainer.svelte";
 
     let team = $derived($selectedTeam);
-    let isAdmin = $derived(team?.admin === $userStore?.uid);
+    let canViewPayments = $derived(hasTeamPermission(team, $userStore?.uid, "payments", "view"));
+    let canCreatePayments = $derived(hasTeamPermission(team, $userStore?.uid, "payments", "create"));
     let memberBalances = $state([]);
     let isLoading = $state(true);
     let showToast = $state(false);
@@ -36,7 +37,7 @@
     });
 
     async function loadData() {
-        if (!team?.id) return;
+        if (!team?.id || !canViewPayments) return;
         isLoading = true;
         try {
             memberBalances = await getTeamPaymentsData(team.id);
@@ -75,7 +76,7 @@
     });
 
     async function handlePayment() {
-        if (!team?.id || !selectedMember) return;
+        if (!team?.id || !selectedMember || !canCreatePayments) return;
         if (paymentAmount <= 0) {
             showNotification("El monto debe ser mayor a 0", "error");
             return;
@@ -114,7 +115,7 @@
     <Toast message={messageToast} type={typeToast} show={showToast} />
     
     <header>
-        <button class="back-btn" onclick={() => ($currentPath = `/teams/${team?.id}`)}>
+        <button class="back-btn" onclick={() => navigateTo(`/teams/${team?.id}`)}>
             <ChevronLeft size={24} />
         </button>
         <div class="header-text">
@@ -125,11 +126,11 @@
         </div>
     </header>
 
-    {#if !isAdmin}
+    {#if !canViewPayments}
         <div class="empty-state">
             <AlertCircle size={48} color="var(--danger-color)" />
             <h2>Acceso Denegado</h2>
-            <p>Solo los administradores pueden ver esta sección.</p>
+            <p>No tienes permiso para ver los pagos de este equipo.</p>
         </div>
     {:else if isLoading}
         <div class="loading-state">
@@ -192,10 +193,14 @@
                                             <Eye size={18} />
                                         </button>
                                         {#if member.balance > 0.01}
-                                            <button class="pay-btn" onclick={() => openPaymentModal(member)}>
-                                                <DollarSign size={16} />
-                                                Pagar
-                                            </button>
+                                            {#if canCreatePayments}
+                                                <button class="pay-btn" onclick={() => openPaymentModal(member)}>
+                                                    <DollarSign size={16} />
+                                                    Pagar
+                                                </button>
+                                            {:else}
+                                                <span class="status-ok">Pendiente</span>
+                                            {/if}
                                         {:else}
                                             <span class="status-ok">
                                                 <CheckCircle size={18} /> Al día

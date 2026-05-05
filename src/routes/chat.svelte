@@ -11,7 +11,7 @@
     selectedTeamId,
     teamsStore,
   } from "../data/stores.js";
-  import { currentPath } from "../router.js";
+  import { navigateTo } from "../router.js";
   import { uploader, resizer } from "../data/fileHelper.js";
   import SliceContainer from "../components/SliceContainer.svelte";
 
@@ -101,7 +101,7 @@
   <header>
     <button
       class="back-btn"
-      onclick={() => ($currentPath = `/teams/${teamId}`)}
+      onclick={() => navigateTo(`/teams/${teamId}`)}
     >
       <ChevronLeft size={24} />
     </button>

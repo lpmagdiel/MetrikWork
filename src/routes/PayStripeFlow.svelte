@@ -1,5 +1,5 @@
 <script>
-  import { currentPath } from "../router.js";
+  import { navigateTo } from "../router.js";
   import StripeTablePrices from "../components/StripeTablePrices.svelte";
   import CheckoutForm from "../components/CheckoutForm.svelte";
   import { ArrowRight, ChevronLeft, CreditCard } from "lucide-svelte";
@@ -19,7 +19,7 @@
       paymentStore.reset();
       step = 1;
     } else {
-      $currentPath = "/teams";
+      navigateTo("/teams");
     }
   }
 </script>

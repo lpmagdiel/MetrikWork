@@ -4,8 +4,10 @@ export const currentPath = writable(window.location.pathname || '/');
 
 export const navigateTo = (path) => {
     const cleanPath = path.startsWith('/') ? path : '/' + path;
-    if (window.location.pathname !== cleanPath) {
-        currentPath.set(cleanPath);
+    currentPath.set(cleanPath);
+
+    const currentUrl = window.location.pathname + window.location.search + window.location.hash;
+    if (currentUrl !== cleanPath) {
         window.history.pushState({}, '', cleanPath);
     }
 };

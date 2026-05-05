@@ -6,4 +6,5 @@ export * from './notes.js';
 export * from './notifications.js';
 export * from './chat.js';
 export * from './works.js';
+export * from './permissions.js';
 export { auth, db, googleProvider } from './firebase.js';

@@ -16,18 +16,26 @@
     updateProduct,
     deleteProduct,
     selectedTeamId,
+    selectedTeam,
+    userStore,
     subscribeToTeamInventory,
+    hasTeamPermission,
   } from "../data/stores.js";
-  import { currentPath } from "../router.js";
+  import { navigateTo } from "../router.js";
   import SliceContainer from "../components/SliceContainer.svelte";
 
   let searchTerm = $state("");
   let teamId = $derived($selectedTeamId);
+  let team = $derived($selectedTeam);
+  let canViewInventory = $derived(hasTeamPermission(team, $userStore?.uid, "inventory", "view"));
+  let canCreateInventory = $derived(hasTeamPermission(team, $userStore?.uid, "inventory", "create"));
+  let canEditInventory = $derived(hasTeamPermission(team, $userStore?.uid, "inventory", "edit"));
+  let canDeleteInventory = $derived(hasTeamPermission(team, $userStore?.uid, "inventory", "delete"));
   let showModal = $state(false);
   let editingId = $state(null);
 
   $effect(() => {
-    if ($selectedTeamId) {
+    if ($selectedTeamId && canViewInventory) {
       subscribeToTeamInventory($selectedTeamId);
     }
     return () => subscribeToTeamInventory(null);
@@ -60,6 +68,7 @@
   ));
 
   function openModal(item = null) {
+    if ((item && !canEditInventory) || (!item && !canCreateInventory)) return;
     if (item) {
       editingId = item.id;
       formData = {
@@ -92,6 +101,7 @@
       alert("Por favor selecciona un equipo primero");
       return;
     }
+    if ((editingId && !canEditInventory) || (!editingId && !canCreateInventory)) return;
     try {
       if (editingId) {
         await updateProduct($selectedTeamId, editingId, formData);
@@ -105,7 +115,7 @@
   }
 
   async function handleDelete(id) {
-    if (!$selectedTeamId) return;
+    if (!$selectedTeamId || !canDeleteInventory) return;
     if (confirm("¿Estás seguro de eliminar este producto?")) {
       await deleteProduct($selectedTeamId, id);
     }
@@ -120,12 +130,14 @@
 </script>
 
 <div class="page-container">
-      <button class="fab" onclick={() => openModal()}>
-    <Plus size={30} />
-  </button>
+  {#if canCreateInventory}
+    <button class="fab" onclick={() => openModal()}>
+      <Plus size={30} />
+    </button>
+  {/if}
   <div class="header">
     <div class="title-group">
-    <button class="back-btn"onclick={() => ($currentPath = `/teams/${teamId}`)}>
+    <button class="back-btn" onclick={() => navigateTo(`/teams/${teamId}`)}>
     <ChevronLeft size={24} />
     </button>
       <Package size={32} color="var(--text-primary)" />
@@ -133,22 +145,27 @@
     </div>
   </div>
 
-  <div class="inventory-resum-container">
-    <div class="stat-card">
-      <h3>Total Productos</h3>
-      <p class="stat-value">{totalItems}</p>
+  {#if !canViewInventory}
+    <div class="empty-state">
+      No tienes permiso para ver el inventario de este equipo.
     </div>
-    <div class="stat-card warning">
-      <h3>Stock Bajo</h3>
-      <p class="stat-value">{lowStockItems}</p>
+  {:else}
+    <div class="inventory-resum-container">
+      <div class="stat-card">
+        <h3>Total Productos</h3>
+        <p class="stat-value">{totalItems}</p>
+      </div>
+      <div class="stat-card warning">
+        <h3>Stock Bajo</h3>
+        <p class="stat-value">{lowStockItems}</p>
+      </div>
+      <div class="stat-card">
+        <h3>Valor Total</h3>
+        <p class="stat-value">{formatCurrency(totalValue)}</p>
+      </div>
     </div>
-    <div class="stat-card">
-      <h3>Valor Total</h3>
-      <p class="stat-value">{formatCurrency(totalValue)}</p>
-    </div>
-  </div>
 
-  <div class="content">
+    <div class="content">
     <div class="toolbar">
       <div class="search-bar">
         <Search size={20} color="var(--text-secondary)" />
@@ -193,18 +210,22 @@
               </td>
               <td>
                 <div class="actions">
-                  <button
-                    class="icon-btn edit"
-                    onclick={() => openModal(item)}
-                  >
-                    <Edit2 size={18} />
-                  </button>
-                  <button
-                    class="icon-btn delete"
-                    onclick={() => handleDelete(item.id)}
-                  >
-                    <Trash2 size={18} />
-                  </button>
+                  {#if canEditInventory}
+                    <button
+                      class="icon-btn edit"
+                      onclick={() => openModal(item)}
+                    >
+                      <Edit2 size={18} />
+                    </button>
+                  {/if}
+                  {#if canDeleteInventory}
+                    <button
+                      class="icon-btn delete"
+                      onclick={() => handleDelete(item.id)}
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  {/if}
                 </div>
               </td>
             </tr>
@@ -219,7 +240,8 @@
         </tbody>
       </table>
     </div>
-  </div>
+    </div>
+  {/if}
 </div>
 
 <SliceContainer bind:show={showModal}>

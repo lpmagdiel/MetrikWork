@@ -1,7 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { Mail } from "lucide-svelte";
-  import { currentPath } from "../router";
+  import { navigateTo } from "../router";
   import LoadingSpinner from "../components/LoadingSpinner.svelte";
   import SliceContainer from "../components/SliceContainer.svelte";
   import Alert from "../components/Alert.svelte";
@@ -60,9 +60,9 @@
         skipAutoRedirect = true;
         const additionalInfo = getAdditionalUserInfo(result);
         if (additionalInfo?.isNewUser) {
-          $currentPath = "/tour";
+          navigateTo("/tour");
         } else {
-          $currentPath = "/";
+          navigateTo("/");
         }
       }
     }).catch((error) => {
@@ -72,7 +72,7 @@
 
     const unsubscribe = userStore.subscribe((value) => {
       if (value && value.email && !skipAutoRedirect) {
-        $currentPath = "/";
+        navigateTo("/");
       }
     });
     return unsubscribe;
@@ -96,9 +96,9 @@
         const credential = await signInWithPopup(auth, googleProvider);
         const additionalInfo = getAdditionalUserInfo(credential);
         if (additionalInfo?.isNewUser) {
-          $currentPath = "/tour";
+          navigateTo("/tour");
         } else {
-          $currentPath = "/";
+          navigateTo("/");
         }
       } catch (error) {
         console.log(error);
@@ -157,9 +157,9 @@
         password = "";
         name = "";
         if (isNewUser) {
-          $currentPath = "/tour";
+          navigateTo("/tour");
         } else {
-          $currentPath = "/";
+          navigateTo("/");
         }
       }, 1500);
     } catch (error) {

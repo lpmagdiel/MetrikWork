@@ -6,7 +6,7 @@
     // Icons
     import { Calendar, ChevronLeft, Plus } from "lucide-svelte";
 
-    import { currentPath, navigateTo } from "../router.js";
+    import { navigateTo } from "../router.js";
     import { teamTasksStore, selectedTeamId, userStore, selectedTeam } from "../data/stores.js";
     import { derived } from "svelte/store";
     import CircleAddButton from "../components/CircleAddButton.svelte";

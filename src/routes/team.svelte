@@ -41,8 +41,14 @@
     addTeamTask,
     updateTeamTask,
     deleteTeamTask,
+    updateMemberPermissions,
+    createDefaultMemberPermissions,
+    normalizeTeamPermissions,
+    hasTeamPermission,
+    TEAM_PERMISSION_LABELS,
+    TEAM_PERMISSION_ACTION_LABELS,
   } from "../data/stores.js";
-  import { currentPath, navigateTo } from "../router.js";
+  import { navigateTo } from "../router.js";
   import SliceContainer from "../components/SliceContainer.svelte";
   import Toast from "../components/Toast.svelte";
   import Chart from "../components/Chart.svelte";
@@ -51,6 +57,14 @@
 
   let team = $derived($selectedTeam);
   let isAdmin = $derived(team?.admin === $userStore?.uid);
+  let canViewTasks = $derived(hasTeamPermission(team, $userStore?.uid, "tasks", "view"));
+  let canViewInventory = $derived(hasTeamPermission(team, $userStore?.uid, "inventory", "view"));
+  let canViewPayments = $derived(hasTeamPermission(team, $userStore?.uid, "payments", "view"));
+  let canViewSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "view"));
+  let canCreateSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "create"));
+  let canEditSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "edit"));
+  const permissionModules = Object.entries(TEAM_PERMISSION_LABELS);
+  const permissionActions = Object.entries(TEAM_PERMISSION_ACTION_LABELS);
 
   let showMemberSettings = $state(false);
   let memberList = $state([]);
@@ -58,6 +72,8 @@
   let selectedMemberId = $state(null);
   let selectedMemberEmail = $state("");
   let newMemberEmail = $state("");
+  let newMemberPermissions = $state(createDefaultMemberPermissions());
+  let memberPermissions = $state(createDefaultMemberPermissions());
   let dailyRate = $state(0);
   let extraHourRate = $state(0);
   let isSaving = $state(false);
@@ -104,8 +120,7 @@
   );
 
   $effect(() => {
-    if (team?.id) {
-      console.log(team);
+    if (team?.id && canViewTasks) {
       subscribeToTeamTasks(team.id);
     }
     return () => subscribeToTeamTasks(null);
@@ -211,7 +226,17 @@
     const settings = team.memberSettings?.[memberId] || {};
     dailyRate = settings.dailyRate || 0;
     extraHourRate = settings.extraHourRate || 0;
+    memberPermissions = normalizeTeamPermissions(team.memberPermissions?.[memberId]);
     showMemberSettings = true;
+  }
+
+  function resetNewMemberForm() {
+    newMemberEmail = "";
+    newMemberPermissions = createDefaultMemberPermissions();
+  }
+
+  function togglePermission(target, module, action) {
+    target[module][action] = !target[module][action];
   }
 
   function showNotification(msg, type = "success") {
@@ -284,8 +309,8 @@
     if (!newMemberEmail || !team?.id) return;
     isAddingMember = true;
     try {
-      await addMemberByEmail(team.id, newMemberEmail);
-      newMemberEmail = "";
+      await addMemberByEmail(team.id, newMemberEmail, newMemberPermissions);
+      resetNewMemberForm();
       showAddMember = false;
     } catch (error) {
       messageToast = "Error al añadir miembro";
@@ -306,6 +331,9 @@
         dailyRate,
         extraHourRate,
       );
+      if (selectedMemberId !== team.admin) {
+        await updateMemberPermissions(team.id, selectedMemberId, memberPermissions);
+      }
       showMemberSettings = false;
     } catch (error) {
       messageToast = "Error al guardar los ajustes";
@@ -329,9 +357,15 @@
   {#if team}
     <div class="content">
       <div class="team-header-card">
+        {#if team.photoURL}
         <div class="team-icon">
-          <Users size={40} />
-        </div>
+            <img src={team.photoURL} alt={team.name} />
+          </div>
+        {:else}
+          <div class="team-icon">
+            <Users size={40} />
+          </div>
+        {/if}
         <h2>{team.name}</h2>
         <div class="center">
           <div class="admin-badge">
@@ -352,15 +386,17 @@
             </div>
             <span>Chat</span>
           </button>
-          <button
-            class="menu-card"
-            onclick={() => (navigateTo(`/teams/${team.id}/tasks`))}
-          >
-            <div class="menu-icon tasks">
-              <CheckSquare size={24} />
-            </div>
-            <span>Tareas</span>
-          </button>
+          {#if canViewTasks}
+            <button
+              class="menu-card"
+              onclick={() => (navigateTo(`/teams/${team.id}/tasks`))}
+            >
+              <div class="menu-icon tasks">
+                <CheckSquare size={24} />
+              </div>
+              <span>Tareas</span>
+            </button>
+          {/if}
           <button class="menu-card" onclick={() => (showWorkdayForm = true)}>
             <div class="menu-icon workday">
               <Clock size={24} />
@@ -373,22 +409,29 @@
             </div>
             <span>Mis estadísticas</span>
           </button>
-          <button
-            class="menu-card"
-            onclick={() => (navigateTo(`/teams/${team.id}/inventory`))}
-          >
-            <div class="menu-icon inventory">
-              <Package size={24} />
-            </div>
-            <span>Inventario</span>
-          </button>
-          {#if isAdmin}
-            <button class="menu-card">
+          {#if canViewInventory}
+            <button
+              class="menu-card"
+              onclick={() => (navigateTo(`/teams/${team.id}/inventory`))}
+            >
+              <div class="menu-icon inventory">
+                <Package size={24} />
+              </div>
+              <span>Inventario</span>
+            </button>
+          {/if}
+          {#if canViewSettings}
+            <button
+              class="menu-card"
+              onclick={() => (navigateTo(`/teams/${team.id}/settings`))}
+            >
               <div class="menu-icon settings">
                 <Settings size={24} />
               </div>
               <span>Ajustes</span>
             </button>
+          {/if}
+          {#if canViewPayments}
             <button
               class="menu-card"
               onclick={() => (navigateTo(`/teams/${team.id}/payments`))}
@@ -398,7 +441,8 @@
               </div>
               <span>Pagos</span>
             </button>
-            
+          {/if}
+          {#if isAdmin}
             <button
               class="menu-card"
               onclick={() => (navigateTo(`/teams/${team.id}/planning`))}
@@ -415,7 +459,7 @@
       <section class="members-section">
         <div class="section-header">
           <h3>Miembros ({team.members?.length || 0})</h3>
-          {#if isAdmin}
+          {#if canCreateSettings}
             <button
               class="add-member-btn"
               onclick={() => (showAddMember = true)}
@@ -445,7 +489,7 @@
                   {member?.name || member?.email || "Usuario"}
                 </p>
               </div>
-              {#if isAdmin}
+              {#if canEditSettings}
                 <button
                   class="member-settings-btn"
                   onclick={() => openMemberSettings(member.id, member.email)}
@@ -459,12 +503,6 @@
         </div>
       </section>
 
-      {#if isAdmin}
-        <button class="delete-team-btn">
-          <Trash2 size={20} />
-          <span>Eliminar Equipo</span>
-        </button>
-      {/if}
     </div>
 
     <SliceContainer bind:show={showAddMember}>
@@ -485,6 +523,28 @@
               placeholder="usuario@ejemplo.com"
             />
           </div>
+        </div>
+
+        <div class="permissions-editor">
+          <h4>Permisos del miembro</h4>
+          {#each permissionModules as [module, moduleLabel]}
+            <div class="permission-row">
+              <span class="permission-module">{moduleLabel}</span>
+              <div class="permission-actions">
+                {#each permissionActions as [action, actionLabel]}
+                  <label class="permission-toggle">
+                    <input
+                      type="checkbox"
+                      checked={newMemberPermissions[module][action]}
+                      onchange={() =>
+                        togglePermission(newMemberPermissions, module, action)}
+                    />
+                    <span>{actionLabel}</span>
+                  </label>
+                {/each}
+              </div>
+            </div>
+          {/each}
         </div>
 
         <button
@@ -540,6 +600,30 @@
             />
           </div>
         </div>
+
+        {#if selectedMemberId !== team.admin}
+          <div class="permissions-editor">
+            <h4>Permisos del miembro</h4>
+            {#each permissionModules as [module, moduleLabel]}
+              <div class="permission-row">
+                <span class="permission-module">{moduleLabel}</span>
+                <div class="permission-actions">
+                  {#each permissionActions as [action, actionLabel]}
+                    <label class="permission-toggle">
+                      <input
+                        type="checkbox"
+                        checked={memberPermissions[module][action]}
+                        onchange={() =>
+                          togglePermission(memberPermissions, module, action)}
+                      />
+                      <span>{actionLabel}</span>
+                    </label>
+                  {/each}
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
 
         <button
           class="save-settings-btn"
@@ -749,7 +833,7 @@
   {:else}
     <div class="empty-state">
       <p>No se seleccionó ningún equipo.</p>
-      <button onclick={() => ($currentPath = "/teams")}>Volver</button>
+      <button onclick={() => navigateTo("/teams")}>Volver</button>
     </div>
   {/if}
 </div>
@@ -826,6 +910,12 @@
     align-items: center;
     justify-content: center;
     margin-bottom: 16px;
+  }
+  .team-icon img {
+    width: 72px;
+    height: 72px;
+    object-fit: cover;
+    border-radius: 16px;
   }
 
   .team-header-card h2 {
@@ -1105,6 +1195,58 @@
     font-size: 16px;
     font-weight: 500;
     color: var(--text-primary);
+  }
+
+  .permissions-editor {
+    margin: 8px 0 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .permissions-editor h4 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  .permission-row {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    background: var(--bg-input);
+  }
+
+  .permission-module {
+    display: block;
+    margin-bottom: 10px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  .permission-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .permission-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 34px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .permission-toggle input {
+    accent-color: var(--accent-color);
   }
 
   .save-settings-btn {

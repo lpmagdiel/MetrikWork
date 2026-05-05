@@ -1,6 +1,6 @@
 <script>
   import { onMount, tick } from "svelte";
-  import { currentPath } from "./router.js";
+  import { currentPath, navigateTo } from "./router.js";
   import {
     userStore,
     authReady,
@@ -9,6 +9,30 @@
   } from "./data/stores.js";
   import NavBar from "./components/NavBar.svelte";
   import LoadingSpinner from "./components/LoadingSpinner.svelte";
+  import UpdateFeaturesModal from "./components/UpdateFeaturesModal.svelte";
+  import { updateData } from "./data/updateFeatures.js";
+  // Modal de novedades
+  let showUpdateModal = false;
+
+  onMount(() => {
+    // Solo mostrar si el usuario está autenticado y no está en login/hello/tour
+    if (
+      typeof window !== "undefined" &&
+      $authReady &&
+      $userStore &&
+      ["/hello", "/login", "/tour"].indexOf($currentPath) === -1
+    ) {
+      const lastSeen = localStorage.getItem("lastUpdateFeaturesVersion");
+      if (lastSeen !== updateData.version) {
+        showUpdateModal = true;
+      }
+    }
+  });
+
+  function closeUpdateModal() {
+    showUpdateModal = false;
+    localStorage.setItem("lastUpdateFeaturesVersion", updateData.version);
+  }
 
   // Static Imports
   import Home from "./routes/home.svelte";
@@ -25,6 +49,7 @@
   import Tasks from "./routes/tasks.svelte";
   import Chat from "./routes/chat.svelte";
   import TeamPayments from "./routes/team-payments.svelte";
+  import TeamSettings from "./routes/team-settings.svelte";
   import Pay from "./routes/pay.svelte";
   import Timer from "./routes/Timer.svelte";
   import Tour from "./routes/tour.svelte";
@@ -66,6 +91,7 @@
         else if (subpage === "inventory") component = Inventory;
         else if (subpage === "chat") component = Chat;
         else if (subpage === "payments") component = TeamPayments;
+        else if (subpage === "settings") component = TeamSettings;
         else if (subpage === "planning") component = Planning;
         return { component, teamId };
       }
@@ -109,7 +135,7 @@
       $currentPath !== "/hello" &&
       $currentPath !== "/login"
     ) {
-      $currentPath = "/hello";
+      navigateTo("/hello");
     }
   });
 
@@ -129,6 +155,7 @@
   {:else}
     <Component />
   {/if}
+  <UpdateFeaturesModal open={showUpdateModal} onClose={closeUpdateModal} />
 </main>
 
 {#if $authReady && $currentPath !== "/hello" && $currentPath !== "/login" && $currentPath !== "/tour"}

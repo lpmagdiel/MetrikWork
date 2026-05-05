@@ -6,7 +6,7 @@
     deleteAllNotifications,
   } from "../data/stores.js";
   import { ChevronLeft, Bell, CheckCheck, Trash2 } from "lucide-svelte";
-  import { currentPath } from "../router.js";
+  import { navigateTo } from "../router.js";
   import { fly } from "svelte/transition";
   import Toast from "../components/Toast.svelte";
   import ConfirmToast from "../components/ConfirmToast.svelte";
@@ -109,7 +109,7 @@
   }
 
   function goBack() {
-    $currentPath = "/";
+    navigateTo("/");
   }
 </script>
 

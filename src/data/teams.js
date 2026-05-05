@@ -1,8 +1,9 @@
 import { writable, get, derived } from 'svelte/store';
 import { db } from './firebase.js';
-import { doc, onSnapshot, collection, addDoc, query, where, updateDoc, getDoc, arrayUnion, getDocs } from 'firebase/firestore';
+import { doc, onSnapshot, collection, addDoc, query, where, updateDoc, getDoc, arrayUnion, getDocs, deleteField, deleteDoc } from 'firebase/firestore';
 import { userStore } from './auth.js';
 import { createNotification } from './notifications.js';
+import { createTeamPermissions, normalizeTeamPermissions } from './permissions.js';
 
 export const teamsStore = writable([]);
 export const selectedTeamId = writable(null);
@@ -88,6 +89,9 @@ export async function createTeam(teamName, paymentData = null) {
             admin: user.uid,
             members: [user.uid],
             membersData: [{ id: user.uid, name: user.name || user.email }],
+            memberPermissions: {
+                [user.uid]: createTeamPermissions(true)
+            },
             createdAt: new Date().toISOString()
         };
 
@@ -117,7 +121,7 @@ export async function createTeam(teamName, paymentData = null) {
  * @param {string} email 
  * @returns 
  */
-export async function addMemberByEmail(teamId, email) {
+export async function addMemberByEmail(teamId, email, permissions = {}) {
     try {
         // 1. Search for user by email
         const usersRef = collection(db, 'users');
@@ -145,7 +149,8 @@ export async function addMemberByEmail(teamId, email) {
 
         await updateDoc(teamRef, {
             members: arrayUnion(memberUid),
-            membersData: arrayUnion({ id: memberUid, name: memberName })
+            membersData: arrayUnion({ id: memberUid, name: memberName }),
+            [`memberPermissions.${memberUid}`]: normalizeTeamPermissions(permissions)
         });
 
         // 3. Create notification for the new member
@@ -186,6 +191,85 @@ export async function updateMemberSettings(teamId, memberId, dailyRate, extraHou
         });
     } catch (error) {
         console.error("Error updating member settings:", error);
+        throw error;
+    }
+}
+
+export async function updateMemberPermissions(teamId, memberId, permissions) {
+    const user = get(userStore);
+    if (!user) return;
+
+    try {
+        const teamRef = doc(db, 'teams', teamId);
+        await updateDoc(teamRef, {
+            [`memberPermissions.${memberId}`]: normalizeTeamPermissions(permissions),
+            updatedAt: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error("Error updating member permissions:", error);
+        throw error;
+    }
+}
+
+export async function updateTeamProfile(teamId, data) {
+    const user = get(userStore);
+    if (!user || !teamId) return;
+
+    try {
+        const updateData = {
+            updatedAt: new Date().toISOString()
+        };
+
+        if (typeof data.name === 'string') {
+            updateData.team = data.name.trim();
+        }
+
+        if (typeof data.photoURL === 'string') {
+            updateData.photoURL = data.photoURL;
+        }
+
+        await updateDoc(doc(db, 'teams', teamId), updateData);
+    } catch (error) {
+        console.error("Error updating team profile:", error);
+        throw error;
+    }
+}
+
+export async function removeTeamMember(teamId, memberId) {
+    const user = get(userStore);
+    if (!user || !teamId || !memberId) return;
+
+    try {
+        const teamRef = doc(db, 'teams', teamId);
+        const teamSnapshot = await getDoc(teamRef);
+        if (!teamSnapshot.exists()) throw new Error("Equipo no encontrado");
+
+        const teamData = teamSnapshot.data();
+        if (teamData.admin === memberId) {
+            throw new Error("No puedes quitar al administrador del equipo");
+        }
+
+        await updateDoc(teamRef, {
+            members: (teamData.members || []).filter((id) => id !== memberId),
+            membersData: (teamData.membersData || []).filter((member) => member.id !== memberId),
+            [`memberSettings.${memberId}`]: deleteField(),
+            [`memberPermissions.${memberId}`]: deleteField(),
+            updatedAt: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error("Error removing team member:", error);
+        throw error;
+    }
+}
+
+export async function deleteTeam(teamId) {
+    const user = get(userStore);
+    if (!user || !teamId) return;
+
+    try {
+        await deleteDoc(doc(db, 'teams', teamId));
+    } catch (error) {
+        console.error("Error deleting team:", error);
         throw error;
     }
 }

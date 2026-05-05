@@ -1,5 +1,5 @@
 <script>
-  import { currentPath } from "../router.js";
+  import { navigateTo } from "../router.js";
   import { ChevronLeft, Users } from "lucide-svelte";
   import { BETA_TESTERS_MODE } from "../data/features.js";
   import { createTeam, selectedTeamId } from "../data/stores.js";
@@ -9,7 +9,7 @@
   let betaError = $state("");
 
   function goBack() {
-    $currentPath = "/teams";
+    navigateTo("/teams");
   }
 
   async function handleBetaCreateTeam() {
@@ -24,7 +24,7 @@
       const id = await createTeam(name);
       if (id) {
         selectedTeamId.set(id);
-        $currentPath = `/teams/${id}`;
+        navigateTo(`/teams/${id}`);
       }
     } catch (e) {
       betaError = e?.message || "No se pudo crear el equipo.";
