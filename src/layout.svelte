@@ -14,19 +14,27 @@
   // Modal de novedades
   let showUpdateModal = false;
 
-  onMount(() => {
+  let cleanPath = $derived($currentPath.split("?")[0]);
+  let hasCheckedUpdate = false;
+
+  $effect(() => {
     // Solo mostrar si el usuario está autenticado y no está en login/hello/tour
     if (
-      typeof window !== "undefined" &&
+      !hasCheckedUpdate &&
       $authReady &&
       $userStore &&
-      ["/hello", "/login", "/tour"].indexOf($currentPath) === -1
+      ["/hello", "/login", "/tour"].indexOf(cleanPath) === -1
     ) {
       const lastSeen = localStorage.getItem("lastUpdateFeaturesVersion");
       if (lastSeen !== updateData.version) {
         showUpdateModal = true;
       }
+      hasCheckedUpdate = true;
     }
+  });
+
+  onMount(() => {
+    // onMount can be empty or removed if no other logic is needed
   });
 
   function closeUpdateModal() {
@@ -75,9 +83,6 @@
     "/timer": Timer,
     "/tour": Tour,
   };
-
-  let cleanPath = $derived($currentPath.split("?")[0]);
-
   let routeInfo = $derived.by(() => {
     // 1. Handle nested team routes: /teams/:teamId/:subpage
     if (cleanPath.startsWith("/teams/")) {
