@@ -1,6 +1,11 @@
 <script>
   import { updateData } from "../data/updateFeatures.js";
   let { open = false, onClose = () => {} } = $props();
+
+  const closeModal = () => {
+    open = false;
+    onClose();
+  };
 </script>
 
 {#if open}
@@ -12,7 +17,7 @@
           <li>• {feature}</li>
         {/each}
       </ul>
-      <button class="close-btn" onclick={onClose}>Cerrar</button>
+      <button class="close-btn" onclick={closeModal}>Cerrar</button>
     </div>
   </div>
 {/if}

@@ -25,6 +25,8 @@
 
   import AvatarCircle from "../components/AvatarCircle.svelte";
   import Toast from "../components/Toast.svelte";
+  import UpdateFeaturesModal from "../components/UpdateFeaturesModal.svelte";
+  import {updateData} from "../data/updateFeatures.js";
 
   let name = $state("");
   let email = $state("");
@@ -32,6 +34,7 @@
   let showToast = $state(false);
   let toastMessage = $state("");
   let toastType = $state("success");
+  let showUpdateModal = $state(false);
 
   onMount(async () => {
     if ($userStore) {
@@ -92,6 +95,7 @@
 
 <div class="settings-page">
   <Toast message={toastMessage} type={toastType} bind:show={showToast} />
+  <UpdateFeaturesModal open={showUpdateModal} />
   <header>
     <h1>Configuración</h1>
   </header>
@@ -173,13 +177,13 @@
     <section class="settings-group">
       <h3>Aplicación</h3>
       <div class="settings-list">
-        <button class="settings-item actionable">
+        <button class="settings-item actionable" onclick={()=>(showUpdateModal=true)}>
           <div class="item-icon info">
             <Info size={18} />
           </div>
           <div class="item-info">
             <span>Sobre MetricWork</span>
-            <p>Versión 1.0.0 (Beta)</p>
+            <p>{updateData.version}</p>
           </div>
           <ChevronRight size={18} class="chevron" />
         </button>
