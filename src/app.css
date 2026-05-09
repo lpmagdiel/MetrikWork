@@ -1,5 +1,7 @@
 :root {
   --page-top-safe: env(safe-area-inset-top, 0px);
+  --translucend-ligth:rgba(255, 255, 255, 0.5);
+  --translucend-dark:rgba(0, 0, 0, 0.5);
   --bg-page: #f9f9f9;
   --bg-card: #ffffff;
   --bg-card-raised: #ffffff;
@@ -61,6 +63,8 @@
   --shadow-button: 0 4px 14px rgba(255, 255, 255, 0.08);
   --shadow-soft: 0 8px 30px rgba(0, 0, 0, 0.5);
   --shadow-card: 0 2px 10px rgba(0, 0, 0, 0.3);
+  --translucend-ligth:rgba(95, 95, 95, 0.4);
+  --translucend-dark:rgba(255, 255, 255, 0.5);
 }
 
 * {

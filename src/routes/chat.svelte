@@ -426,7 +426,8 @@
 
   .message-bubble {
     padding: 12px 16px;
-    background: var(--bg-card);
+    background: var(--translucend-ligth);
+    backdrop-filter: blur(10px);
     border-radius: 16px;
     border-bottom-left-radius: 4px;
     font-size: 15px;
@@ -436,7 +437,7 @@
   }
 
   .message-wrapper.me .message-bubble {
-    background: var(--success-color);
+    background: var(--translucend-dark);
     color: var(--bg-card);
     border-radius: 16px;
     border-bottom-right-radius: 4px;
@@ -453,7 +454,7 @@
     display: grid;
     grid-template-columns: 1fr auto auto;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
     border-top: 1px solid var(--border-color);
     flex-shrink: 0;
     width: 100%;

@@ -449,7 +449,7 @@
 
   .stat-value-btn {
     background: var(--accent-strong);
-    color: #ffffff;
+    color: var(--bg-page);
     border: none;
     padding: 10px 16px;
     border-radius: var(--radius-sm);
