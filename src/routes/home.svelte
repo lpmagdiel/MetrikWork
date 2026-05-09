@@ -11,7 +11,10 @@
     Calculator,
     StickyNote,
     Timer,
-    Sparkles
+    Sparkles,
+
+    MapPinned
+
   } from "lucide-svelte";
 
   let hasUnread = $derived($notificationsStore.some((n) => !n.opened));
@@ -147,6 +150,12 @@
           <Calculator size={28} />
         </div>
         <span class="action-label">Calculadora</span>
+      </a>
+      <a href="/locations" class="action-btn">
+        <div class="action-icon-box">
+          <MapPinned size={28} />
+        </div>
+        <span class="action-label">Ubicaciones</span>
       </a>
       <a href="/notes" class="action-btn">
         <div class="action-icon-box">
@@ -334,7 +343,7 @@
     display: flex;
     justify-content: space-between;
     padding: 0 8px;
-    margin-top: 8px;
+    margin-top: 18px;
   }
 
   .action-btn {
@@ -352,8 +361,8 @@
   }
 
   .action-icon-box {
-    width: 64px;
-    height: 64px;
+    width: 52px;
+    height: 52px;
     background: var(--bg-card);
     border-radius: var(--radius-md);
     display: flex;

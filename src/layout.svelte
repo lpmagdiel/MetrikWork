@@ -54,6 +54,7 @@
   import Inventory from "./routes/inventory.svelte";
   import Calculator from "./routes/calculator.svelte";
   import Notes from "./routes/notes.svelte";
+  import Locations from "./routes/locations.svelte";
   import Tasks from "./routes/tasks.svelte";
   import Chat from "./routes/chat.svelte";
   import TeamPayments from "./routes/team-payments.svelte";
@@ -76,6 +77,7 @@
     "/inventory": Inventory,
     "/calculator": Calculator,
     "/notes": Notes,
+    "/locations": Locations,
     "/tasks": Tasks,
     "/team": Team,
     "/chat": Chat,

@@ -60,15 +60,24 @@ export function mergeChatMessages(existingMessages = [], olderMessages = []) {
     return sortMessages(Array.from(messagesById.values()));
 }
 
-export async function sendTeamMessage(teamId, content, user, imageUrl = null) {
+export async function sendTeamMessage(teamId, content, user, imageUrl = null, extraData = {}) {
     if (!user || !teamId) return;
     try {
-        await addDoc(collection(db, 'teams', teamId, 'messages'), {
+        const messageData = {
             text: content,
             imageUrl: imageUrl,
+            type: extraData.type || (imageUrl ? 'IMAGE' : 'TEXT'),
             senderId: user.uid,
             senderName: user.name || user.email,
             createdAt: new Date().toISOString()
+        };
+
+        if (extraData.location) {
+            messageData.location = extraData.location;
+        }
+
+        await addDoc(collection(db, 'teams', teamId, 'messages'), {
+            ...messageData
         });
         try {
             const chatStats = JSON.parse(localStorage.getItem('chatStats')) || { totalMessages: 0 };

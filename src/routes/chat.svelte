@@ -2,7 +2,7 @@
   // @ts-nocheck
 
   import { onMount, onDestroy } from "svelte";
-  import { ChevronLeft, Send, Image as ImageIcon } from "lucide-svelte";
+  import { ChevronLeft, Image as ImageIcon, MapPinned, Plus, Send } from "lucide-svelte";
   import {
     userStore,
     chatMessagesStore,
@@ -12,11 +12,13 @@
     mergeChatMessages,
     selectedTeamId,
     teamsStore,
+    locationsStore,
   } from "../data/stores.js";
   import { get } from "svelte/store";
   import { navigateTo } from "../router.js";
   import { uploader, resizer } from "../data/fileHelper.js";
   import SliceContainer from "../components/SliceContainer.svelte";
+  import LocationBox from "../components/LocationBox.svelte";
 
   let messageInput = $state("");
   let messages = $derived($chatMessagesStore);
@@ -26,6 +28,8 @@
   );
   let chatContainer;
   let showImageSlice = $state(false);
+  let showAttachMenu = $state(false);
+  let showLocationSlice = $state(false);
   let fileInput;
   let previewUrl = $state("");
   let isUploading = $state(false);
@@ -96,7 +100,13 @@
   }
 
   function openFilePicker() {
+    showAttachMenu = false;
     fileInput && fileInput.click();
+  }
+
+  function openLocationPicker() {
+    showAttachMenu = false;
+    showLocationSlice = true;
   }
 
   async function handleFileChange(e) {
@@ -123,7 +133,7 @@
     try {
       const imageUrl = await uploader(previewUrl);
       shouldStickToBottom = true;
-      await sendTeamMessage(teamId, "", $userStore, imageUrl);
+      await sendTeamMessage(teamId, "", $userStore, imageUrl, { type: "IMAGE" });
       showImageSlice = false;
       previewUrl = "";
     } catch (error) {
@@ -131,6 +141,27 @@
       alert("Error al enviar la imagen");
     } finally {
       isUploading = false;
+    }
+  }
+
+  async function handleSendLocation(location) {
+    if (!teamId || !$userStore || !location) return;
+
+    try {
+      shouldStickToBottom = true;
+      await sendTeamMessage(teamId, "", $userStore, null, {
+        type: "SIMPLE_LOCATION",
+        location: {
+          id: location.id,
+          name: location.name,
+          description: location.description || "",
+          gps: location.gps || null,
+        },
+      });
+      showLocationSlice = false;
+    } catch (error) {
+      console.error("Error sending location", error);
+      alert("Error al enviar la ubicación");
     }
   }
 
@@ -176,8 +207,17 @@
           {#if msg.senderId !== $userStore?.uid}
             <span class="sender-name">{msg.senderName}</span>
           {/if}
-          <div class="message-bubble">
-            {#if msg.imageUrl}
+          <div
+            class="message-bubble"
+            class:location-bubble={msg.type === "SIMPLE_LOCATION" && msg.location}
+          >
+            {#if msg.type === "SIMPLE_LOCATION" && msg.location}
+              <LocationBox
+                gps={msg.location.gps}
+                name={msg.location.name}
+                description={msg.location.description || "Sin descripción"}
+              />
+            {:else if msg.imageUrl}
               <img src={msg.imageUrl} alt="Imagen" class="chat-image" />
             {/if}
             {#if msg.text}
@@ -202,9 +242,21 @@
       bind:value={messageInput}
       onkeydown={handleKeydown}
     />
-    <button class="image-btn" onclick={openFilePicker} title="Enviar imagen">
-      <ImageIcon />
-    </button>
+    <div class="attach-wrapper">
+      {#if showAttachMenu}
+        <div class="attach-menu">
+          <button type="button" onclick={openLocationPicker} title="Enviar ubicación">
+            <MapPinned size={20} />
+          </button>
+          <button type="button" onclick={openFilePicker} title="Enviar imagen">
+            <ImageIcon size={20} />
+          </button>
+        </div>
+      {/if}
+      <button class="attach-btn" onclick={() => (showAttachMenu = !showAttachMenu)} title="Adjuntar">
+        <Plus />
+      </button>
+    </div>
     <input
       bind:this={fileInput}
       type="file"
@@ -243,6 +295,38 @@
         <span>Enviar Imagen</span>
       {/if}
     </button>
+  </div>
+</SliceContainer>
+
+<SliceContainer bind:show={showLocationSlice} bg="var(--bg-card)">
+  <div class="location-picker">
+    <div class="location-picker-header">
+      <MapPinned size={22} />
+      <h2>Enviar ubicación</h2>
+    </div>
+
+    {#if $locationsStore.length === 0}
+      <div class="location-empty">
+        <p>No tienes ubicaciones guardadas.</p>
+        <button onclick={() => navigateTo("/locations")}>Crear ubicación</button>
+      </div>
+    {:else}
+      <div class="location-picker-list">
+        {#each $locationsStore as location (location.id)}
+          <article class="location-option">
+            <LocationBox
+              gps={location.gps}
+              name={location.name}
+              description={location.description || "Sin descripción"}
+            />
+            <button class="send-location-btn" onclick={() => handleSendLocation(location)}>
+              <Send size={16} />
+              Enviar
+            </button>
+          </article>
+        {/each}
+      </div>
+    {/if}
   </div>
 </SliceContainer>
 
@@ -352,12 +436,11 @@
   }
 
   .message-wrapper.me .message-bubble {
-    background: var(--accent-strong);
+    background: var(--success-color);
     color: var(--bg-card);
     border-radius: 16px;
     border-bottom-right-radius: 4px;
   }
-
   .timestamp {
     font-size: 10px;
     color: var(--text-muted);
@@ -392,7 +475,7 @@
   }
 
   .send-btn,
-  .image-btn {
+  .attach-btn {
     background: var(--accent-strong);
     color: var(--bg-card);
     border: none;
@@ -406,7 +489,42 @@
     transition: transform 0.1s;
   }
 
-  .send-btn:active {
+  .attach-wrapper {
+    position: relative;
+    width: 44px;
+    height: 44px;
+  }
+
+  .attach-menu {
+    position: absolute;
+    right: 0;
+    bottom: 54px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 999px;
+    background: var(--bg-card);
+    box-shadow: var(--shadow-soft);
+    border: 1px solid var(--border-color);
+    z-index: 100;
+  }
+
+  .attach-menu button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border: none;
+    border-radius: 50%;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    cursor: pointer;
+  }
+
+  .send-btn:active,
+  .attach-btn:active {
     transform: scale(0.95);
   }
 
@@ -417,12 +535,30 @@
 
   .chat-image {
     max-width: 100%;
-    border-radius: 8px;
+    border-radius: 12px;
     display: block;
     margin-bottom: 4px;
   }
 
   .message-bubble p {
+    margin: 0;
+  }
+
+  .message-bubble.location-bubble {
+    width: min(320px, 76vw);
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--text-primary);
+    
+  }
+
+  .message-wrapper.me .message-bubble.location-bubble {
+    background: transparent;
+    color: var(--text-primary);
+  }
+
+  .message-bubble.location-bubble :global(.location-box) {
     margin: 0;
   }
 
@@ -443,5 +579,91 @@
 
   .send-image-btn:disabled {
     opacity: 0.6;
+  }
+
+  .location-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 8px 16px 24px;
+  }
+
+  .location-picker-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-primary);
+  }
+
+  .location-picker-header h2 {
+    font-size: 20px;
+    line-height: 1.2;
+  }
+
+  .location-picker-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .location-option {
+    position: relative;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .location-option :global(.location-box) {
+    margin: 0;
+  }
+
+  .send-location-btn {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 36px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--accent-strong);
+    color: var(--bg-card);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: var(--shadow-card);
+  }
+
+  .location-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 220px;
+    gap: 14px;
+    color: var(--text-secondary);
+    text-align: center;
+  }
+
+  .location-empty button {
+    min-height: 42px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--accent-strong);
+    color: var(--bg-card);
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .location-bubble{
+    padding: 4px !important;
   }
 </style>

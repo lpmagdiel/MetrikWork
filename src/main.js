@@ -3,7 +3,7 @@ import './app.css'
 import Layout from './layout.svelte'
 import { navigateTo } from './router.js';
 
-import { initAuth, initializePushNotifications, subscribeToTeams, subscribeToTasks, subscribeToNotifications, subscribeToNotes, subscribeToSettings } from './data/index.js';
+import { initAuth, initializePushNotifications, subscribeToTeams, subscribeToTasks, subscribeToNotifications, subscribeToNotes, subscribeToLocations, subscribeToSettings } from './data/index.js';
 
 initAuth((uid) => {
   initializePushNotifications(uid);
@@ -11,6 +11,7 @@ initAuth((uid) => {
   subscribeToTasks(uid);
   subscribeToNotifications(uid);
   subscribeToNotes(uid);
+  subscribeToLocations(uid);
   subscribeToSettings(uid);
 });
 
