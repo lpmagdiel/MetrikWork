@@ -8,9 +8,12 @@
     chatMessagesStore,
     subscribeToTeamChat,
     sendTeamMessage,
+    getOlderTeamMessages,
+    mergeChatMessages,
     selectedTeamId,
     teamsStore,
   } from "../data/stores.js";
+  import { get } from "svelte/store";
   import { navigateTo } from "../router.js";
   import { uploader, resizer } from "../data/fileHelper.js";
   import SliceContainer from "../components/SliceContainer.svelte";
@@ -26,24 +29,65 @@
   let fileInput;
   let previewUrl = $state("");
   let isUploading = $state(false);
+  let isLoadingOlder = $state(false);
+  let hasOlderMessages = $state(true);
+  let shouldStickToBottom = $state(true);
+  const pageSize = 30;
 
   $effect(() => {
     if (teamId) {
-      subscribeToTeamChat(teamId);
+      hasOlderMessages = true;
+      shouldStickToBottom = true;
+      subscribeToTeamChat(teamId, pageSize);
     }
     return () => subscribeToTeamChat(null);
   });
 
   $effect(() => {
-    if (messages.length && chatContainer) {
+    if (messages.length && chatContainer && shouldStickToBottom) {
       chatContainer.scrollTop = chatContainer.scrollHeight;
     }
   });
+
+  function handleMessagesScroll() {
+    if (!chatContainer) return;
+    const distanceFromBottom =
+      chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight;
+    shouldStickToBottom = distanceFromBottom < 90;
+    if (chatContainer.scrollTop < 80) {
+      loadOlderMessages();
+    }
+  }
+
+  async function loadOlderMessages() {
+    if (!teamId || isLoadingOlder || !hasOlderMessages || messages.length === 0) return;
+    isLoadingOlder = true;
+    const previousHeight = chatContainer?.scrollHeight || 0;
+    const oldestMessage = messages[0];
+    try {
+      const olderMessages = await getOlderTeamMessages(teamId, oldestMessage, pageSize);
+      if (olderMessages.length < pageSize) {
+        hasOlderMessages = false;
+      }
+      if (olderMessages.length > 0) {
+        chatMessagesStore.set(mergeChatMessages(get(chatMessagesStore), olderMessages));
+        requestAnimationFrame(() => {
+          if (!chatContainer) return;
+          chatContainer.scrollTop = chatContainer.scrollHeight - previousHeight;
+        });
+      }
+    } catch (error) {
+      console.error("Error loading older messages", error);
+    } finally {
+      isLoadingOlder = false;
+    }
+  }
 
   async function handleSendMessage() {
     if (!messageInput.trim() || !teamId || !$userStore) return;
 
     try {
+      shouldStickToBottom = true;
       await sendTeamMessage(teamId, messageInput.trim(), $userStore);
       messageInput = "";
     } catch (error) {
@@ -78,6 +122,7 @@
     isUploading = true;
     try {
       const imageUrl = await uploader(previewUrl);
+      shouldStickToBottom = true;
       await sendTeamMessage(teamId, "", $userStore, imageUrl);
       showImageSlice = false;
       previewUrl = "";
@@ -108,12 +153,21 @@
     <h1>{teamName}</h1>
   </header>
 
-  <div class="messages-container" bind:this={chatContainer}>
+  <div class="messages-container" bind:this={chatContainer} onscroll={handleMessagesScroll}>
     {#if messages.length === 0}
       <div class="empty-state">
         <p>No hay mensajes aún. ¡Di hola!</p>
       </div>
     {:else}
+      {#if hasOlderMessages}
+        <button
+          class="load-more-btn"
+          onclick={loadOlderMessages}
+          disabled={isLoadingOlder}
+        >
+          {isLoadingOlder ? "Cargando..." : "Cargar mensajes anteriores"}
+        </button>
+      {/if}
       {#each messages as msg (msg.id)}
         <div
           class="message-wrapper"
@@ -246,6 +300,25 @@
     height: 100%;
     color: var(--text-secondary);
     font-size: 14px;
+  }
+
+  .load-more-btn {
+    align-self: center;
+    border: none;
+    border-radius: 999px;
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    box-shadow: var(--shadow-card);
+    padding: 9px 14px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    margin-bottom: 4px;
+  }
+
+  .load-more-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 
   .message-wrapper {

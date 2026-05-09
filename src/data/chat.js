@@ -1,25 +1,63 @@
 import { writable } from 'svelte/store';
 import { db } from './firebase.js';
-import { onSnapshot, collection, addDoc } from 'firebase/firestore';
+import {
+    onSnapshot,
+    collection,
+    addDoc,
+    query,
+    orderBy,
+    limit,
+    startAfter,
+    getDocs
+} from 'firebase/firestore';
 
 export const chatMessagesStore = writable([]);
 let chatUnsubscribe;
+const CHAT_PAGE_SIZE = 30;
 
-export function subscribeToTeamChat(teamId) {
+function normalizeMessageDoc(doc) {
+    return { id: doc.id, ...doc.data(), _snapshot: doc };
+}
+
+function sortMessages(messages) {
+    return messages.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+}
+
+export function subscribeToTeamChat(teamId, pageSize = CHAT_PAGE_SIZE) {
     if (chatUnsubscribe) chatUnsubscribe();
     chatMessagesStore.set([]);
     if (!teamId) return;
-    chatUnsubscribe = onSnapshot(collection(db, 'teams', teamId, 'messages'), (snapshot) => {
-        const messages = [];
-        snapshot.forEach((doc) => {
-            messages.push({ id: doc.id, ...doc.data() });
-        });
-        // @ts-ignore
-        messages.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-        chatMessagesStore.set(messages);
+    const messagesQuery = query(
+        collection(db, 'teams', teamId, 'messages'),
+        orderBy('createdAt', 'desc'),
+        limit(pageSize)
+    );
+    chatUnsubscribe = onSnapshot(messagesQuery, (snapshot) => {
+        const messages = snapshot.docs.map(normalizeMessageDoc);
+        chatMessagesStore.set(sortMessages(messages));
     }, (error) => {
         console.error("Error in chat listener:", error);
     });
+}
+
+export async function getOlderTeamMessages(teamId, oldestMessage, pageSize = CHAT_PAGE_SIZE) {
+    if (!teamId || !oldestMessage?._snapshot) return [];
+    const messagesQuery = query(
+        collection(db, 'teams', teamId, 'messages'),
+        orderBy('createdAt', 'desc'),
+        startAfter(oldestMessage._snapshot),
+        limit(pageSize)
+    );
+    const snapshot = await getDocs(messagesQuery);
+    return sortMessages(snapshot.docs.map(normalizeMessageDoc));
+}
+
+export function mergeChatMessages(existingMessages = [], olderMessages = []) {
+    const messagesById = new Map();
+    [...olderMessages, ...existingMessages].forEach((message) => {
+        messagesById.set(message.id, message);
+    });
+    return sortMessages(Array.from(messagesById.values()));
 }
 
 export async function sendTeamMessage(teamId, content, user, imageUrl = null) {
