@@ -88,7 +88,7 @@
 
   async function handleDelete(notificationId) {
     try {
-      await deleteNotification(notificationId);
+      await deleteNotification(notificationId, $userStore?.uid);
       if (swipedNotificationId === notificationId) swipedNotificationId = null;
     } catch (e) {
       messageToast = "Error al eliminar";
@@ -103,7 +103,7 @@
 
   async function handleDeleteAll() {
     try {
-      await deleteAllNotifications();
+      await deleteAllNotifications($userStore?.uid);
       showConfirmToast = false;
       messageToast = "Notificaciones eliminadas";
       typeToast = "success";
@@ -301,10 +301,12 @@
     padding: 24px 24px var(--bottom-nav-clearance);
     padding-top: var(--page-top-safe);
     height: 100%;
+    min-height: 0;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
     background-color: var(--bg-page);
+    overflow: hidden;
   }
 
   header {
@@ -312,6 +314,7 @@
     align-items: center;
     gap: 14px;
     margin-bottom: 24px;
+    flex: 0 0 auto;
   }
 
   .back-btn {
@@ -374,6 +377,7 @@
     grid-template-columns: auto 1fr auto;
     align-items: center;
     gap: 12px;
+    flex: 0 0 auto;
   }
 
   .push-icon {
@@ -459,6 +463,7 @@
     grid-template-columns: auto 1fr auto;
     align-items: center;
     gap: 14px;
+    flex: 0 0 auto;
   }
 
   .summary-icon {
@@ -501,7 +506,10 @@
 
   .notifications-list {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
     display: flex;
     flex-direction: column;
     gap: 14px;
@@ -511,6 +519,7 @@
   /* Wrapper que contiene la tarjeta y el fondo rojo */
   .notification-wrapper {
     position: relative;
+    flex: 0 0 auto;
     border-radius: var(--radius-lg);
     overflow: hidden;
     touch-action: pan-y; /* permite scroll vertical, capturamos horizontal manualmente */

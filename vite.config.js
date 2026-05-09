@@ -140,12 +140,21 @@ function cloudinaryApiPlugin() {
 }
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '');
+
+  return {
     build: {
-    sourcemap: true
-  },
-  plugins: [svelte(), stripeApiPlugin(), cloudinaryApiPlugin()],
-  server: {
-    historyApiFallback: true,
-  }
+      sourcemap: true
+    },
+    define: {
+      'import.meta.env.CLOUDINARY_PRESET_INVENTARY': JSON.stringify(
+        env.CLOUDINARY_PRESET_INVENTARY || 'MetricWorkInventary'
+      ),
+    },
+    plugins: [svelte(), stripeApiPlugin(), cloudinaryApiPlugin()],
+    server: {
+      historyApiFallback: true,
+    }
+  };
 })

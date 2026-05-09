@@ -1,6 +1,18 @@
 import { writable, get } from 'svelte/store';
 import { db } from './firebase.js';
-import { onSnapshot, collection, query, where, deleteDoc, doc, updateDoc, addDoc } from 'firebase/firestore';
+import {
+    onSnapshot,
+    collection,
+    query,
+    where,
+    deleteDoc,
+    doc,
+    updateDoc,
+    addDoc,
+    getDoc,
+    getDocs,
+    writeBatch
+} from 'firebase/firestore';
 import { showDeviceNotification } from './pushNotifications.js';
 
 export const notificationsStore = writable([]);
@@ -82,9 +94,15 @@ export async function markNotificationAsRead(notificationId) {
     }
 }
 
-export async function deleteNotification(notificationId) {
+export async function deleteNotification(notificationId, uid = null) {
     try {
         const notifRef = doc(db, 'notifications', notificationId);
+        if (uid) {
+            const snapshot = await getDoc(notifRef);
+            if (!snapshot.exists() || snapshot.data().notificationFor !== uid) {
+                throw new Error('Notification not found for current user');
+            }
+        }
         await deleteDoc(notifRef);
     } catch (error) {
         console.error("Error deleting notification:", error);
@@ -94,8 +112,27 @@ export async function deleteNotification(notificationId) {
 
 export async function deleteAllNotifications(uid) {
     try {
+        if (uid) {
+            const notificationsQuery = query(
+                collection(db, 'notifications'),
+                where('notificationFor', '==', uid)
+            );
+            const snapshot = await getDocs(notificationsQuery);
+            if (snapshot.empty) return;
+
+            const refs = snapshot.docs.map((notificationDoc) => notificationDoc.ref);
+            for (let i = 0; i < refs.length; i += 450) {
+                const batch = writeBatch(db);
+                refs.slice(i, i + 450).forEach((notificationRef) => {
+                    batch.delete(notificationRef);
+                });
+                await batch.commit();
+            }
+            return;
+        }
+
         const notifications = get(notificationsStore);
-        const deletePromises = notifications.map(n => deleteDoc(doc(db, 'notifications', n.id)));
+        const deletePromises = notifications.map((n) => deleteDoc(doc(db, 'notifications', n.id)));
         await Promise.all(deletePromises);
     } catch (error) {
         console.error("Error deleting all notifications:", error);

@@ -8,7 +8,8 @@
     AlertTriangle,
     X,
     Save,
-    ChevronLeft
+    ChevronLeft,
+    Image as ImageIcon
   } from "lucide-svelte";
   import {
     inventoryStore,
@@ -22,7 +23,11 @@
     hasTeamPermission,
   } from "../data/stores.js";
   import { navigateTo } from "../router.js";
+  import { uploader, resizer } from "../data/fileHelper.js";
   import SliceContainer from "../components/SliceContainer.svelte";
+
+  const CLOUDINARY_PRESET_INVENTARY =
+    import.meta.env.CLOUDINARY_PRESET_INVENTARY || "MetricWorkInventary";
 
   let searchTerm = $state("");
   let teamId = $derived($selectedTeamId);
@@ -33,6 +38,9 @@
   let canDeleteInventory = $derived(hasTeamPermission(team, $userStore?.uid, "inventory", "delete"));
   let showModal = $state(false);
   let editingId = $state(null);
+  let fileInput;
+  let pendingImageData = $state("");
+  let isSaving = $state(false);
 
   $effect(() => {
     if ($selectedTeamId && canViewInventory) {
@@ -48,6 +56,7 @@
     price: 0,
     category: "",
     minStock: 5,
+    imageUrl: "",
   });
 
   // Derived filtered items
@@ -77,6 +86,7 @@
         price: item.price,
         category: item.category,
         minStock: item.minStock,
+        imageUrl: item.imageUrl || "",
       };
     } else {
       editingId = null;
@@ -86,14 +96,58 @@
         price: 0,
         category: "",
         minStock: 5,
+        imageUrl: "",
       };
     }
+    pendingImageData = "";
     showModal = true;
   }
 
   function closeModal() {
     showModal = false;
     editingId = null;
+    pendingImageData = "";
+    isSaving = false;
+  }
+
+  function openFilePicker() {
+    fileInput && fileInput.click();
+  }
+
+  async function handleImageChange(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      alert("Selecciona un archivo de imagen válido");
+      e.target.value = null;
+      return;
+    }
+
+    try {
+      const imageData = await readFileAsDataUrl(file);
+      const resizedImage = await resizer(imageData, 700);
+      pendingImageData = resizedImage;
+      formData.imageUrl = resizedImage;
+    } catch (error) {
+      console.error("Error processing product image", error);
+      alert("No se pudo cargar la imagen");
+    } finally {
+      e.target.value = null;
+    }
+  }
+
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (event) => resolve(event.target.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function removeProductImage() {
+    formData.imageUrl = "";
+    pendingImageData = "";
   }
 
   async function handleSubmit() {
@@ -102,15 +156,26 @@
       return;
     }
     if ((editingId && !canEditInventory) || (!editingId && !canCreateInventory)) return;
+    if (isSaving) return;
+    isSaving = true;
     try {
+      const productData = { ...formData };
+      if (pendingImageData) {
+        productData.imageUrl = await uploader(
+          pendingImageData,
+          CLOUDINARY_PRESET_INVENTARY,
+        );
+      }
       if (editingId) {
-        await updateProduct($selectedTeamId, editingId, formData);
+        await updateProduct($selectedTeamId, editingId, productData);
       } else {
-        await addProduct($selectedTeamId, formData);
+        await addProduct($selectedTeamId, productData);
       }
       closeModal();
     } catch (error) {
       alert("Error al guardar el producto: " + error.message);
+    } finally {
+      isSaving = false;
     }
   }
 
@@ -192,7 +257,18 @@
         <tbody>
           {#each filteredItems as item (item.id)}
             <tr>
-              <td><span class="product-name">{item.name}</span></td>
+              <td>
+                <div class="product-cell">
+                  {#if item.imageUrl}
+                    <img src={item.imageUrl} alt={item.name} class="product-thumb" />
+                  {:else}
+                    <div class="product-thumb placeholder">
+                      <Package size={18} />
+                    </div>
+                  {/if}
+                  <span class="product-name">{item.name}</span>
+                </div>
+              </td>
               <td
                 ><span class="category-tag">{item.category || "General"}</span
                 ></td
@@ -250,6 +326,38 @@
       <h2>{editingId ? "Editar Producto" : "Nuevo Producto"}</h2>
     </div>
     <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
+      <div class="form-group">
+        <label for="product-image">Imagen del Producto</label>
+        <div class="image-picker">
+          <div class="image-preview">
+            {#if formData.imageUrl}
+              <img src={formData.imageUrl} alt="Vista previa del producto" />
+            {:else}
+              <ImageIcon size={28} />
+            {/if}
+          </div>
+          <div class="image-actions">
+            <button type="button" class="image-btn" onclick={openFilePicker}>
+              <ImageIcon size={18} />
+              <span>{formData.imageUrl ? "Cambiar imagen" : "Agregar imagen"}</span>
+            </button>
+            {#if formData.imageUrl}
+              <button type="button" class="remove-image-btn" onclick={removeProductImage}>
+                <X size={18} />
+              </button>
+            {/if}
+          </div>
+          <input
+            bind:this={fileInput}
+            id="product-image"
+            type="file"
+            accept="image/*"
+            onchange={handleImageChange}
+            style="display:none"
+          />
+        </div>
+      </div>
+
       <div class="form-group">
         <label for="name">Nombre del Producto</label>
         <input
@@ -311,9 +419,13 @@
       </div>
 
       <div class="slice-actions">
-        <button type="submit" class="save-btn block-btn">
-          <Save size={20} />
-          <span>{editingId ? "Actualizar" : "Guardar"}</span>
+        <button type="submit" class="save-btn block-btn" disabled={isSaving}>
+          {#if isSaving}
+            <span>Guardando...</span>
+          {:else}
+            <Save size={20} />
+            <span>{editingId ? "Actualizar" : "Guardar"}</span>
+          {/if}
         </button>
       </div>
     </form>
@@ -488,6 +600,30 @@
     color: var(--text-primary);
   }
 
+  .product-cell {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 180px;
+  }
+
+  .product-thumb {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    object-fit: cover;
+    flex: 0 0 auto;
+    background: var(--bg-input);
+  }
+
+  .product-thumb.placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+  }
+
   .category-tag {
     background: var(--bg-input);
     color: var(--text-secondary);
@@ -588,6 +724,72 @@
     border-color: var(--accent-color);
     outline: none;
   }
+
+  .image-picker {
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    gap: 14px;
+    align-items: center;
+  }
+
+  .image-preview {
+    width: 96px;
+    aspect-ratio: 1;
+    border-radius: 14px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  .image-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .image-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .image-btn,
+  .remove-image-btn {
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.1s, opacity 0.2s;
+  }
+
+  .image-btn {
+    min-height: 44px;
+    padding: 0 14px;
+    gap: 8px;
+    background: var(--accent-strong);
+    color: var(--bg-card);
+    font-weight: 600;
+  }
+
+  .remove-image-btn {
+    width: 44px;
+    height: 44px;
+    background: var(--bg-danger-subtle);
+    color: var(--danger-color);
+  }
+
+  .image-btn:active,
+  .remove-image-btn:active {
+    transform: scale(0.96);
+  }
+
   /* Slice Styles */
   .slice-content {
     padding: 24px;
@@ -686,5 +888,10 @@
 
   .save-btn:hover {
     background: var(--text-primary);
+  }
+
+  .save-btn:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
   }
 </style>
