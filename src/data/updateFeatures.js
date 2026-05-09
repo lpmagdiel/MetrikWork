@@ -1,12 +1,11 @@
 export const updateData = {
-  version: "0.9.0", // Actualiza este valor en cada release
-  message: "¡Novedades de MetricWork 0.9.0! ⚠️ Beta",
+  version: "0.9.2", // Actualiza este valor en cada release
+  message: "¡Novedades de MetricWork 0.9.2! ⚠️ Beta",
   features: [
-    "Nuevo resumen de mejoras tras cada actualización.",
-    "Mejoras de rendimiento y corrección de errores.",
-    "Ajustes de equipos ya disponibles.",
-    "Los miembros de equipo ahora cuentan con permisos.",
-    "Ahora se puede actualizar la imagen de perfil y la información personal.",
-    "Cuando un usuario a recibido un pago ahora se le notifica."
+    "Notificaciones push disponibles para recibir avisos en el dispositivo.",
+    "La app ahora escucha nuevas notificaciones en tiempo real y las muestra como avisos del sistema.",
+    "Nueva opción para activar las notificaciones desde el centro de avisos.",
+    "Preparada la configuración de Firebase Cloud Messaging y Vercel para envíos push.",
+    "Mejoras generales en el centro de notificaciones y estabilidad."
   ]
 };
