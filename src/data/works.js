@@ -1,5 +1,28 @@
 import { db } from './firebase.js';
-import { collection, addDoc, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
+
+export function getTodayDateString() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+export async function hasWorkdayForDate(teamId, userId, date = getTodayDateString()) {
+    if (!teamId || !userId) return false;
+    const worksQuery = query(
+        collection(db, 'works'),
+        where('teamId', '==', teamId),
+        where('userId', '==', userId),
+        where('date', '==', date)
+    );
+    const snapshot = await getDocs(worksQuery);
+    return snapshot.docs.some((doc) => {
+        const type = doc.data().type;
+        return type === 'full-day' || type === 'half-day';
+    });
+}
 
 export async function registerWorkday(teamId, userId, userName, workDay) {
     if (!workDay) throw new Error("workDay is missing");
@@ -10,7 +33,7 @@ export async function registerWorkday(teamId, userId, userName, workDay) {
             userName,
             type: (workDay && workDay.type) ? workDay.type : 'full-day',
             overtimeHours: (workDay && workDay.overtimeHours) ? Number(workDay.overtimeHours) : 0,
-            date: new Date().toISOString().split('T')[0],
+            date: getTodayDateString(),
             createdAt: new Date().toISOString(),
             paid: false
         };
@@ -30,6 +53,52 @@ export async function registerWorkday(teamId, userId, userName, workDay) {
         throw error;
     }
 }
+
+export async function assignWorkdayToMember(teamId, userId, userName, workDay, assignedBy = null) {
+    if (!teamId || !userId || !workDay?.date) throw new Error("Datos de jornada incompletos");
+    const worksQuery = query(
+        collection(db, 'works'),
+        where('teamId', '==', teamId),
+        where('userId', '==', userId),
+        where('date', '==', workDay.date)
+    );
+    const snapshot = await getDocs(worksQuery);
+    const workData = {
+        teamId,
+        userId,
+        userName,
+        type: workDay.type || 'full-day',
+        overtimeHours: workDay.overtimeHours ? Number(workDay.overtimeHours) : 0,
+        date: workDay.date,
+        note: workDay.note?.trim() || '',
+        assignedBy,
+        updatedAt: new Date().toISOString()
+    };
+
+    if (!snapshot.empty) {
+        await updateDoc(snapshot.docs[0].ref, workData);
+        return snapshot.docs[0].id;
+    }
+
+    const docRef = await addDoc(collection(db, 'works'), {
+        ...workData,
+        createdAt: new Date().toISOString(),
+        paid: false
+    });
+    return docRef.id;
+}
+
+export const getTeamWorks = async (teamId) => {
+    if (!teamId) return [];
+    const worksQuery = query(collection(db, 'works'), where('teamId', '==', teamId));
+    const snapshot = await getDocs(worksQuery);
+    const works = [];
+    snapshot.forEach((doc) => {
+        works.push({ id: doc.id, ...doc.data() });
+    });
+    return works.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+}
+
 export const getWorksByTeamId = async (teamId) => {
     const worksQuery = query(collection(db, 'works'), where('teamId', '==', teamId));
     const snapshot = await getDocs(worksQuery);

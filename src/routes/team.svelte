@@ -35,7 +35,7 @@
     getUserProfile,
     addMemberByEmail,
     registerWorkday,
-    getTeamStats,
+    hasWorkdayForDate,
     teamTasksStore,
     subscribeToTeamTasks,
     addTeamTask,
@@ -51,8 +51,6 @@
   import { navigateTo } from "../router.js";
   import SliceContainer from "../components/SliceContainer.svelte";
   import Toast from "../components/Toast.svelte";
-  import Chart from "../components/Chart.svelte";
-  import Calendar from "../components/Calendar.svelte";
   import AvatarCircle from "../components/AvatarCircle.svelte";
 
   let team = $derived($selectedTeam);
@@ -82,16 +80,12 @@
   let typeToast = $state("");
   let showToast = $state(false);
   let showWorkdayForm = $state(false);
+  let hasWorkdayToday = $state(false);
+  let isCheckingWorkday = $state(false);
   let workDay = $state({
-    type: "full-day", // "full-day" | "half-day"
+    type: "full-day", // "full-day" | "half-day" | "overtime"
     overtimeHours: 0,
   });
-  let showStats = $state(false);
-  let statsMode = $state("month");
-  let stats = $state(null);
-  let dateRangeStart = $state(null);
-  let dateRangeEnd = $state(null);
-
   // Tasks state
   let showTasks = $state(false);
   let showAddTask = $state(false);
@@ -248,62 +242,71 @@
     }, 3000);
   }
 
+  async function checkTodayWorkday() {
+    if (!team?.id || !$userStore?.uid) {
+      hasWorkdayToday = false;
+      return false;
+    }
+
+    isCheckingWorkday = true;
+    try {
+      hasWorkdayToday = await hasWorkdayForDate(team.id, $userStore.uid);
+      if (hasWorkdayToday) {
+        workDay.type = "overtime";
+      } else if (workDay.type === "overtime") {
+        workDay.type = "full-day";
+      }
+      return hasWorkdayToday;
+    } catch (error) {
+      console.error("Error checking today's workday:", error);
+      showNotification("No se pudo comprobar la jornada de hoy", "error");
+      return false;
+    } finally {
+      isCheckingWorkday = false;
+    }
+  }
+
+  async function openWorkdayForm() {
+    workDay = {
+      type: "full-day",
+      overtimeHours: 0,
+    };
+    showWorkdayForm = true;
+    await checkTodayWorkday();
+  }
+
   async function handleRegisterWorkday() {
     if (!team?.id || !$userStore?.uid) return;
     try {
+      const alreadyHasWorkday = await checkTodayWorkday();
+      const workDayToRegister = {
+        ...workDay,
+        type: alreadyHasWorkday ? "overtime" : workDay.type,
+      };
+
+      if (alreadyHasWorkday && workDayToRegister.overtimeHours <= 0) {
+        showNotification("Hoy ya ingresaste una jornada. Añade horas extra para registrar otra entrada.", "error");
+        return;
+      }
+
       await registerWorkday(
         team.id,
         $userStore.uid,
         $userStore.name || $userStore.email,
-        workDay,
+        workDayToRegister,
       );
       showWorkdayForm = false;
-      showNotification("Jornada registrada correctamente", "success");
+      hasWorkdayToday = true;
+      showNotification(
+        workDayToRegister.type === "overtime"
+          ? "Horas extra registradas correctamente"
+          : "Jornada registrada correctamente",
+        "success",
+      );
     } catch (error) {
       showNotification("Error al registrar jornada", "error");
     }
   }
-
-  async function handleOpenStats() {
-    if (!team?.id || !$userStore?.uid) return;
-    showStats = true;
-    if (statsMode !== "calendar") {
-      try {
-        const settings = team.memberSettings?.[$userStore.uid] || {};
-        const dailyRate = Number(settings.dailyRate) || 0;
-        const extraHourRate = Number(settings.extraHourRate) || 0;
-        stats = await getTeamStats(
-          team.id,
-          $userStore.uid,
-          statsMode,
-          dailyRate,
-          extraHourRate,
-        );
-      } catch (error) {
-        console.error("Error loading stats:", error);
-        messageToast = "Error al cargar estadísticas";
-        typeToast = "error";
-        showToast = true;
-      }
-    }
-  }
-
-  $effect(() => {
-    if (showStats && team?.id && $userStore?.uid && statsMode !== "calendar") {
-      const settings = team.memberSettings?.[$userStore.uid] || {};
-      const dailyRate = Number(settings.dailyRate) || 0;
-      const extraHourRate = Number(settings.extraHourRate) || 0;
-      getTeamStats(
-        team.id,
-        $userStore.uid,
-        statsMode,
-        dailyRate,
-        extraHourRate,
-      ).then((result) => {
-        stats = result;
-      });
-    }
-  });
 
   async function handleAddMember() {
     if (!newMemberEmail || !team?.id) return;
@@ -397,13 +400,16 @@
               <span>Tareas</span>
             </button>
           {/if}
-          <button class="menu-card" onclick={() => (showWorkdayForm = true)}>
+          <button class="menu-card" onclick={openWorkdayForm}>
             <div class="menu-icon workday">
               <Clock size={24} />
             </div>
             <span>Ingresar jornada</span>
           </button>
-          <button class="menu-card" onclick={handleOpenStats}>
+          <button
+            class="menu-card"
+            onclick={() => navigateTo(`/teams/${team.id}/stats`)}
+          >
             <div class="menu-icon stats">
               <BarChart2 size={24} />
             </div>
@@ -644,15 +650,21 @@
       <div class="workday-form">
         <h3>Registrar Jornada</h3>
         <p class="form-instruction">
-          Selecciona el tipo de jornada que deseas registrar para hoy.
+          {hasWorkdayToday
+            ? "Ya ingresaste una jornada hoy. Solo puedes añadir horas extra."
+            : "Selecciona el tipo de jornada que deseas registrar para hoy."}
         </p>
 
         <div class="workday-options">
           <button
             class="workday-option {workDay.type === 'full-day'
               ? 'work-option-active'
-              : ''}"
-            onclick={() => (workDay.type = "full-day")}
+              : ''} {hasWorkdayToday ? 'work-option-disabled' : ''}"
+            onclick={() => {
+              if (!hasWorkdayToday) workDay.type = "full-day";
+            }}
+            disabled={hasWorkdayToday || isCheckingWorkday}
+            aria-disabled={hasWorkdayToday || isCheckingWorkday}
           >
             <div class="option-icon full-day">
               <Clock size={24} />
@@ -666,8 +678,12 @@
           <button
             class="workday-option {workDay.type === 'half-day'
               ? 'work-option-active'
-              : ''}"
-            onclick={() => (workDay.type = "half-day")}
+              : ''} {hasWorkdayToday ? 'work-option-disabled' : ''}"
+            onclick={() => {
+              if (!hasWorkdayToday) workDay.type = "half-day";
+            }}
+            disabled={hasWorkdayToday || isCheckingWorkday}
+            aria-disabled={hasWorkdayToday || isCheckingWorkday}
           >
             <div class="option-icon half-day">
               <Clock size={24} />
@@ -712,124 +728,17 @@
           </div>
         </div>
 
-        <button class="register-workday-btn" onclick={handleRegisterWorkday}>
+        <button
+          class="register-workday-btn"
+          onclick={handleRegisterWorkday}
+          disabled={isCheckingWorkday || (hasWorkdayToday && workDay.overtimeHours <= 0)}
+        >
           <Save size={20} />
-          <span>Registrar Jornada</span>
+          <span>{hasWorkdayToday ? "Registrar Horas Extra" : "Registrar Jornada"}</span>
         </button>
       </div>
     </SliceContainer>
 
-    <SliceContainer bind:show={showStats}>
-      <div class="stats-container">
-        <h3>Estadísticas</h3>
-
-        <div class="period-selector">
-          <button
-            class="period-btn {statsMode === 'month' ? 'active' : ''}"
-            onclick={() => {
-              statsMode = "month";
-            }}
-          >
-            Mes
-          </button>
-          <button
-            class="period-btn {statsMode === 'year' ? 'active' : ''}"
-            onclick={() => {
-              statsMode = "year";
-            }}
-          >
-            Año
-          </button>
-          <button
-            class="period-btn {statsMode === 'calendar' ? 'active' : ''}"
-            onclick={() => {
-              statsMode = "calendar";
-            }}
-          >
-            Calendario
-          </button>
-        </div>
-
-        {#if statsMode === "calendar"}
-          <div class="calendar-section">
-            <Calendar
-              bind:selectedStart={dateRangeStart}
-              bind:selectedEnd={dateRangeEnd}
-            />
-            {#if dateRangeStart && dateRangeEnd}
-              <div class="date-range-display">
-                <p class="range-text">
-                  {dateRangeStart.toLocaleDateString("es-ES")} - {dateRangeEnd.toLocaleDateString(
-                    "es-ES",
-                  )}
-                </p>
-              </div>
-            {/if}
-          </div>
-        {/if}
-
-        {#if stats}
-          <div class="stats-grid">
-            <div class="stat-card earnings">
-              <div class="stat-icon">
-                <DollarSign size={18} />
-              </div>
-              <div class="stat-content">
-                <span class="stat-label">Ingresos</span>
-                <span class="stat-value">${stats.totalEarnings.toFixed(2)}</span
-                >
-              </div>
-            </div>
-
-            <div class="stat-card workdays">
-              <div class="stat-icon">
-                <Clock size={18} />
-              </div>
-              <div class="stat-content">
-                <span class="stat-label">Jornadas</span>
-                <span class="stat-value">{stats.totalWorkDays}</span>
-                <span class="stat-detail"
-                  >{stats.totalFullDays} completas / {stats.totalHalfDays} medias</span
-                >
-              </div>
-            </div>
-
-            <div class="stat-card overtime">
-              <div class="stat-icon">
-                <BarChart2 size={18} />
-              </div>
-              <div class="stat-content">
-                <span class="stat-label">Horas Extras</span>
-                <span class="stat-value">{stats.totalOvertimeHours}h</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="chart-section">
-            <h4>Distribución de Jornadas</h4>
-            <Chart
-              data={[
-                stats.totalFullDays,
-                stats.totalHalfDays,
-                stats.totalOvertimeHours,
-              ]}
-              labels={["Completas", "Medias", "H. Extras"]}
-              color="#e3654e"
-              maxValue={Math.max(
-                stats.totalFullDays,
-                stats.totalHalfDays,
-                stats.totalOvertimeHours,
-                5,
-              )}
-            />
-          </div>
-        {:else}
-          <div class="loading-stats">
-            <p>Cargando estadísticas...</p>
-          </div>
-        {/if}
-      </div>
-    </SliceContainer>
   {:else}
     <div class="empty-state">
       <p>No se seleccionó ningún equipo.</p>
@@ -1362,6 +1271,18 @@
     box-shadow: var(--shadow-card);
   }
 
+  .workday-option:disabled,
+  .workday-option.work-option-disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+
+  .workday-option:disabled:hover {
+    border-color: var(--border-color);
+  }
+
   .workday-option:active:not(.overtime) {
     transform: scale(0.98);
   }
@@ -1496,252 +1417,21 @@
     box-shadow: var(--shadow-lg);
   }
 
+  .register-workday-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+
+  .register-workday-btn:disabled:hover {
+    background: var(--accent-color);
+    transform: none;
+    box-shadow: none;
+  }
+
   .register-workday-btn:active {
     transform: translateY(0);
   }
 
-
-  /* Statistics Styles */
-  .stats-container {
-    padding: 24px;
-    background: linear-gradient(135deg, #fcfaf6 0%, #ffffff 100%);
-    border-radius: 8px;
-  }
-
-  .stats-container h3 {
-    margin: 0 0 24px;
-    font-size: 24px;
-    font-weight: 800;
-    color: #1a1a1a;
-    text-align: center;
-    background: linear-gradient(135deg, #e3654e 0%, #d85845 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-
-  .calendar-section {
-    margin-bottom: 24px;
-    background: white;
-    padding: 16px;
-    border-radius: 16px;
-    border: 1px solid #e8e8e8;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-  }
-
-  .date-range-display {
-    margin-top: 16px;
-    padding: 14px;
-    background: linear-gradient(135deg, #fff3f0 0%, #fffbf9 100%);
-    border-radius: 12px;
-    border: 1px solid #ffe0d5;
-    text-align: center;
-  }
-
-  .range-text {
-    margin: 0;
-    font-size: 14px;
-    font-weight: 600;
-    color: #e3654e;
-  }
-
-  .period-selector {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 24px;
-    background: linear-gradient(135deg, #f5f5f5 0%, #f0f0f0 100%);
-    padding: 8px;
-    border-radius: 16px;
-    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.06);
-  }
-
-  .period-btn {
-    flex: 1;
-    padding: 12px;
-    background: transparent;
-    border: none;
-    border-radius: 12px;
-    font-size: 14px;
-    font-weight: 700;
-    color: #999;
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    position: relative;
-  }
-
-  .period-btn.active {
-    background: linear-gradient(135deg, #e3654e 0%, #d85845 100%);
-    color: white;
-    box-shadow: 0 6px 16px rgba(227, 101, 78, 0.35);
-    transform: translateY(-2px);
-  }
-
-  .period-btn:hover:not(.active) {
-    background: rgba(255, 255, 255, 0.7);
-    color: #666;
-  }
-
-  .stats-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 16px;
-    margin-bottom: 24px;
-  }
-
-  @media (max-width: 768px) {
-    .stats-grid {
-      grid-template-columns: 1fr;
-      gap: 12px;
-    }
-  }
-
-  .stat-card {
-    background: white;
-    border: 1px solid #e8e8e8;
-    padding: 20px 16px;
-    border-radius: 16px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 12px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    position: relative;
-    overflow: hidden;
-    text-align: center;
-  }
-
-  .stat-card::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: linear-gradient(90deg, #e3654e 0%, #f39c12 100%);
-    opacity: 0;
-    transition: opacity 0.3s;
-  }
-
-  .stat-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.12);
-    border-color: #e0e0e0;
-  }
-
-  .stat-card:hover::before {
-    opacity: 1;
-  }
-
-  .stat-icon {
-    width: 56px;
-    height: 56px;
-    border-radius: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: relative;
-    transition: all 0.3s;
-    flex-shrink: 0;
-  }
-
-  .stat-card:hover .stat-icon {
-    transform: scale(1.15) rotate(-5deg);
-  }
-
-  .stat-card.earnings .stat-icon {
-    background: linear-gradient(135deg, #81c784 0%, #66bb6a 100%);
-    color: white;
-    box-shadow: 0 6px 16px rgba(76, 175, 80, 0.35);
-  }
-
-  .stat-card.workdays .stat-icon {
-    background: linear-gradient(135deg, #ffb74d 0%, #ffa726 100%);
-    color: white;
-    box-shadow: 0 6px 16px rgba(255, 152, 0, 0.35);
-  }
-
-  .stat-card.overtime .stat-icon {
-    background: linear-gradient(135deg, #ba68c8 0%, #ab47bc 100%);
-    color: white;
-    box-shadow: 0 6px 16px rgba(156, 39, 176, 0.35);
-  }
-
-  .stat-content {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    width: 100%;
-  }
-
-  .stat-label {
-    font-size: 12px;
-    color: #999;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .stat-value {
-    font-size: 28px;
-    font-weight: 800;
-    color: #1a1a1a;
-    line-height: 1;
-  }
-
-  .stat-detail {
-    font-size: 12px;
-    color: #bbb;
-    font-weight: 500;
-  }
-
-  .chart-section {
-    background: white;
-    border: 1px solid #e8e8e8;
-    padding: 20px;
-    border-radius: 16px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  .chart-section:hover {
-    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
-  }
-
-  .chart-section h4 {
-    margin: 0 0 20px;
-    font-size: 16px;
-    font-weight: 700;
-    color: #1a1a1a;
-    text-align: center;
-  }
-
-  .loading-stats {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 60px 20px;
-    color: #999;
-    font-size: 15px;
-    font-weight: 500;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .loading-stats::before {
-    content: "";
-    width: 40px;
-    height: 40px;
-    border: 3px solid #f0f0f0;
-    border-top-color: #e3654e;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
 </style>

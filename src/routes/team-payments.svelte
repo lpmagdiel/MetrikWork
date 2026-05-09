@@ -294,7 +294,9 @@
                                 <div class="history-item">
                                     <div class="item-info">
                                         <span class="item-date">{work.date}</span>
-                                        <span class="item-type">{work.type === 'full-day' ? 'Día Completo' : 'Medio Día'}</span>
+                                        <span class="item-type">
+                                            {work.type === 'full-day' ? 'Día Completo' : work.type === 'half-day' ? 'Medio Día' : 'Horas Extra'}
+                                        </span>
                                     </div>
                                     <div class="item-values">
                                         {#if work.overtimeHours > 0}

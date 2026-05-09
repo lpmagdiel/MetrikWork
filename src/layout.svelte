@@ -58,6 +58,7 @@
   import Chat from "./routes/chat.svelte";
   import TeamPayments from "./routes/team-payments.svelte";
   import TeamSettings from "./routes/team-settings.svelte";
+  import TeamStats from "./routes/team-stats.svelte";
   import Pay from "./routes/pay.svelte";
   import Timer from "./routes/Timer.svelte";
   import Tour from "./routes/tour.svelte";
@@ -97,6 +98,7 @@
         else if (subpage === "chat") component = Chat;
         else if (subpage === "payments") component = TeamPayments;
         else if (subpage === "settings") component = TeamSettings;
+        else if (subpage === "stats") component = TeamStats;
         else if (subpage === "planning") component = Planning;
         return { component, teamId };
       }
