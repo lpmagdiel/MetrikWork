@@ -232,16 +232,23 @@
 <style>
   .tour-page {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
+    inset: 0;
+    width: 100%;
+    height: 100dvh;
     background: var(--bg-page);
     display: flex;
     flex-direction: column;
     z-index: 1000;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
     padding-top: var(--page-top-safe);
+  }
+
+  @supports not (height: 100dvh) {
+    .tour-page {
+      height: 100vh;
+    }
   }
 
   .tour-header {
@@ -290,7 +297,7 @@
   }
 
   .tour-content {
-    flex: 1;
+    flex: 1 0 auto;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -558,6 +565,7 @@
   }
 
   .tour-footer {
+    flex: 0 0 auto;
     padding: 24px;
     display: flex;
     justify-content: space-between;
@@ -607,6 +615,12 @@
     .mascot-img {
       width: 140px;
       height: 140px;
+    }
+  }
+
+  @media (max-height: 760px) {
+    .tour-content {
+      justify-content: flex-start;
     }
   }
 </style>
