@@ -73,7 +73,11 @@ service cloud.firestore {
 
       // --- SUBCOLECCIONES DE EQUIPO ---
       match /tasks/{taskId} {
-        allow read: if hasTeamPermission(teamId, "tasks", "view");
+        allow read: if hasTeamPermission(teamId, "tasks", "view") ||
+                    (
+                      isTeamMember(teamId) &&
+                      request.auth.uid in resource.data.assignedTo
+                    );
         allow create: if hasTeamPermission(teamId, "tasks", "create");
         allow update: if hasTeamPermission(teamId, "tasks", "edit");
         allow delete: if hasTeamPermission(teamId, "tasks", "delete");

@@ -1,34 +1,41 @@
 <script>
   import {
+    CalendarDays,
+    CheckCircle2,
     ChevronLeft,
     ChevronRight,
-    Clock,
-    CheckCircle2,
     Circle,
-    StickyNote,
+    Clock,
     Plus,
     Send,
+    StickyNote,
     Trash2,
+    Users,
   } from "lucide-svelte";
   import {
-    tasksStore,
     notesStore,
     addNote,
     deleteNote,
     userStore,
+    teamsStore,
+    getAssignedTasksFromTeams,
   } from "../data/stores.js";
   import SliceContainer from "../components/SliceContainer.svelte";
+  import LoadingSpinner from "../components/LoadingSpinner.svelte";
   import { useSwipe } from "svelte-gestures";
 
-  let currentDate = $state(new Date());
-  let selectedDate = $state(new Date());
+  let currentMonth = $state(new Date().getMonth());
+  let currentYear = $state(new Date().getFullYear());
+  let selectedDate = $state(toDateKey(new Date()));
   let showAddNote = $state(false);
   let newNoteContent = $state("");
   let isSubmittingNote = $state(false);
   let swipedNoteId = $state(null);
+  let assignedTasks = $state([]);
+  let isLoadingTasks = $state(false);
 
-  const daysOfWeek = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
-  const months = [
+  const weekDays = ["L", "M", "X", "J", "V", "S", "D"];
+  const monthNames = [
     "Enero",
     "Febrero",
     "Marzo",
@@ -42,124 +49,146 @@
     "Noviembre",
     "Diciembre",
   ];
-  const monthShort = [
-    "Ene",
-    "Feb",
-    "Mar",
-    "Abr",
-    "May",
-    "Jun",
-    "Jul",
-    "Ago",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dic",
-  ];
+  const statusConfig = {
+    pending: { label: "Pendiente", tone: "warning" },
+    "in-progress": { label: "En proceso", tone: "info" },
+    completed: { label: "Completada", tone: "success" },
+    unassigned: { label: "Sin asignar", tone: "muted" },
+  };
 
   let calendarDays = $derived.by(() => {
-    const year = currentDate.getFullYear();
-    const month = currentDate.getMonth();
+    const days = [];
+    const firstDay = new Date(currentYear, currentMonth, 1);
+    const startOffset = (firstDay.getDay() + 6) % 7;
+    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
 
-    const firstDayOfMonth = new Date(year, month, 1).getDay();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-
-    const prevMonthDays = new Date(year, month, 0).getDate();
-
-    let days = [];
-
-    // Previous month placeholders
-    for (let i = firstDayOfMonth - 1; i >= 0; i--) {
+    for (let i = 0; i < startOffset; i++) days.push(null);
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = new Date(currentYear, currentMonth, day);
+      const dateKey = toDateKey(date);
       days.push({
-        day: prevMonthDays - i,
-        month: month - 1,
-        year: year,
-        isCurrentMonth: false,
+        day,
+        dateKey,
+        tasks: tasksForDate(dateKey),
+        notes: notesForDate(dateKey),
       });
     }
-
-    // Current month days
-    for (let i = 1; i <= daysInMonth; i++) {
-      days.push({
-        day: i,
-        month: month,
-        year: year,
-        isCurrentMonth: true,
-      });
-    }
-
-    // Next month placeholders
-    const totalDays = 42; // 6 rows of 7 days
-    const remainingDays = totalDays - days.length;
-    for (let i = 1; i <= remainingDays; i++) {
-      days.push({
-        day: i,
-        month: month + 1,
-        year: year,
-        isCurrentMonth: false,
-      });
-    }
-
     return days;
   });
 
-  let tasksForSelectedDate = $derived(
-    $tasksStore.filter((task) => {
-      if (!task.dueDate) return false;
-      const taskDate = new Date(task.dueDate);
-      return (
-        taskDate.getDate() === selectedDate.getDate() &&
-        taskDate.getMonth() === selectedDate.getMonth() &&
-        taskDate.getFullYear() === selectedDate.getFullYear()
-      );
-    }),
+  let tasksForSelectedDate = $derived(tasksForDate(selectedDate));
+  let notesForSelectedDate = $derived(notesForDate(selectedDate));
+  let selectedDateLabel = $derived(formatDisplayDate(selectedDate));
+  let pendingTasksCount = $derived(
+    assignedTasks.filter((task) => task.status !== "completed").length,
   );
 
-  let notesForSelectedDate = $derived(
-    $notesStore.filter((note) => {
-      if (!note.date) return false;
-      const noteDate = new Date(note.date);
-      return (
-        noteDate.getDate() === selectedDate.getDate() &&
-        noteDate.getMonth() === selectedDate.getMonth() &&
-        noteDate.getFullYear() === selectedDate.getFullYear()
-      );
-    }),
-  );
+  $effect(() => {
+    const uid = $userStore?.uid;
+    const teams = $teamsStore;
+    if (uid) {
+      loadAssignedTasks(teams, uid);
+    } else {
+      assignedTasks = [];
+    }
+  });
 
-  function hasTasks(dateObj) {
-    return $tasksStore.some((task) => {
-      if (!task.dueDate) return false;
-      const taskDate = new Date(task.dueDate);
-      return (
-        taskDate.getDate() === dateObj.day &&
-        taskDate.getMonth() === dateObj.month &&
-        taskDate.getFullYear() === dateObj.year
-      );
+  async function loadAssignedTasks(teams = $teamsStore, uid = $userStore?.uid) {
+    if (!uid) return;
+    isLoadingTasks = true;
+    try {
+      assignedTasks = await getAssignedTasksFromTeams(teams, uid);
+    } catch (error) {
+      console.error("Error loading assigned calendar tasks:", error);
+    } finally {
+      isLoadingTasks = false;
+    }
+  }
+
+  function tasksForDate(dateKey) {
+    return assignedTasks.filter((task) => getTaskDateKey(task) === dateKey);
+  }
+
+  function notesForDate(dateKey) {
+    return $notesStore.filter((note) => getNoteDateKey(note) === dateKey);
+  }
+
+  function getTaskDateKey(task) {
+    if (!task?.dueDate) return "";
+    return task.dueDate.slice(0, 10);
+  }
+
+  function getNoteDateKey(note) {
+    if (!note?.date) return "";
+    const date = new Date(note.date);
+    if (Number.isNaN(date.getTime())) return "";
+    return toDateKey(date);
+  }
+
+  function toDateKey(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  function formatDisplayDate(dateKey) {
+    if (!dateKey) return "";
+    const [year, month, day] = dateKey.split("-").map(Number);
+    return new Date(year, month - 1, day).toLocaleDateString("es-ES", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
     });
   }
 
-  function hasNotes(dateObj) {
-    return $notesStore.some((note) => {
-      if (!note.date) return false;
-      const noteDate = new Date(note.date);
-      return (
-        noteDate.getDate() === dateObj.day &&
-        noteDate.getMonth() === dateObj.month &&
-        noteDate.getFullYear() === dateObj.year
-      );
-    });
+  function formatTaskDateTime(task) {
+    if (!task?.dueDate) return "Todo el día";
+    const date = new Date(task.dueDate);
+    if (Number.isNaN(date.getTime())) return "Todo el día";
+    const hasTime = !task.dueDate.endsWith("T00:00:00.000Z");
+    return hasTime
+      ? date.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })
+      : "Todo el día";
+  }
+
+  function prevMonth() {
+    if (currentMonth === 0) {
+      currentMonth = 11;
+      currentYear -= 1;
+    } else {
+      currentMonth -= 1;
+    }
+  }
+
+  function nextMonth() {
+    if (currentMonth === 11) {
+      currentMonth = 0;
+      currentYear += 1;
+    } else {
+      currentMonth += 1;
+    }
+  }
+
+  function selectDate(day) {
+    if (!day) return;
+    selectedDate = day.dateKey;
+  }
+
+  function isToday(day) {
+    return day?.dateKey === toDateKey(new Date());
   }
 
   async function handleAddNote() {
-    if (newNoteContent.trim() === "") return;
+    if (!newNoteContent.trim()) return;
     if (!$userStore?.uid) {
       alert("No se pudo identificar el usuario para guardar la nota");
       return;
     }
+    const [year, month, day] = selectedDate.split("-").map(Number);
     isSubmittingNote = true;
     try {
-      await addNote($userStore.uid, newNoteContent, selectedDate);
+      await addNote($userStore.uid, newNoteContent.trim(), new Date(year, month - 1, day));
       newNoteContent = "";
       showAddNote = false;
     } catch (error) {
@@ -172,8 +201,8 @@
   function handleNoteSwipe(event, noteId) {
     if (event.detail.direction === "left") {
       swipedNoteId = noteId;
-    } else if (event.detail.direction === "right") {
-      if (swipedNoteId === noteId) swipedNoteId = null;
+    } else if (event.detail.direction === "right" && swipedNoteId === noteId) {
+      swipedNoteId = null;
     }
   }
 
@@ -186,172 +215,192 @@
       alert("Error al eliminar la nota");
     }
   }
-
-  function nextMonth() {
-    currentDate = new Date(
-      currentDate.getFullYear(),
-      currentDate.getMonth() + 1,
-      1,
-    );
-  }
-
-  function prevMonth() {
-    currentDate = new Date(
-      currentDate.getFullYear(),
-      currentDate.getMonth() - 1,
-      1,
-    );
-  }
-
-  function selectDate(dateObj) {
-    selectedDate = new Date(dateObj.year, dateObj.month, dateObj.day);
-  }
-
-  function isToday(dateObj) {
-    const today = new Date();
-    return (
-      dateObj.day === today.getDate() &&
-      dateObj.month === today.getMonth() &&
-      dateObj.year === today.getFullYear()
-    );
-  }
-
-  function isSelected(dateObj) {
-    return (
-      dateObj.day === selectedDate.getDate() &&
-      dateObj.month === selectedDate.getMonth() &&
-      dateObj.year === selectedDate.getFullYear()
-    );
-  }
 </script>
 
 <div class="calendar-page">
   <header>
-    <h1>Agenda</h1>
-    <div class="month-nav">
-      <button onclick={prevMonth} class="nav-btn"
-        ><ChevronLeft size={20} /></button
-      >
-      <h2>{months[currentDate.getMonth()]} {currentDate.getFullYear()}</h2>
-      <button onclick={nextMonth} class="nav-btn"
-        ><ChevronRight size={20} /></button
-      >
+    <div class="header-title">
+      <h1>Agenda</h1>
+      <span>{pendingTasksCount} tareas pendientes</span>
     </div>
+    <button class="refresh-btn" onclick={loadAssignedTasks} disabled={isLoadingTasks}>
+      <CalendarDays size={18} />
+    </button>
   </header>
 
-  <div class="calendar-card">
-    <div class="weekdays">
-      {#each daysOfWeek as day}
-        <div class="weekday">{day}</div>
-      {/each}
-    </div>
-    <div class="days-grid">
-      {#each calendarDays as dateObj}
-        <button
-          class="day-btn"
-          class:current-month={dateObj.isCurrentMonth}
-          class:today={isToday(dateObj)}
-          class:selected={isSelected(dateObj)}
-          onclick={() => selectDate(dateObj)}
-        >
-          <span class="day-number">{dateObj.day}</span>
-          <div class="dots-container">
-            {#if hasTasks(dateObj)}
-              <div class="task-dot"></div>
+  <main class="calendar-content">
+    <section class="calendar-panel">
+      <div class="section-heading">
+        <div>
+          <p>Calendario personal</p>
+          <h2>{monthNames[currentMonth]} {currentYear}</h2>
+        </div>
+        <div class="calendar-actions">
+          <button class="icon-btn" onclick={prevMonth} aria-label="Mes anterior">
+            <ChevronLeft size={20} />
+          </button>
+          <button class="icon-btn" onclick={nextMonth} aria-label="Mes siguiente">
+            <ChevronRight size={20} />
+          </button>
+        </div>
+      </div>
+
+      <div class="weekdays">
+        {#each weekDays as day}
+          <span>{day}</span>
+        {/each}
+      </div>
+
+      <div class="calendar-grid">
+        {#each calendarDays as day}
+          <button
+            class="calendar-day"
+            class:empty={!day}
+            class:selected={day?.dateKey === selectedDate}
+            class:today={isToday(day)}
+            class:marked={day && (day.tasks.length > 0 || day.notes.length > 0)}
+            disabled={!day}
+            onclick={() => selectDate(day)}
+          >
+            {#if day}
+              <span class="day-number">{day.day}</span>
+              {#if day.tasks.length > 0 || day.notes.length > 0}
+                <span class="assignment-count">{day.tasks.length + day.notes.length}</span>
+                <span class="assignment-dots">
+                  {#if day.tasks.length > 0}<i class="task-dot"></i>{/if}
+                  {#if day.notes.length > 0}<i class="note-dot"></i>{/if}
+                </span>
+              {/if}
             {/if}
-            {#if hasNotes(dateObj)}
-              <div class="note-dot"></div>
-            {/if}
-          </div>
+          </button>
+        {/each}
+      </div>
+    </section>
+
+    <section class="day-panel">
+      <div class="section-heading compact">
+        <div>
+          <p>Día seleccionado</p>
+          <h2>{selectedDateLabel}</h2>
+        </div>
+        <button class="add-note-btn" onclick={() => (showAddNote = true)}>
+          <Plus size={18} />
+          <span>Nota</span>
         </button>
-      {/each}
-    </div>
-  </div>
+      </div>
 
-  <section class="tasks-section">
-    <div class="section-header">
-      <h3>Día {selectedDate.getDate()} de {monthShort[selectedDate.getMonth()]}</h3>
-      <button class="add-note-btn" onclick={() => (showAddNote = true)}>
-        <Plus size={16} />
-        <span>Agregar Nota</span>
-      </button>
-    </div>
+      <div class="daily-summary">
+        <div>
+          <strong>{tasksForSelectedDate.length}</strong>
+          <span>Tareas</span>
+        </div>
+        <div>
+          <strong>{notesForSelectedDate.length}</strong>
+          <span>Notas</span>
+        </div>
+      </div>
+    </section>
 
-    <div class="daily-content">
-      <div class="content-group">
-        <h4>Tareas</h4>
+    <section class="records-panel">
+      <div class="section-heading">
+        <div>
+          <p>Trabajo asignado</p>
+          <h2>Tareas del día</h2>
+        </div>
+        {#if isLoadingTasks}
+          <LoadingSpinner show={true} />
+        {/if}
+      </div>
+
+      {#if tasksForSelectedDate.length > 0}
         <div class="tasks-list">
-          {#if tasksForSelectedDate.length > 0}
-            {#each tasksForSelectedDate as task}
-              <div class="task-item">
-                <div class="task-status">
-                  {#if task.completed}
-                    <CheckCircle2 size={20} color="#4CAF50" />
-                  {:else}
-                    <Circle size={20} color="#878787" />
-                  {/if}
+          {#each tasksForSelectedDate as task (task.teamId + task.id)}
+            <article class="task-item">
+              <div class="task-status">
+                {#if task.status === "completed"}
+                  <CheckCircle2 size={22} />
+                {:else}
+                  <Circle size={22} />
+                {/if}
+              </div>
+              <div class="task-info">
+                <div class="task-header">
+                  <h3>{task.title}</h3>
+                  <span class="status-pill {statusConfig[task.status]?.tone || 'muted'}">
+                    {statusConfig[task.status]?.label || "Pendiente"}
+                  </span>
                 </div>
-                <div class="task-info">
-                  <h5>{task.title}</h5>
-                  <div class="task-meta">
-                    <Clock size={12} />
-                    <span>{task.time || "Todo el día"}</span>
-                  </div>
+                {#if task.description}
+                  <p>{task.description}</p>
+                {/if}
+                <div class="task-meta">
+                  <span><Users size={13} /> {task.teamName}</span>
+                  <span><Clock size={13} /> {formatTaskDateTime(task)}</span>
                 </div>
               </div>
-            {/each}
-          {:else}
-            <p class="empty-msg">No hay tareas.</p>
-          {/if}
+            </article>
+          {/each}
         </div>
+      {:else}
+        <div class="empty-state">
+          <CalendarDays size={28} />
+          <p>No tienes tareas asignadas para este día.</p>
+        </div>
+      {/if}
+    </section>
+
+    <section class="records-panel">
+      <div class="section-heading">
+        <div>
+          <p>Recordatorios</p>
+          <h2>Notas personales</h2>
+        </div>
+        <StickyNote size={20} class="muted-icon" />
       </div>
 
-      <div class="content-group">
-        <h4>Notas</h4>
+      {#if notesForSelectedDate.length > 0}
         <div class="notes-list">
-          {#if notesForSelectedDate.length > 0}
-            {#each notesForSelectedDate as note (note.id)}
-              <div
-                class="note-swipe-wrapper"
-                {...useSwipe((e) => handleNoteSwipe(e, note.id))}
+          {#each notesForSelectedDate as note (note.id)}
+            <div
+              class="note-swipe-wrapper"
+              {...useSwipe((e) => handleNoteSwipe(e, note.id))}
+            >
+              <button
+                class="delete-action-bg"
+                onclick={() => confirmDeleteNote(note.id)}
+                aria-label="Eliminar nota"
               >
-                <button
-                  class="delete-action-bg"
-                  onclick={() => confirmDeleteNote(note.id)}
-                  aria-label="Eliminar nota"
-                >
-                  <Trash2 size={24} color="white" />
-                </button>
-                <div class="note-item" class:swiped={swipedNoteId === note.id}>
-                  <StickyNote size={18} color="#FF9800" />
-                  <p>{note.content}</p>
-                </div>
-              </div>
-            {/each}
-          {:else}
-            <p class="empty-msg">No hay notas.</p>
-          {/if}
+                <Trash2 size={22} color="white" />
+              </button>
+              <article class="note-item" class:swiped={swipedNoteId === note.id}>
+                <StickyNote size={18} />
+                <p>{note.content}</p>
+              </article>
+            </div>
+          {/each}
         </div>
-      </div>
-    </div>
-  </section>
+      {:else}
+        <div class="empty-state">
+          <StickyNote size={28} />
+          <p>No hay notas para este día.</p>
+        </div>
+      {/if}
+    </section>
+  </main>
 
   <SliceContainer bind:show={showAddNote}>
     <div class="add-note-form">
-      <h2>Nueva Nota</h2>
-      <p>
-        Agrega un recordatorio personal para el {selectedDate.getDate()} de {months[
-          selectedDate.getMonth()
-        ]}.
-      </p>
+      <h2>Nueva nota</h2>
+      <p>Agrega un recordatorio personal para el {selectedDateLabel}.</p>
 
-      <div class="note-input-container">
+      <label>
+        <span>Nota</span>
         <textarea
           placeholder="Escribe tu nota aquí..."
           bind:value={newNoteContent}
           rows="4"
         ></textarea>
-      </div>
+      </label>
 
       <button
         class="submit-note-btn"
@@ -362,7 +411,7 @@
           <span>Guardando...</span>
         {:else}
           <Send size={20} />
-          <span>Guardar Nota</span>
+          <span>Guardar nota</span>
         {/if}
       </button>
     </div>
@@ -371,215 +420,342 @@
 
 <style>
   .calendar-page {
-    padding: 22px 18px var(--bottom-nav-clearance);
-    padding-top: var(--page-top-safe);
-    height: 100%;
-    box-sizing: border-box;
     display: flex;
     flex-direction: column;
-    background:
-      radial-gradient(circle at 18% 2%, rgba(255, 223, 118, 0.18), transparent 34%),
-      var(--bg-page);
-    overflow-y: auto;
+    height: 100%;
+    min-height: 0;
+    background: var(--bg-page);
+    overflow: hidden;
+    padding-top: var(--page-top-safe);
   }
 
   header {
-    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 24px 20px 16px;
+    flex-shrink: 0;
+  }
+
+  .header-title {
+    flex: 1;
+    min-width: 0;
   }
 
   h1 {
-    margin: 0 0 16px;
-    font-size: 32px;
-    font-weight: 700;
-  }
-
-  .month-nav {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    background: var(--bg-card-raised);
-    padding: 9px 12px;
-    border: 1px solid var(--border-color);
-    border-radius: 22px;
-    box-shadow: var(--shadow-card);
-    backdrop-filter: blur(14px);
-  }
-
-  .month-nav h2 {
     margin: 0;
-    font-size: 18px;
-    font-weight: 600;
+    font-size: 22px;
+    font-weight: 800;
   }
 
-  .nav-btn {
-    width: 42px;
-    height: 42px;
-    justify-content: center;
-    background: var(--bg-accent-subtle);
-    border: none;
-    color: var(--bg-card-raised);
-    border-radius: 15px;
-    padding: 0;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-  }
-
-  .calendar-card {
-    background: var(--bg-card-raised);
-    border: 1px solid var(--border-color);
-    border-radius: 28px;
-    padding: 18px;
-    box-shadow: var(--shadow-card);
-    backdrop-filter: blur(14px);
-    margin-bottom: 26px;
-  }
-
-  .weekdays {
-    display: grid;
-    grid-template-columns: repeat(7, 1fr);
-    margin-bottom: 12px;
-  }
-
-  .weekday {
-    text-align: center;
-    font-size: 13px;
-    font-weight: 600;
+  .header-title span,
+  .section-heading p,
+  label span {
     color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 800;
   }
 
-  .days-grid {
-    display: grid;
-    grid-template-columns: repeat(7, 1fr);
-    gap: 8px;
-  }
-
-  .day-btn {
-    aspect-ratio: 1;
-    background: none;
+  .refresh-btn,
+  .icon-btn {
     border: none;
-    border-radius: 15px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    position: relative;
-    color: var(--text-muted);
-    font-size: 15px;
-    font-weight: 500;
-    transition: all 0.2s;
-  }
-
-  .day-btn.current-month {
-    color: var(--text-primary);
-  }
-
-  .day-btn.today {
-    color: var(--accent-color);
-    font-weight: 700;
-  }
-
-  .day-btn.selected {
-    background: var(--accent-color);
-    color: #24110e;
-    box-shadow: 0 10px 20px var(--shadow-button);
-  }
-
-  .dots-container {
-    display: flex;
-    gap: 2px;
-    position: absolute;
-    bottom: 6px;
-  }
-
-  .task-dot {
-    width: 4px;
-    height: 4px;
-    background: currentColor;
-    border-radius: 50%;
-  }
-
-  .note-dot {
-    width: 4px;
-    height: 4px;
-    background: var(--warning-color);
-    border-radius: 50%;
-  }
-
-
-  .section-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 24px;
-  }
-
-  .section-header h3 {
-    margin: 0;
-    font-size: 18px;
-    font-weight: 600;
-  }
-
-  .add-note-btn {
-    background: var(--bg-warning-subtle);
-    color: var(--warning-color);
-    border: none;
-    padding: 8px 12px;
+    width: 44px;
+    height: 44px;
     border-radius: 12px;
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    font-weight: 600;
+    justify-content: center;
     cursor: pointer;
+    color: var(--text-primary);
+    background: var(--bg-card);
+    box-shadow: var(--shadow-card);
   }
 
-  .daily-content {
+  .refresh-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .calendar-content {
+    flex: 1;
+    min-height: 0;
+    padding: 8px 20px var(--bottom-nav-clearance);
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: grid;
+    gap: 16px;
+    align-content: start;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .calendar-panel,
+  .day-panel,
+  .records-panel {
+    background: var(--bg-card);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+    padding: 16px;
+  }
+
+  .section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .section-heading.compact {
+    margin-bottom: 12px;
+  }
+
+  .section-heading h2 {
+    font-size: 18px;
+    font-weight: 800;
+    margin-top: 3px;
+  }
+
+  .calendar-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .icon-btn {
+    width: 36px;
+    height: 36px;
+    background: var(--bg-input);
+    box-shadow: none;
+  }
+
+  .weekdays,
+  .calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .weekdays {
+    margin-bottom: 8px;
+  }
+
+  .weekdays span {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 800;
+  }
+
+  .calendar-day {
+    min-width: 0;
+    aspect-ratio: 1;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    cursor: pointer;
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    position: relative;
   }
 
-  .content-group h4 {
-    margin: 0 0 12px;
-    font-size: 14px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+  .calendar-day.empty {
+    background: transparent;
+    cursor: default;
+  }
+
+  .calendar-day.today {
+    border-color: var(--text-primary);
+  }
+
+  .calendar-day.marked {
+    background: var(--bg-success-subtle);
+    border-color: var(--accent-color);
+  }
+
+  .calendar-day.selected {
+    background: var(--text-primary);
+    color: var(--bg-card);
+  }
+
+  .day-number {
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .assignment-count {
+    font-size: 10px;
+    font-weight: 800;
+  }
+
+  .assignment-dots {
+    display: flex;
+    gap: 3px;
+    min-height: 5px;
+  }
+
+  .assignment-dots i {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .assignment-dots .note-dot {
+    background: var(--warning-color);
+  }
+
+  .daily-summary {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .daily-summary div {
+    background: var(--bg-input);
+    border-radius: 12px;
+    padding: 12px;
+    display: grid;
+    gap: 4px;
+  }
+
+  .daily-summary strong {
+    font-size: 22px;
+  }
+
+  .daily-summary span,
+  .task-meta,
+  .task-info p {
     color: var(--text-secondary);
+    font-size: 12px;
+  }
+
+  .add-note-btn,
+  .submit-note-btn {
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    font-weight: 800;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .add-note-btn {
+    background: var(--text-primary);
+    color: var(--bg-card);
+    padding: 10px 12px;
   }
 
   .tasks-list,
   .notes-list {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+    display: grid;
+    gap: 10px;
   }
 
   .task-item,
   .note-item {
-    background: var(--bg-card-raised);
     border: 1px solid var(--border-color);
-    padding: 16px;
-    border-radius: 20px;
+    border-radius: 12px;
+    padding: 12px;
     display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    background: var(--bg-card);
+  }
+
+  .task-status {
+    color: var(--success-color);
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .task-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .task-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+
+  .task-header h3 {
+    font-size: 14px;
+    margin: 0;
+  }
+
+  .task-info p {
+    margin-bottom: 8px;
+  }
+
+  .task-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .task-meta span {
+    display: inline-flex;
     align-items: center;
-    gap: 16px;
-    box-shadow: var(--shadow-card);
-    backdrop-filter: blur(14px);
-    position: relative;
-    z-index: 2;
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    gap: 4px;
+  }
+
+  .status-pill {
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .status-pill.warning {
+    background: var(--bg-warning-subtle);
+    color: var(--warning-color);
+  }
+
+  .status-pill.info {
+    background: var(--bg-info-subtle);
+    color: var(--info-color);
+  }
+
+  .status-pill.success {
+    background: var(--bg-success-subtle);
+    color: var(--success-color);
+  }
+
+  .status-pill.muted {
+    background: var(--bg-input);
+    color: var(--text-secondary);
   }
 
   .note-swipe-wrapper {
     position: relative;
     overflow: hidden;
-    border-radius: 16px;
+    border-radius: 12px;
+  }
+
+  .note-item {
+    color: var(--warning-color);
+    position: relative;
+    z-index: 2;
+    transition: transform 0.25s ease;
   }
 
   .note-item.swiped {
     transform: translateX(-70px);
+  }
+
+  .note-item p {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 14px;
   }
 
   .delete-action-bg {
@@ -588,97 +764,95 @@
     top: 0;
     bottom: 0;
     width: 70px;
-    background: var(--bg-danger-subtle);
+    background: var(--danger-color);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 1;
-    border-radius: 0 16px 16px 0;
     border: none;
     cursor: pointer;
     padding: 0;
   }
 
-  .note-item p {
-    margin: 0;
-    font-size: 15px;
-    color: var(--text-primary);
-  }
-
-  .task-info h5 {
-    margin: 0 0 4px;
-    font-size: 15px;
-    font-weight: 600;
-  }
-
-  .task-meta {
+  .empty-state {
+    min-height: 112px;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 4px;
-    font-size: 12px;
+    justify-content: center;
+    gap: 12px;
     color: var(--text-secondary);
+    text-align: center;
+    border: 1px dashed var(--border-color);
+    border-radius: 12px;
+    padding: 18px;
   }
 
-  .empty-msg {
-    margin: 0;
-    font-size: 14px;
-    color: var(--text-muted);
-    font-style: italic;
+  .muted-icon {
+    color: var(--text-secondary);
   }
 
   .add-note-form {
-    padding: 20px;
+    display: grid;
+    gap: 14px;
   }
 
   .add-note-form h2 {
-    margin: 0 0 8px;
-    font-size: 22px;
+    font-size: 20px;
   }
 
-  .add-note-form p {
+  .add-note-form > p {
     color: var(--text-secondary);
     font-size: 14px;
-    margin-bottom: 24px;
+    margin-top: -8px;
   }
 
-  .note-input-container {
-    background: var(--bg-input);
-    padding: 16px;
-    border-radius: 16px;
-    margin-bottom: 24px;
+  label {
+    display: grid;
+    gap: 7px;
   }
 
   textarea {
     width: 100%;
-    background: transparent;
-    border: none;
-    outline: none;
-    font-size: 16px;
-    font-family: inherit;
-    resize: none;
+    border: 1px solid var(--border-color);
+    background: var(--bg-input);
     color: var(--text-primary);
+    border-radius: 12px;
+    padding: 12px;
+    font-size: 14px;
+    resize: vertical;
   }
 
   .submit-note-btn {
-    width: 100%;
-    padding: 16px;
-    background:
-      linear-gradient(135deg, #ffdf76, var(--accent-color)),
-      var(--accent-color);
-    color: #24110e;
-    border: none;
-    border-radius: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    font-size: 16px;
-    font-weight: 600;
-    cursor: pointer;
+    background: var(--text-primary);
+    color: var(--bg-card);
+    min-height: 48px;
   }
 
   .submit-note-btn:disabled {
-    opacity: 0.6;
+    opacity: 0.55;
     cursor: not-allowed;
+  }
+
+  @media (min-width: 920px) {
+    .calendar-content {
+      grid-template-columns: minmax(0, 1.1fr) minmax(340px, 0.9fr);
+      align-items: start;
+    }
+
+    .records-panel {
+      grid-column: 1 / -1;
+    }
+  }
+
+  @media (max-width: 640px) {
+    header,
+    .calendar-content {
+      padding-inline: 16px;
+    }
+
+    .task-header {
+      display: grid;
+    }
   }
 </style>

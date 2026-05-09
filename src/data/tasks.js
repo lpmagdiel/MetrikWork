@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store';
 import { db } from './firebase.js';
-import { onSnapshot, collection, addDoc, query, where, deleteDoc, updateDoc, doc, getDoc } from 'firebase/firestore';
+import { onSnapshot, collection, addDoc, query, where, deleteDoc, updateDoc, doc, getDoc, getDocs } from 'firebase/firestore';
 import { createNotification } from './notifications.js';
 
 export const tasksStore = writable([]);
@@ -45,6 +45,29 @@ export function subscribeToTeamTasks(teamId) {
     }, (error) => {
         console.error("Error in team tasks listener:", error);
     });
+}
+
+export async function getAssignedTasksFromTeams(teams = [], uid) {
+    if (!uid || !Array.isArray(teams) || teams.length === 0) return [];
+    const taskGroups = await Promise.all(
+        teams.map(async (team) => {
+            const tasksQuery = query(
+                collection(db, 'teams', team.id, 'tasks'),
+                where('assignedTo', 'array-contains', uid)
+            );
+            const snapshot = await getDocs(tasksQuery);
+            const teamName = team.name || team.team || 'Equipo';
+            return snapshot.docs.map((taskDoc) => ({
+                id: taskDoc.id,
+                teamId: team.id,
+                teamName,
+                ...taskDoc.data()
+            }));
+        })
+    );
+    return taskGroups
+        .flat()
+        .sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''));
 }
 
 export async function addTeamTask(teamId, taskData, user, teamName = 'el equipo') {
