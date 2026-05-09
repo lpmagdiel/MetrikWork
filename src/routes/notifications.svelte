@@ -1,11 +1,15 @@
 <script>
   import {
     notificationsStore,
+    pushNotificationState,
+    requestPushNotifications,
+    userStore,
     markNotificationAsRead,
     deleteNotification,
     deleteAllNotifications,
   } from "../data/stores.js";
-  import { ChevronLeft, Bell, CheckCheck, Trash2 } from "lucide-svelte";
+  import { onMount } from "svelte";
+  import { ChevronLeft, Bell, BellRing, CheckCheck, Trash2 } from "lucide-svelte";
   import { navigateTo } from "../router.js";
   import { fly } from "svelte/transition";
   import Toast from "../components/Toast.svelte";
@@ -17,7 +21,10 @@
   let showConfirmToast = $state(false);
   let messageToast = $state("");
   let typeToast = $state("");
+  let canUsePush = $state(false);
+  let pushButtonLoading = $state(false);
   let unreadCount = $derived(notifications.filter((n) => !n.opened).length);
+  let pushState = $derived($pushNotificationState);
 
   // --- Swipe logic (native touch/pointer) ---
   const SWIPE_THRESHOLD = 60; // px mínimos para activar el swipe
@@ -108,6 +115,44 @@
     }
   }
 
+  onMount(() => {
+    canUsePush = "Notification" in window && "serviceWorker" in navigator;
+  });
+
+  function getPushStatusText() {
+    if (!canUsePush || pushState.status === "unsupported") return "No disponible";
+    if (pushState.permission === "denied") return "Bloqueadas";
+    if (pushState.status === "enabled") return "Activas";
+    if (pushState.status === "local-enabled") return "Activas en este dispositivo";
+    if (pushState.status === "checking") return "Comprobando";
+    if (pushState.status === "error") return "Revisar configuración";
+    return "Pendientes";
+  }
+
+  async function handleEnablePush() {
+    if (!$userStore?.uid || pushButtonLoading) return;
+    pushButtonLoading = true;
+
+    try {
+      const result = await requestPushNotifications($userStore.uid);
+      if (result.ok) {
+        messageToast = result.token
+          ? "Notificaciones push activadas"
+          : "Notificaciones del dispositivo activadas";
+        typeToast = "success";
+      } else if (result.reason === "denied") {
+        messageToast = "Permiso bloqueado en el navegador";
+        typeToast = "error";
+      } else {
+        messageToast = "No se pudieron activar las notificaciones";
+        typeToast = "error";
+      }
+      showToast = true;
+    } finally {
+      pushButtonLoading = false;
+    }
+  }
+
   function goBack() {
     navigateTo("/");
   }
@@ -152,6 +197,32 @@
     {/if}
   </header>
 
+  {#if canUsePush}
+    <section class="push-card">
+      <div class="push-icon">
+        <BellRing size={22} />
+      </div>
+      <div class="push-content">
+        <span class="push-label">Dispositivo</span>
+        <strong>{getPushStatusText()}</strong>
+        {#if pushState.error}
+          <p>{pushState.error}</p>
+        {/if}
+      </div>
+      {#if pushState.permission === "granted"}
+        <span class="push-pill">Activas</span>
+      {:else}
+        <button
+          class="push-action"
+          onclick={handleEnablePush}
+          disabled={pushButtonLoading || pushState.permission === "denied"}
+        >
+          {pushButtonLoading ? "..." : pushState.permission === "denied" ? "Bloqueadas" : "Activar"}
+        </button>
+      {/if}
+    </section>
+  {/if}
+
   {#if notifications.length > 0}
     <section class="summary-card">
       <div class="summary-icon">
@@ -170,6 +241,7 @@
       {#each notifications as notification (notification.id)}
         <div
           class="notification-wrapper"
+          role="listitem"
           transition:fly={{ x: -200, duration: 300 }}
           onpointerdown={(e) => onPointerDown(e, notification.id)}
           onpointerup={(e) => onPointerUp(e, notification.id)}
@@ -289,6 +361,91 @@
     box-shadow: var(--shadow-card);
     cursor: pointer;
     flex-shrink: 0;
+  }
+
+  .push-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    padding: 14px;
+    margin-bottom: 14px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .push-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-accent-subtle);
+    color: var(--accent-strong);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .push-content {
+    min-width: 0;
+  }
+
+  .push-label {
+    display: block;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .push-content strong {
+    display: block;
+    margin-top: 3px;
+    color: var(--text-primary);
+    font-size: 15px;
+    line-height: 1.25;
+  }
+
+  .push-content p {
+    margin: 4px 0 0;
+    color: var(--danger-color);
+    font-size: 12px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  .push-action,
+  .push-pill {
+    border: none;
+    border-radius: var(--radius-sm);
+    min-width: 78px;
+    height: 38px;
+    padding: 0 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .push-action {
+    background: var(--accent-color);
+    color: var(--accent-ink);
+    cursor: pointer;
+  }
+
+  .push-action:disabled {
+    background: var(--bg-input);
+    color: var(--text-muted);
+    cursor: not-allowed;
+  }
+
+  .push-pill {
+    background: var(--bg-accent-subtle);
+    color: var(--success-color);
   }
 
   .summary-card {
@@ -551,6 +708,16 @@
     }
 
     .summary-badge {
+      grid-column: 1 / -1;
+      justify-self: start;
+    }
+
+    .push-card {
+      grid-template-columns: auto 1fr;
+    }
+
+    .push-action,
+    .push-pill {
       grid-column: 1 / -1;
       justify-self: start;
     }

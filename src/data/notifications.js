@@ -1,13 +1,16 @@
 import { writable, get } from 'svelte/store';
 import { db } from './firebase.js';
 import { onSnapshot, collection, query, where, deleteDoc, doc, updateDoc, addDoc } from 'firebase/firestore';
+import { showDeviceNotification } from './pushNotifications.js';
 
 export const notificationsStore = writable([]);
 let notificationsUnsubscribe;
+let hasLoadedInitialSnapshot = false;
 
 export function subscribeToNotifications(uid) {
     if (notificationsUnsubscribe) notificationsUnsubscribe();
     notificationsStore.set([]);
+    hasLoadedInitialSnapshot = false;
     if (!uid) return;
     const notificationsQuery = query(collection(db, 'notifications'), where('notificationFor', '==', uid));
     notificationsUnsubscribe = onSnapshot(notificationsQuery, (snapshot) => {
@@ -15,6 +18,22 @@ export function subscribeToNotifications(uid) {
         snapshot.forEach((doc) => {
             notifications.push({ id: doc.id, ...doc.data() });
         });
+        if (hasLoadedInitialSnapshot) {
+            snapshot.docChanges()
+                .filter((change) => change.type === 'added')
+                .forEach((change) => {
+                    const notification = { id: change.doc.id, ...change.doc.data() };
+                    if (!notification.opened) {
+                        showDeviceNotification({
+                            id: notification.id,
+                            title: notification.title,
+                            message: notification.message,
+                            url: '/notifications',
+                        });
+                    }
+                });
+        }
+        hasLoadedInitialSnapshot = true;
         // @ts-ignore
         notifications.sort((a, b) => new Date(b.date) - new Date(a.date));
         notificationsStore.set(notifications);
@@ -25,15 +44,31 @@ export function subscribeToNotifications(uid) {
 
 export async function createNotification(uid, title, message) {
     try {
-        await addDoc(collection(db, 'notifications'), {
+        const docRef = await addDoc(collection(db, 'notifications'), {
             title,
             message,
             date: new Date().toISOString(),
             notificationFor: uid,
             opened: false
         });
+        sendPushNotification(docRef.id).catch((error) => {
+            console.warn("Notification was saved, but push delivery failed:", error);
+        });
     } catch (error) {
         console.error("Error creating notification:", error);
+    }
+}
+
+async function sendPushNotification(notificationId) {
+    if (typeof fetch === 'undefined') return;
+    const response = await fetch('/api/send-push-notification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notificationId }),
+    });
+    if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(errorBody || `Push request failed with ${response.status}`);
     }
 }
 
