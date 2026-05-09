@@ -37,6 +37,21 @@ export async function registerWorkday(teamId, userId, userName, workDay) {
             createdAt: new Date().toISOString(),
             paid: false
         };
+        const optionalFields = [
+            'taskTitle',
+            'note',
+            'startedAt',
+            'endedAt',
+            'durationSeconds',
+            'durationHours',
+            'variableHours',
+            'timerMode'
+        ];
+        optionalFields.forEach((field) => {
+            if (workDay[field] !== undefined && workDay[field] !== null) {
+                newWork[field] = workDay[field];
+            }
+        });
         await addDoc(collection(db, 'works'), newWork);
         try {
             const existingStats = JSON.parse(localStorage.getItem('userStats')) || { workDays: [] };
