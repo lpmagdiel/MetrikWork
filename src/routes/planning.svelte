@@ -21,6 +21,7 @@
     getUserProfile,
     getTeamWorks,
     assignWorkdayToMember,
+    createNotification,
   } from "../data/stores.js";
 
   let messageToast = $state("");
@@ -232,6 +233,11 @@
         assignmentForm,
         $userStore?.uid || null,
       );
+      await createNotification(
+        assignmentForm.userId,
+        "Nueva jornada asignada",
+        buildAssignmentNotificationMessage(),
+      );
       await loadWorks();
       openAddEvent = false;
       selectedCalendarDate = assignmentForm.date;
@@ -248,6 +254,15 @@
   function clearFilters() {
     selectedMemberFilter = "all";
     selectedDateFilter = "";
+  }
+
+  function buildAssignmentNotificationMessage() {
+    const teamName = team?.name || team?.team || "tu equipo";
+    const typeLabel = workTypeLabels[assignmentForm.type] || "Jornada";
+    const noteText = assignmentForm.note?.trim()
+      ? ` Nota: ${assignmentForm.note.trim()}.`
+      : "";
+    return `${typeLabel} asignada para el ${formatDisplayDate(assignmentForm.date)} en ${teamName}.${noteText}`;
   }
 </script>
 
