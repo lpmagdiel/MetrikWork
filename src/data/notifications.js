@@ -107,7 +107,13 @@ async function sendPushNotification(notificationId) {
     });
     if (!response.ok) {
         const errorBody = await response.text();
-        throw new Error(errorBody || `Push request failed with ${response.status}`);
+        let message = errorBody;
+        try {
+            message = JSON.parse(errorBody).error || errorBody;
+        } catch {
+            // Keep the raw response body when it is not JSON.
+        }
+        throw new Error(message || `Push request failed with ${response.status}`);
     }
 }
 

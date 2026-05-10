@@ -139,6 +139,47 @@ function cloudinaryApiPlugin() {
   };
 }
 
+function pushNotificationApiPlugin() {
+  return {
+    name: 'push-notification-api',
+    configResolved(config) {
+      const env = loadEnv('', config.root, '');
+      Object.entries(env).forEach(([key, value]) => {
+        if (typeof process.env[key] === 'undefined') {
+          process.env[key] = value;
+        }
+      });
+    },
+    configureServer(server) {
+      server.middlewares.use('/api/send-push-notification', async (req, res) => {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+
+        try {
+          req.body = body ? JSON.parse(body) : {};
+        } catch {
+          res.statusCode = 400;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ error: 'Invalid JSON' }));
+          return;
+        }
+
+        try {
+          const { default: handler } = await import('./api/send-push-notification.js');
+          await handler(req, res);
+        } catch (error) {
+          console.error('Push notification API error:', error);
+          if (!res.headersSent) {
+            res.statusCode = 500;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: error.message || 'Internal server error' }));
+          }
+        }
+      });
+    },
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
@@ -161,7 +202,7 @@ export default defineConfig(({ mode }) => {
         env.CLOUDINARY_PRESET_INVENTARY || 'MetricWorkInventary'
       ),
     },
-    plugins: [svelte(), stripeApiPlugin(), cloudinaryApiPlugin()],
+    plugins: [svelte(), stripeApiPlugin(), cloudinaryApiPlugin(), pushNotificationApiPlugin()],
     server: {
       historyApiFallback: true,
     }
