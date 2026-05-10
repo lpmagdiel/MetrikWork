@@ -25,6 +25,7 @@
   let pushButtonLoading = $state(false);
   let unreadCount = $derived(notifications.filter((n) => !n.opened).length);
   let pushState = $derived($pushNotificationState);
+  let pushEnabled = $derived(pushState.status === "enabled" && Boolean(pushState.token));
 
   // --- Swipe logic (native touch/pointer) ---
   const SWIPE_THRESHOLD = 60; // px mínimos para activar el swipe
@@ -125,8 +126,8 @@
   function getPushStatusText() {
     if (!canUsePush || pushState.status === "unsupported") return "No disponible";
     if (pushState.permission === "denied") return "Bloqueadas";
-    if (pushState.status === "enabled") return "Activas";
-    if (pushState.status === "local-enabled") return "Activas en este dispositivo";
+    if (pushEnabled) return "Activas";
+    if (pushState.status === "local-enabled") return "Falta configuración push";
     if (pushState.status === "checking") return "Comprobando";
     if (pushState.status === "error") return "Revisar configuración";
     return "Pendientes";
@@ -212,13 +213,13 @@
           <p>{pushState.error}</p>
         {/if}
       </div>
-      {#if pushState.permission === "granted"}
+      {#if pushEnabled}
         <span class="push-pill">Activas</span>
       {:else}
         <button
           class="push-action"
           onclick={handleEnablePush}
-          disabled={pushButtonLoading || pushState.permission === "denied"}
+          disabled={pushButtonLoading || pushState.permission === "denied" || pushState.status === "local-enabled"}
         >
           {pushButtonLoading ? "..." : pushState.permission === "denied" ? "Bloqueadas" : "Activar"}
         </button>

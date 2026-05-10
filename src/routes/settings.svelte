@@ -20,6 +20,8 @@
     getUserProfile,
     settingsStore,
     updateSettings,
+    pushNotificationState,
+    requestPushNotifications,
   } from "../data/stores.js";
   import { navigateTo } from "../router.js";
 
@@ -35,8 +37,14 @@
   let toastMessage = $state("");
   let toastType = $state("success");
   let showUpdateModal = $state(false);
+  let canUsePush = $state(false);
+  let pushButtonLoading = $state(false);
+  let pushState = $derived($pushNotificationState);
+  let pushEnabled = $derived(pushState.status === "enabled" && Boolean(pushState.token));
 
   onMount(async () => {
+    canUsePush = "Notification" in window && "serviceWorker" in navigator;
+
     if ($userStore) {
       email = $userStore.email;
       name = $userStore.name || "";
@@ -89,6 +97,38 @@
       });
     } catch (error) {
       console.error("Error toggling dark mode:", error);
+    }
+  }
+
+  function getPushDescription() {
+    if (!canUsePush || pushState.status === "unsupported") return "No disponible en este navegador";
+    if (pushState.permission === "denied") return "Permiso bloqueado en el navegador";
+    if (pushEnabled) return "Avisos activos aunque la app esté cerrada";
+    if (pushState.status === "local-enabled") return pushState.error || "Falta configuración push";
+    if (pushState.status === "checking") return "Comprobando el dispositivo";
+    if (pushState.status === "error") return pushState.error || "Revisar configuración";
+    return "Activar avisos de tareas y equipos";
+  }
+
+  async function handleEnablePush() {
+    if (!$userStore?.uid || pushButtonLoading || pushEnabled) return;
+    pushButtonLoading = true;
+
+    try {
+      const result = await requestPushNotifications($userStore.uid);
+      if (result.ok && result.token) {
+        toastMessage = "Notificaciones push activadas";
+        toastType = "success";
+      } else if (result.reason === "denied") {
+        toastMessage = "Permiso bloqueado en el navegador";
+        toastType = "error";
+      } else {
+        toastMessage = "No se pudieron activar las notificaciones push";
+        toastType = "error";
+      }
+      showToast = true;
+    } finally {
+      pushButtonLoading = false;
     }
   }
 </script>
@@ -146,10 +186,15 @@
           </div>
           <div class="item-info">
             <span>Notificaciones</span>
-            <p>Recibir avisos de tareas y equipos</p>
+            <p>{getPushDescription()}</p>
           </div>
           <label class="switch">
-            <input type="checkbox" checked={true} />
+            <input
+              type="checkbox"
+              checked={pushEnabled}
+              disabled={!canUsePush || pushButtonLoading || pushEnabled || pushState.permission === "denied" || pushState.status === "local-enabled"}
+              onchange={handleEnablePush}
+            />
             <span class="slider"></span>
           </label>
         </div>
