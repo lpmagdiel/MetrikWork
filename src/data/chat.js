@@ -8,8 +8,11 @@ import {
     orderBy,
     limit,
     startAfter,
-    getDocs
+    getDocs,
+    getDoc,
+    doc
 } from 'firebase/firestore';
+import { createNotification } from './notifications.js';
 
 export const chatMessagesStore = writable([]);
 let chatUnsubscribe;
@@ -60,6 +63,51 @@ export function mergeChatMessages(existingMessages = [], olderMessages = []) {
     return sortMessages(Array.from(messagesById.values()));
 }
 
+function getMessagePreview(messageData) {
+    if (messageData.text) return messageData.text;
+    if (messageData.type === 'IMAGE' || messageData.imageUrl) return 'Envió una imagen';
+    if (messageData.type === 'SIMPLE_LOCATION') return 'Envió una ubicación';
+    return 'Nuevo mensaje';
+}
+
+async function notifyTeamMembersAboutMessage(teamId, messageId, messageData) {
+    try {
+        const teamSnapshot = await getDoc(doc(db, 'teams', teamId));
+        if (!teamSnapshot.exists()) return;
+
+        const teamData = teamSnapshot.data();
+        const members = Array.isArray(teamData.members) ? teamData.members : [];
+        const recipients = members.filter((memberId) => memberId && memberId !== messageData.senderId);
+        if (recipients.length === 0) return;
+
+        const teamName = teamData.team || teamData.name || 'Equipo';
+        const senderName = messageData.senderName || 'Alguien';
+        const title = `${senderName} en ${teamName}`;
+        const message = getMessagePreview(messageData);
+        const url = `/teams/${teamId}/chat`;
+
+        const results = await Promise.allSettled(
+            recipients.map((uid) =>
+                createNotification(uid, title, message, {
+                    url,
+                    type: 'chat_message',
+                    sourceId: messageId,
+                    teamId,
+                    showInForeground: false
+                })
+            )
+        );
+
+        results
+            .filter((result) => result.status === 'rejected')
+            .forEach((result) => {
+                console.warn('Chat notification failed:', result.reason);
+            });
+    } catch (error) {
+        console.warn('Message was sent, but chat notifications failed:', error);
+    }
+}
+
 export async function sendTeamMessage(teamId, content, user, imageUrl = null, extraData = {}) {
     if (!user || !teamId) return;
     try {
@@ -76,9 +124,10 @@ export async function sendTeamMessage(teamId, content, user, imageUrl = null, ex
             messageData.location = extraData.location;
         }
 
-        await addDoc(collection(db, 'teams', teamId, 'messages'), {
+        const docRef = await addDoc(collection(db, 'teams', teamId, 'messages'), {
             ...messageData
         });
+        notifyTeamMembersAboutMessage(teamId, docRef.id, messageData);
         try {
             const chatStats = JSON.parse(localStorage.getItem('chatStats')) || { totalMessages: 0 };
             chatStats.totalMessages = (chatStats.totalMessages || 0) + 1;

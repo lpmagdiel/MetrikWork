@@ -19,6 +19,17 @@ export const notificationsStore = writable([]);
 let notificationsUnsubscribe;
 let hasLoadedInitialSnapshot = false;
 
+function isAppInBackground() {
+    if (typeof document === 'undefined') return false;
+    return document.visibilityState === 'hidden' || !document.hasFocus();
+}
+
+function shouldShowDeviceNotification(notification) {
+    if (notification.opened) return false;
+    if (notification.showInForeground === false) return isAppInBackground();
+    return true;
+}
+
 export function subscribeToNotifications(uid) {
     if (notificationsUnsubscribe) notificationsUnsubscribe();
     notificationsStore.set([]);
@@ -35,12 +46,12 @@ export function subscribeToNotifications(uid) {
                 .filter((change) => change.type === 'added')
                 .forEach((change) => {
                     const notification = { id: change.doc.id, ...change.doc.data() };
-                    if (!notification.opened) {
+                    if (shouldShowDeviceNotification(notification)) {
                         showDeviceNotification({
                             id: notification.id,
                             title: notification.title,
                             message: notification.message,
-                            url: '/notifications',
+                            url: notification.url || '/notifications',
                         });
                     }
                 });
@@ -54,14 +65,30 @@ export function subscribeToNotifications(uid) {
     });
 }
 
-export async function createNotification(uid, title, message) {
+function getOptionalNotificationFields(options = {}) {
+    const fields = {};
+    ['url', 'type', 'sourceId', 'teamId'].forEach((key) => {
+        if (typeof options[key] === 'string' && options[key].trim()) {
+            fields[key] = options[key].trim();
+        }
+    });
+
+    if (typeof options.showInForeground === 'boolean') {
+        fields.showInForeground = options.showInForeground;
+    }
+
+    return fields;
+}
+
+export async function createNotification(uid, title, message, options = {}) {
     try {
         const docRef = await addDoc(collection(db, 'notifications'), {
             title,
             message,
             date: new Date().toISOString(),
             notificationFor: uid,
-            opened: false
+            opened: false,
+            ...getOptionalNotificationFields(options)
         });
         sendPushNotification(docRef.id).catch((error) => {
             console.warn("Notification was saved, but push delivery failed:", error);

@@ -4,9 +4,23 @@
  * @param {string} preset 
  * @returns 
  */
-export const uploader = async (file, preset = 'MetricWork') => {
-    const cloudName = 'lpzmagdiel';
+const DEFAULT_CLOUDINARY_CLOUD_NAME =
+    import.meta.env.VITE_CLOUDINARY_CLOUD_NAME ||
+    import.meta.env.CLOUDINARY_CLOUD_NAME ||
+    'lpzmagdiel';
+
+const DEFAULT_CLOUDINARY_PRESET =
+    import.meta.env.VITE_CLOUDINARY_PRESET ||
+    import.meta.env.CLOUDINARY_PRESET ||
+    'MetricWork';
+
+export const uploader = async (file, preset = DEFAULT_CLOUDINARY_PRESET) => {
+    const cloudName = DEFAULT_CLOUDINARY_CLOUD_NAME;
     const uploadPreset = preset;
+
+    if (!cloudName || !uploadPreset) {
+        throw new Error('Cloudinary no está configurado correctamente');
+    }
 
     const formData = new FormData();
     formData.append('file', file);

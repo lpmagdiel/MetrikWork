@@ -85,6 +85,7 @@ function setupForegroundMessages() {
     foregroundUnsubscribe = onMessage(messaging, (payload) => {
         const notification = payload.notification || {};
         const data = payload.data || {};
+        if (data.showInForeground === 'false' && !isAppInBackground()) return;
         showDeviceNotification({
             id: data.notificationId || payload.messageId,
             title: notification.title || data.title || 'MetricWork',
@@ -92,6 +93,11 @@ function setupForegroundMessages() {
             url: data.url || '/notifications',
         });
     });
+}
+
+function isAppInBackground() {
+    if (typeof document === 'undefined') return false;
+    return document.visibilityState === 'hidden' || !document.hasFocus();
 }
 
 async function configureMessaging(uid) {

@@ -9,6 +9,10 @@
   import { Camera, Loader2, User } from "lucide-svelte";
 
   const { editable = true, size = 100 } = $props();
+  const CLOUDINARY_PRESET_AVATAR =
+    import.meta.env.VITE_CLOUDINARY_PRESET_AVATAR ||
+    import.meta.env.CLOUDINARY_PRESET_AVATAR ||
+    "MetricWorkProfile";
 
   let isSaving = $state(false);
   let isLoading = $state(true);
@@ -44,7 +48,7 @@
         optimisticAvatar = cropped;
 
         const resized = await resizer(cropped, 400); // 400px para pantallas retina
-        const avatarUrl = await uploader(resized, "MetricWorkProfile");
+        const avatarUrl = await uploader(resized, CLOUDINARY_PRESET_AVATAR);
 
         await updateUserProfile($userStore.uid, { avatar: avatarUrl });
 

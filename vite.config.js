@@ -148,6 +148,15 @@ export default defineConfig(({ mode }) => {
       sourcemap: true
     },
     define: {
+      'import.meta.env.CLOUDINARY_CLOUD_NAME': JSON.stringify(
+        env.CLOUDINARY_CLOUD_NAME || 'lpzmagdiel'
+      ),
+      'import.meta.env.CLOUDINARY_PRESET': JSON.stringify(
+        env.CLOUDINARY_PRESET || 'MetricWork'
+      ),
+      'import.meta.env.CLOUDINARY_PRESET_AVATAR': JSON.stringify(
+        env.CLOUDINARY_PRESET_AVATAR || 'MetricWorkProfile'
+      ),
       'import.meta.env.CLOUDINARY_PRESET_INVENTARY': JSON.stringify(
         env.CLOUDINARY_PRESET_INVENTARY || 'MetricWorkInventary'
       ),

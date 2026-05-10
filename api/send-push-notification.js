@@ -33,6 +33,9 @@ export default async function handler(req, res) {
     const title = getStringField(notification.fields, 'title') || 'MetricWork';
     const body = getStringField(notification.fields, 'message');
     const notificationFor = getStringField(notification.fields, 'notificationFor');
+    const url = getStringField(notification.fields, 'url') || '/notifications';
+    const type = getStringField(notification.fields, 'type');
+    const showInForeground = getBooleanField(notification.fields, 'showInForeground');
 
     if (!notificationFor) {
       return sendJson(res, 400, { error: 'Notification has no recipient' });
@@ -50,6 +53,9 @@ export default async function handler(req, res) {
         body,
         notificationId,
         origin,
+        url,
+        type,
+        showInForeground,
       }))
     );
 
@@ -192,6 +198,23 @@ async function markPushAsSent(projectId, accessToken, notificationId) {
 }
 
 async function sendFcmMessage(projectId, accessToken, token, notification) {
+  const url = normalizeAppUrl(notification.url);
+  const absoluteUrl = `${notification.origin}${url}`;
+  const data = {
+    notificationId: notification.notificationId,
+    url,
+    title: notification.title,
+    body: notification.body || '',
+  };
+
+  if (notification.type) {
+    data.type = notification.type;
+  }
+
+  if (typeof notification.showInForeground === 'boolean') {
+    data.showInForeground = String(notification.showInForeground);
+  }
+
   const response = await fetch(`https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`, {
     method: 'POST',
     headers: {
@@ -205,15 +228,10 @@ async function sendFcmMessage(projectId, accessToken, token, notification) {
           title: notification.title,
           body: notification.body,
         },
-        data: {
-          notificationId: notification.notificationId,
-          url: '/notifications',
-          title: notification.title,
-          body: notification.body || '',
-        },
+        data,
         webpush: {
           fcm_options: {
-            link: `${notification.origin}/notifications`,
+            link: absoluteUrl,
           },
           notification: {
             icon: `${notification.origin}/icon.png`,
@@ -243,6 +261,18 @@ function getFirestoreUrl(projectId, documentPath) {
 
 function getStringField(fields, name) {
   return fields?.[name]?.stringValue || '';
+}
+
+function getBooleanField(fields, name) {
+  const field = fields?.[name];
+  if (!field || typeof field.booleanValue === 'undefined') return null;
+  return field.booleanValue;
+}
+
+function normalizeAppUrl(url) {
+  if (!url || typeof url !== 'string') return '/notifications';
+  if (!url.startsWith('/')) return '/notifications';
+  return url;
 }
 
 function getOrigin(req) {

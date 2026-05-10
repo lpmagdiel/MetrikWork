@@ -84,6 +84,9 @@
     if (!notification.opened) {
       await markNotificationAsRead(notification.id);
     }
+    if (notification.url) {
+      navigateTo(notification.url);
+    }
   }
 
   async function handleDelete(notificationId) {

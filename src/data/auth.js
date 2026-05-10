@@ -1,7 +1,7 @@
 import { writable, get } from 'svelte/store';
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged, signOut, updateProfile } from 'firebase/auth';
-import { doc, setDoc, getDoc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, onSnapshot } from 'firebase/firestore';
 
 export const userStore = writable(null);
 export const authReady = writable(false);
@@ -84,10 +84,12 @@ export async function logout() {
 export async function updateUserProfile(uid, data) {
     try {
         const userRef = doc(db, 'users', uid);
-        await updateDoc(userRef, {
+        const profileData = {
             ...data,
             updatedAt: new Date().toISOString()
-        });
+        };
+
+        await setDoc(userRef, profileData, { merge: true });
         
         // Update Firebase Auth profile if name is changed
         if (data.name && auth.currentUser) {
@@ -101,6 +103,13 @@ export async function updateUserProfile(uid, data) {
         if (currentUser && currentUser.uid === uid) {
             userStore.update(u => ({ ...u, ...data }));
         }
+
+        userProfileCache[uid] = {
+            ...(userProfileCache[uid] || {}),
+            ...profileData,
+            id: uid
+        };
+
         return true;
     } catch (error) {
         console.error("Error updating user profile:", error);
