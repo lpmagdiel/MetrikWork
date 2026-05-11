@@ -27,8 +27,10 @@ export async function getTeamPaymentsData(teamId) {
             const dailyRate = Number(settings.dailyRate) || 0;
             const extraHourRate = Number(settings.extraHourRate) || 0;
 
-            const userWorks = works[userId] || [];
-            const userPayments = payments.filter(p => p.userId === userId);
+            const userWorks = (works[userId] || []).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+            const userPayments = payments
+                .filter(p => p.userId === userId)
+                .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
             let totalFullDays = 0;
             let totalHalfDays = 0;
@@ -62,6 +64,8 @@ export async function getTeamPaymentsData(teamId) {
                 totalEarned,
                 totalPaid,
                 balance,
+                dailyRate,
+                extraHourRate,
                 payments: userPayments,
                 works: userWorks
             };
@@ -74,7 +78,7 @@ export async function getTeamPaymentsData(teamId) {
     }
 }
 
-export async function registerTeamPayment(teamId, userId, amount, type) {
+export async function registerTeamPayment(teamId, userId, amount, type, registeredBy = null) {
     try {
         const paymentDoc = {
             teamId,
@@ -84,7 +88,14 @@ export async function registerTeamPayment(teamId, userId, amount, type) {
             date: new Date().toISOString(),
             createdAt: new Date().toISOString()
         };
-        await addDoc(collection(db, 'team_payments'), paymentDoc);
+
+        if (registeredBy?.uid) {
+            paymentDoc.registeredBy = registeredBy.uid;
+            paymentDoc.registeredByName = registeredBy.name || registeredBy.email || '';
+        }
+
+        const docRef = await addDoc(collection(db, 'team_payments'), paymentDoc);
+        return { id: docRef.id, ...paymentDoc };
     } catch (error) {
         console.error("Error registering team payment:", error);
         throw error;

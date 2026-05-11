@@ -25,6 +25,7 @@
   import { navigateTo } from "../router.js";
   import { uploader, resizer } from "../data/fileHelper.js";
   import SliceContainer from "../components/SliceContainer.svelte";
+  import Product from "../components/Product.svelte";
 
   const CLOUDINARY_PRESET_INVENTARY =
     import.meta.env.CLOUDINARY_PRESET_INVENTARY || "MetricWorkInventary";
@@ -243,78 +244,13 @@
     </div>
 
     <div class="table-container">
-      <table>
-        <thead>
-          <tr>
-            <th>Producto</th>
-            <th>Categoría</th>
-            <th>Precio</th>
-            <th>Stock</th>
-            <th>Estado</th>
-            <th>Acciones</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each filteredItems as item (item.id)}
-            <tr>
-              <td>
-                <div class="product-cell">
-                  {#if item.imageUrl}
-                    <img src={item.imageUrl} alt={item.name} class="product-thumb" />
-                  {:else}
-                    <div class="product-thumb placeholder">
-                      <Package size={18} />
-                    </div>
-                  {/if}
-                  <span class="product-name">{item.name}</span>
-                </div>
-              </td>
-              <td
-                ><span class="category-tag">{item.category || "General"}</span
-                ></td
-              >
-              <td>{formatCurrency(item.price)}</td>
-              <td>{item.quantity}</td>
-              <td>
-                {#if item.quantity <= item.minStock}
-                  <span class="status-badge low">
-                    <AlertTriangle size={14} /> Bajo
-                  </span>
-                {:else}
-                  <span class="status-badge ok">OK</span>
-                {/if}
-              </td>
-              <td>
-                <div class="actions">
-                  {#if canEditInventory}
-                    <button
-                      class="icon-btn edit"
-                      onclick={() => openModal(item)}
-                    >
-                      <Edit2 size={18} />
-                    </button>
-                  {/if}
-                  {#if canDeleteInventory}
-                    <button
-                      class="icon-btn delete"
-                      onclick={() => handleDelete(item.id)}
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                  {/if}
-                </div>
-              </td>
-            </tr>
-          {/each}
-          {#if filteredItems.length === 0}
-            <tr>
-              <td colspan="6" class="empty-state">
-                No se encontraron productos
-              </td>
-            </tr>
-          {/if}
-        </tbody>
-      </table>
+      {#each filteredItems as item (item.id)}
+        <Product 
+          product={item} 
+          isEditable={canEditInventory} 
+          onEdit={(product) => openModal(product)}
+        />
+      {/each}
     </div>
     </div>
   {/if}
@@ -427,6 +363,15 @@
             <span>{editingId ? "Actualizar" : "Guardar"}</span>
           {/if}
         </button>
+        <div class="center">
+          <button
+          class="icon-btn delete block-btn"
+          onclick={() => handleDelete(editingId)}
+        >
+          <Trash2 size={18} />
+          <span>Eliminar</span>
+        </button>
+        </div>
       </div>
     </form>
 
@@ -536,9 +481,6 @@
   }
 
   .content {
-    background: var(--bg-card);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-card);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -569,93 +511,10 @@
   }
 
   .table-container {
-    overflow-x: auto;
-  }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  th {
-    text-align: left;
-    padding: 16px;
-    background: var(--bg-input);
-    color: var(--text-secondary);
-    font-weight: 600;
-    font-size: 13px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  td {
-    padding: 16px;
-    border-bottom: 1px solid var(--border-color);
-    color: var(--text-primary);
-    font-size: 14px;
-  }
-
-  .product-name {
-    font-weight: 600;
-    color: var(--text-primary);
-  }
-
-  .product-cell {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    min-width: 180px;
-  }
-
-  .product-thumb {
-    width: 44px;
-    height: 44px;
-    border-radius: 10px;
-    object-fit: cover;
-    flex: 0 0 auto;
-    background: var(--bg-input);
-  }
-
-  .product-thumb.placeholder {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-secondary);
-    border: 1px solid var(--border-color);
-  }
-
-  .category-tag {
-    background: var(--bg-input);
-    color: var(--text-secondary);
-    padding: 4px 8px;
-    border-radius: 100px;
-    font-size: 12px;
-    font-weight: 500;
-  }
-
-  .status-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 10px;
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: 600;
-  }
-
-  .status-badge.ok {
-    background: var(--bg-success-subtle);
-    color: var(--success-color);
-  }
-
-  .status-badge.low {
-    background: var(--bg-warning-subtle);
-    color: var(--warning-color);
-  }
-
-  .actions {
-    display: flex;
-    gap: 8px;
+    overflow-y: scroll;
+    gap: 10px;
+    display: grid;
+    padding-top: 10px;
   }
 
   .icon-btn {
@@ -668,13 +527,6 @@
     display: flex;
     align-items: center;
     justify-content: center;
-  }
-
-  .icon-btn.edit {
-    color: var(--info-color);
-  }
-  .icon-btn.edit:hover {
-    background: var(--bg-info-subtle);
   }
 
   .icon-btn.delete {
@@ -884,6 +736,7 @@
     justify-content: center;
     gap: 8px;
     font-size: 16px;
+    margin-bottom: 10px;
   }
 
   .save-btn:hover {

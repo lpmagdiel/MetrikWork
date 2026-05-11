@@ -1,5 +1,5 @@
 <script>
-    import { ChevronLeft, DollarSign, Filter, Search, CheckCircle, AlertCircle, Eye, History } from "lucide-svelte";
+    import { ChevronLeft, DollarSign, Filter, CheckCircle, AlertCircle, Eye, History, Printer } from "lucide-svelte";
     import { selectedTeam, userStore, hasTeamPermission } from "../data/stores.js";
     import { getTeamPaymentsData, registerTeamPayment } from "../data/teamPayments.js";
     import { createNotification } from "../data/notifications.js";
@@ -75,7 +75,7 @@
         }
     });
 
-    async function handlePayment() {
+    async function handlePayment(shouldPrint = false) {
         if (!team?.id || !selectedMember || !canCreatePayments) return;
         if (paymentAmount <= 0) {
             showNotification("El monto debe ser mayor a 0", "error");
@@ -83,18 +83,37 @@
         }
         
         isSaving = true;
+        let receiptWindow = null;
         try {
-            await registerTeamPayment(team.id, selectedMember.id, paymentAmount, paymentType);
+            const memberSnapshot = selectedMember;
+            const amountToPay = Number(paymentAmount) || 0;
+            if (shouldPrint) {
+                receiptWindow = openReceiptWindow();
+            }
+            const payment = await registerTeamPayment(
+                team.id,
+                selectedMember.id,
+                amountToPay,
+                paymentType,
+                $userStore,
+            );
             
             // Notificar al usuario
             const title = "Pago Recibido";
-            const message = `Has recibido un pago de ${formatMoney(paymentAmount)} del equipo "${team.name}"`;
+            const message = `Has recibido un pago de ${formatMoney(amountToPay)} del equipo "${team.name}"`;
             await createNotification(selectedMember.id, title, message);
             
             showNotification("Pago registrado exitosamente");
             showPaymentModal = false;
+            if (shouldPrint) {
+                generatePaymentReceipt(memberSnapshot, payment, receiptWindow);
+            }
             await loadData();
         } catch (e) {
+            console.error("Error registering payment:", e);
+            if (receiptWindow && !receiptWindow.closed) {
+                receiptWindow.close();
+            }
             showNotification("Error al registrar pago", "error");
         } finally {
             isSaving = false;
@@ -108,6 +127,327 @@
 
     function formatMoney(amount) {
         return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'USD' }).format(amount);
+    }
+
+    function formatDate(value) {
+        if (!value) return "-";
+        return new Date(value).toLocaleDateString("es-ES", {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+        });
+    }
+
+    function formatDateTime(value) {
+        if (!value) return "-";
+        return new Date(value).toLocaleString("es-ES", {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+        });
+    }
+
+    function getWorkTypeLabel(work) {
+        if (work.type === "full-day") return "Día completo";
+        if (work.type === "half-day") return "Medio día";
+        if (work.type === "variable") return "Jornada variable";
+        if (work.type === "overtime") return "Horas extra";
+        return "Jornada";
+    }
+
+    function getWorkUnits(work) {
+        if (work.type === "full-day") return 1;
+        if (work.type === "half-day") return 0.5;
+        return 0;
+    }
+
+    function getWorkAmount(work, member) {
+        const base = getWorkUnits(work) * (Number(member?.dailyRate) || 0);
+        const extra = (Number(work.overtimeHours) || 0) * (Number(member?.extraHourRate) || 0);
+        return base + extra;
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? "")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
+    }
+
+    function openReceiptWindow() {
+        if (typeof window === "undefined") return null;
+        return window.open("", "_blank", "width=900,height=1200");
+    }
+
+    function generatePaymentReceipt(member, payment, receiptWindow = null) {
+        const targetWindow = receiptWindow || openReceiptWindow();
+        if (!targetWindow) {
+            showNotification("El navegador bloqueó la ventana del comprobante", "error");
+            return;
+        }
+
+        const balanceBefore = Number(member?.balance) || 0;
+        const paymentAmountValue = Number(payment?.amount) || 0;
+        const balanceAfter = Math.max(balanceBefore - paymentAmountValue, 0);
+        const paymentsBeforeThis = Math.max((Number(member?.totalPaid) || 0), 0);
+        const works = member?.works || [];
+        const payments = member?.payments || [];
+        const receiptNumber = payment?.id || `TEMP-${Date.now()}`;
+        const teamName = team?.name || team?.team || "Equipo";
+        const memberName = member?.name || member?.email || "Usuario";
+        const registeredBy = payment?.registeredByName || $userStore?.name || $userStore?.email || "Usuario";
+        const generatedAt = new Date().toISOString();
+
+        const workRows = works.map((work) => `
+            <tr>
+                <td>${escapeHtml(work.date || "-")}</td>
+                <td>${escapeHtml(getWorkTypeLabel(work))}</td>
+                <td>${getWorkUnits(work)}</td>
+                <td>${Number(work.overtimeHours) || 0}h</td>
+                <td>${escapeHtml(work.taskTitle || work.note || "")}</td>
+                <td class="money">${escapeHtml(formatMoney(getWorkAmount(work, member)))}</td>
+            </tr>
+        `).join("");
+
+        const paymentRows = payments.map((item) => `
+            <tr>
+                <td>${escapeHtml(formatDate(item.date))}</td>
+                <td>${escapeHtml(item.type === "total" ? "Pago total" : "Pago parcial")}</td>
+                <td>${escapeHtml(item.registeredByName || "-")}</td>
+                <td class="money">${escapeHtml(formatMoney(item.amount))}</td>
+            </tr>
+        `).join("");
+
+        const receiptHtml = `<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8" />
+    <title>Comprobante de pago ${escapeHtml(receiptNumber)}</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            padding: 32px;
+            color: #172033;
+            background: #f3f4f6;
+            font-family: Arial, Helvetica, sans-serif;
+        }
+        .page {
+            max-width: 920px;
+            margin: 0 auto;
+            background: #ffffff;
+            border: 1px solid #dde1e7;
+            padding: 32px;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            gap: 24px;
+            border-bottom: 2px solid #172033;
+            padding-bottom: 20px;
+            margin-bottom: 24px;
+        }
+        h1, h2, h3, p { margin: 0; }
+        h1 { font-size: 28px; }
+        h2 { font-size: 16px; margin: 28px 0 10px; }
+        .muted { color: #647084; font-size: 13px; }
+        .receipt-id { text-align: right; }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+            margin-bottom: 18px;
+        }
+        .box {
+            border: 1px solid #dde1e7;
+            padding: 14px;
+            min-height: 74px;
+        }
+        .label {
+            display: block;
+            color: #647084;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+        .value { font-size: 16px; font-weight: 700; }
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 10px;
+            margin: 18px 0;
+        }
+        .summary .box { min-height: 0; }
+        .money { text-align: right; white-space: nowrap; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 12px;
+            font-size: 12px;
+        }
+        th, td {
+            border: 1px solid #dde1e7;
+            padding: 8px;
+            vertical-align: top;
+        }
+        th {
+            background: #f8fafc;
+            color: #334155;
+            text-align: left;
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+        .total-row td {
+            background: #f8fafc;
+            font-weight: 700;
+        }
+        .signatures {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 48px;
+            margin-top: 48px;
+        }
+        .signature-line {
+            border-top: 1px solid #172033;
+            padding-top: 8px;
+            text-align: center;
+            font-size: 12px;
+        }
+        .actions {
+            max-width: 920px;
+            margin: 0 auto 16px;
+            text-align: right;
+        }
+        button {
+            border: 0;
+            background: #172033;
+            color: #ffffff;
+            padding: 10px 16px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        @media print {
+            body { padding: 0; background: #ffffff; }
+            .page { border: 0; max-width: none; }
+            .actions { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="actions">
+        <button onclick="window.print()">Guardar / imprimir PDF</button>
+    </div>
+    <main class="page">
+        <header>
+            <div>
+                <h1>Comprobante de pago</h1>
+                <p class="muted">MetricWork · ${escapeHtml(teamName)}</p>
+            </div>
+            <div class="receipt-id">
+                <strong>No. ${escapeHtml(receiptNumber)}</strong>
+                <p class="muted">Generado: ${escapeHtml(formatDateTime(generatedAt))}</p>
+            </div>
+        </header>
+
+        <section class="grid">
+            <div class="box">
+                <span class="label">Equipo</span>
+                <span class="value">${escapeHtml(teamName)}</span>
+            </div>
+            <div class="box">
+                <span class="label">Miembro</span>
+                <span class="value">${escapeHtml(memberName)}</span>
+            </div>
+            <div class="box">
+                <span class="label">Registrado por</span>
+                <span class="value">${escapeHtml(registeredBy)}</span>
+            </div>
+            <div class="box">
+                <span class="label">Fecha del pago</span>
+                <span class="value">${escapeHtml(formatDateTime(payment?.date))}</span>
+            </div>
+        </section>
+
+        <section class="summary">
+            <div class="box">
+                <span class="label">Tarifa diaria</span>
+                <span class="value">${escapeHtml(formatMoney(member?.dailyRate || 0))}</span>
+            </div>
+            <div class="box">
+                <span class="label">Hora extra</span>
+                <span class="value">${escapeHtml(formatMoney(member?.extraHourRate || 0))}</span>
+            </div>
+            <div class="box">
+                <span class="label">Días trabajados</span>
+                <span class="value">${Number(member?.totalWorkDays) || 0}</span>
+            </div>
+            <div class="box">
+                <span class="label">Horas extra</span>
+                <span class="value">${Number(member?.totalOvertimeHours) || 0}h</span>
+            </div>
+        </section>
+
+        <h2>Resumen económico</h2>
+        <table>
+            <tbody>
+                <tr><td>Total generado por jornadas</td><td class="money">${escapeHtml(formatMoney(member?.totalEarned || 0))}</td></tr>
+                <tr><td>Pagado anteriormente</td><td class="money">${escapeHtml(formatMoney(paymentsBeforeThis))}</td></tr>
+                <tr><td>Saldo antes de este pago</td><td class="money">${escapeHtml(formatMoney(balanceBefore))}</td></tr>
+                <tr><td>Tipo de pago</td><td class="money">${escapeHtml(payment?.type === "total" ? "Pago total" : "Pago parcial")}</td></tr>
+                <tr class="total-row"><td>Monto pagado</td><td class="money">${escapeHtml(formatMoney(paymentAmountValue))}</td></tr>
+                <tr class="total-row"><td>Saldo posterior</td><td class="money">${escapeHtml(formatMoney(balanceAfter))}</td></tr>
+            </tbody>
+        </table>
+
+        <h2>Jornadas incluidas en el balance</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Tipo</th>
+                    <th>Días</th>
+                    <th>Horas extra</th>
+                    <th>Nota / tarea</th>
+                    <th class="money">Importe</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${workRows || `<tr><td colspan="6">No hay jornadas registradas.</td></tr>`}
+            </tbody>
+        </table>
+
+        <h2>Pagos previos registrados</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Tipo</th>
+                    <th>Registrado por</th>
+                    <th class="money">Importe</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${paymentRows || `<tr><td colspan="4">No hay pagos previos registrados.</td></tr>`}
+            </tbody>
+        </table>
+
+        <section class="signatures">
+            <div class="signature-line">Firma del responsable</div>
+            <div class="signature-line">Firma del miembro</div>
+        </section>
+    </main>
+</body>
+</html>`;
+
+        targetWindow.document.open();
+        targetWindow.document.write(receiptHtml);
+        targetWindow.document.close();
+        targetWindow.focus();
     }
 </script>
 
@@ -265,17 +605,32 @@
                     </div>
                 </div>
 
-                <button 
-                    class="submit-payment-btn" 
-                    onclick={handlePayment} 
-                    disabled={isSaving || paymentAmount <= 0 || paymentAmount > (selectedMember?.balance || 0)}
-                >
-                    {#if isSaving}
-                        Procesando...
-                    {:else}
-                        Registrar Pago de {formatMoney(paymentAmount)}
-                    {/if}
-                </button>
+                <div class="payment-actions">
+                    <button 
+                        class="submit-payment-btn secondary" 
+                        onclick={() => handlePayment(false)} 
+                        disabled={isSaving || paymentAmount <= 0 || paymentAmount > (selectedMember?.balance || 0)}
+                    >
+                        {#if isSaving}
+                            Procesando...
+                        {:else}
+                            <DollarSign size={18} />
+                            Pagar
+                        {/if}
+                    </button>
+                    <button 
+                        class="submit-payment-btn" 
+                        onclick={() => handlePayment(true)} 
+                        disabled={isSaving || paymentAmount <= 0 || paymentAmount > (selectedMember?.balance || 0)}
+                    >
+                        {#if isSaving}
+                            Procesando...
+                        {:else}
+                            <Printer size={18} />
+                            Pagar e imprimir
+                        {/if}
+                    </button>
+                </div>
             </div>
         </SliceContainer>
 
@@ -731,6 +1086,13 @@
         cursor: not-allowed;
     }
 
+    .payment-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 8px;
+    }
+
     .submit-payment-btn {
         background: var(--accent-color);
         color: white;
@@ -741,13 +1103,29 @@
         font-weight: 600;
         cursor: pointer;
         transition: all 0.2s ease;
-        margin-top: 8px;
         box-shadow: var(--shadow-button);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        min-width: 0;
     }
 
     .submit-payment-btn:hover:not(:disabled) {
         transform: translateY(-2px);
         background: var(--accent-strong);
+    }
+
+    .submit-payment-btn.secondary {
+        background: var(--bg-card);
+        color: var(--text-primary);
+        border: 1px solid var(--border-color);
+        box-shadow: none;
+    }
+
+    .submit-payment-btn.secondary:hover:not(:disabled) {
+        background: var(--bg-input);
+        border-color: var(--text-primary);
     }
 
     .submit-payment-btn:disabled {
@@ -877,6 +1255,12 @@
         color: var(--text-secondary);
         font-size: 14px;
         padding: 16px;
+    }
+
+    @media (max-width: 420px) {
+        .payment-actions {
+            grid-template-columns: 1fr;
+        }
     }
 
     :global(.dark) .history-item {
