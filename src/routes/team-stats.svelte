@@ -12,7 +12,7 @@
   import LoadingSpinner from "../components/LoadingSpinner.svelte";
   import Toast from "../components/Toast.svelte";
   import { navigateTo } from "../router.js";
-  import { selectedTeam, selectedTeamId, userStore, getTeamWorks } from "../data/stores.js";
+  import { selectedTeam, selectedTeamId, userStore, getUserTeamWorks } from "../data/stores.js";
 
   let team = $derived($selectedTeam);
   let works = $state([]);
@@ -135,7 +135,7 @@
   async function loadWorks() {
     isLoading = true;
     try {
-      works = await getTeamWorks(team.id);
+      works = await getUserTeamWorks(team.id, $userStore.uid);
     } catch (error) {
       console.error("Error loading team stats:", error);
       showNotification("Error al cargar estadísticas", "error");

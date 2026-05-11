@@ -114,6 +114,21 @@ export const getTeamWorks = async (teamId) => {
     return works.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 }
 
+export const getUserTeamWorks = async (teamId, userId) => {
+    if (!teamId || !userId) return [];
+    const worksQuery = query(
+        collection(db, 'works'),
+        where('teamId', '==', teamId),
+        where('userId', '==', userId)
+    );
+    const snapshot = await getDocs(worksQuery);
+    const works = [];
+    snapshot.forEach((doc) => {
+        works.push({ id: doc.id, ...doc.data() });
+    });
+    return works.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+}
+
 export const getWorksByTeamId = async (teamId) => {
     const worksQuery = query(collection(db, 'works'), where('teamId', '==', teamId));
     const snapshot = await getDocs(worksQuery);

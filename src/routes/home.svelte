@@ -1,6 +1,12 @@
 <script>
   import { onMount } from "svelte";
-  import { userStore, notificationsStore, selectedTeam, getUserProfile } from "../data/stores";
+  import {
+    userStore,
+    notificationsStore,
+    teamsStore,
+    getUserProfile,
+    getUserTeamWorks,
+  } from "../data/stores";
   import AvatarCircle from "../components/AvatarCircle.svelte";
   import {
     Bell,
@@ -34,47 +40,61 @@
   let estimatedEarnings = $state(0);
   let messagesSent = $state(0);
   let totalStats = $state(null);
+  let statsRequestId = 0;
 
   // Calcular estadísticas
-  function calculateStats() {
-    try {
-      // Días trabajados este mes
-      const today = new Date();
-      const currentMonth = today.getMonth();
-      const currentYear = today.getFullYear();
+  async function calculateStats() {
+    const requestId = ++statsRequestId;
 
-      const statsData = localStorage.getItem("userStats");
-      if (statsData) {
-        const stats = JSON.parse(statsData);
-        const thisMonthWorkDays =
-          stats.workDays?.filter((day) => {
-            const date = new Date(day);
-            return (
-              date.getMonth() === currentMonth &&
-              date.getFullYear() === currentYear
-            );
-          }).length || 0;
-        workDaysThisMonth = thisMonthWorkDays;
+    try {
+      const uid = $userStore?.uid;
+      const teams = $teamsStore || [];
+      const { start, end } = getCurrentMonthRange();
+
+      totalTeams = teams.length;
+
+      if (!uid || teams.length === 0) {
+        workDaysThisMonth = 0;
+        estimatedEarnings = 0;
+        totalStats = {
+          workDaysThisMonth,
+          totalTeams,
+          estimatedEarnings,
+          messagesSent,
+        };
+        return;
       }
+
+      const teamWorks = await Promise.all(
+        teams.map(async (team) => ({
+          team,
+          works: await getUserTeamWorks(team.id, uid),
+        })),
+      );
+
+      if (requestId !== statsRequestId) return;
+
+      let totalWorkDays = 0;
+      let totalEarnings = 0;
+
+      teamWorks.forEach(({ team, works }) => {
+        const { dailyRate, extraHourRate } = getMemberRates(team, uid);
+        works
+          .filter((work) => work.date >= start && work.date <= end)
+          .forEach((work) => {
+            totalWorkDays += getWorkDayValue(work);
+            totalEarnings += getWorkEarnings(work, dailyRate, extraHourRate);
+          });
+      });
+
+      workDaysThisMonth = totalWorkDays;
+      estimatedEarnings = totalEarnings;
 
       // Mensajes enviados
       const chatStats = localStorage.getItem("chatStats");
       if (chatStats) {
         const stats = JSON.parse(chatStats);
         messagesSent = stats.totalMessages || 0;
-      }
-
-      // Ganancias estimadas (simulado)
-      estimatedEarnings = workDaysThisMonth * 150 || 0;
-
-      // Cargar datos de localStorage sobre equipos
-      const teamsData = localStorage.getItem("userTeams");
-      if (teamsData) {
-        try {
-          totalTeams = JSON.parse(teamsData).length || 0;
-        } catch {
-          totalTeams = 0;
-        }
       }
 
       totalStats = {
@@ -91,6 +111,48 @@
   $effect(() => {
     calculateStats();
   });
+
+  function getCurrentMonthRange() {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth();
+
+    return {
+      start: toDateString(new Date(year, month, 1)),
+      end: toDateString(new Date(year, month + 1, 0)),
+    };
+  }
+
+  function toDateString(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  function getMemberRates(team, uid) {
+    const settings = team?.memberSettings?.[uid] || {};
+    return {
+      dailyRate: Number(settings.dailyRate) || 0,
+      extraHourRate: Number(settings.extraHourRate) || 0,
+    };
+  }
+
+  function getWorkDayValue(work) {
+    if (work.type === "full-day") return 1;
+    if (work.type === "half-day") return 0.5;
+    return 0;
+  }
+
+  function getWorkEarnings(work, dailyRate, extraHourRate) {
+    const base =
+      work.type === "full-day"
+        ? dailyRate
+        : work.type === "half-day"
+          ? dailyRate / 2
+          : 0;
+    return base + (Number(work.overtimeHours) || 0) * extraHourRate;
+  }
 
   function getGreeting() {
     const hour = new Date().getHours();
