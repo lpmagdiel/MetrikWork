@@ -1,7 +1,7 @@
 <script>
-  import { CircleDollarSign, Edit2, Hash, ImageOff, TriangleAlert } from "lucide-svelte";
+  import { CircleDollarSign, Edit2, Hash, ImageOff, MapPin, TriangleAlert } from "lucide-svelte";
 
-  const { product, isEditable, onEdit } = $props();
+  const { product, isEditable, onEdit, onReport } = $props();
 
   function formatPrice(value) {
     return new Intl.NumberFormat("es-MX", {
@@ -75,8 +75,10 @@
 
   .product-actions {
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 4px;
     padding-right: 8px;
   }
 
@@ -102,6 +104,15 @@
     color: var(--text-secondary);
   }
 
+  .warning {
+    color: var(--warning-color);
+  }
+
+  .warning:hover {
+    background: var(--bg-warning-subtle);
+    color: var(--warning-color);
+  }
+
   .badge {
     display: inline-flex;
     align-items: center;
@@ -124,6 +135,19 @@
   .price {
     color: var(--success-color);
     background: color-mix(in srgb, var(--bg-success-subtle) 72%, var(--bg-card));
+  }
+
+  .location {
+    max-width: 100%;
+    color: var(--info-color);
+    background: var(--bg-info-subtle);
+  }
+
+  .location span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .product-thumb {
@@ -216,9 +240,26 @@
         {/if}
         {product.quantity}
       </span>
+      {#if product.locationName}
+        <span class="badge location">
+          <MapPin size={14} />
+          <span>{product.locationName}</span>
+        </span>
+      {/if}
     </div>
   </div>
   <div class="product-actions">
+    {#if onReport}
+      <button
+        class="icon-btn warning"
+        type="button"
+        aria-label={`Reportar problema con ${product.name}`}
+        title="Reportar problema"
+        onclick={() => onReport(product)}
+      >
+        <TriangleAlert size={18} />
+      </button>
+    {/if}
     {#if isEditable}
       <button
         class="icon-btn edit"

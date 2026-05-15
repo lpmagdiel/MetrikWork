@@ -47,7 +47,7 @@
 
     .toast.show {
         display: block;
-        top: 20px;
+        top: calc(var(--page-top-safe) + 20px);
         transition: top 0.5s ease-in-out;
     }
 

@@ -3,13 +3,22 @@
     Package,
     Plus,
     Search,
-    Edit2,
     Trash2,
-    AlertTriangle,
     X,
     Save,
     ChevronLeft,
-    Image as ImageIcon
+    Image as ImageIcon,
+    Wrench,
+    Boxes,
+    ArrowRight,
+
+    Archive,
+
+    DollarSign,
+
+    Wallet,
+    MapPin,
+    TriangleAlert,
   } from "lucide-svelte";
   import {
     inventoryStore,
@@ -21,11 +30,15 @@
     userStore,
     subscribeToTeamInventory,
     hasTeamPermission,
+    teamLocationsStore,
+    subscribeToTeamLocations,
+    createNotification,
   } from "../data/stores.js";
   import { navigateTo } from "../router.js";
   import { uploader, resizer } from "../data/fileHelper.js";
   import SliceContainer from "../components/SliceContainer.svelte";
   import Product from "../components/Product.svelte";
+  import BadgetButton from "../components/BadgetButton.svelte";
 
   const CLOUDINARY_PRESET_INVENTARY =
     import.meta.env.CLOUDINARY_PRESET_INVENTARY || "MetricWorkInventary";
@@ -42,12 +55,39 @@
   let fileInput;
   let pendingImageData = $state("");
   let isSaving = $state(false);
+  let showReportModal = $state(false);
+  let reportProduct = $state(null);
+  let reportDescription = $state("");
+  let isReporting = $state(false);
+  let selectedInventoryType = $state("material");
+
+  const inventoryTypes = [
+    {
+      value: "tool",
+      title: "Herramientas",
+      description: "Elementos no consumibles",
+      Icon: Wrench,
+    },
+    {
+      value: "material",
+      title: "Productos",
+      description: "Materiales y consumibles",
+      Icon: Boxes,
+    },
+  ];
 
   $effect(() => {
     if ($selectedTeamId && canViewInventory) {
       subscribeToTeamInventory($selectedTeamId);
     }
     return () => subscribeToTeamInventory(null);
+  });
+
+  $effect(() => {
+    if ($selectedTeamId && canViewInventory) {
+      subscribeToTeamLocations($selectedTeamId);
+    }
+    return () => subscribeToTeamLocations(null);
   });
 
   // Form Data
@@ -58,21 +98,52 @@
     category: "",
     minStock: 5,
     imageUrl: "",
+    productType: "material",
+    locationId: "",
+    locationName: "",
   });
 
-  // Derived filtered items
-  let filteredItems = $derived($inventoryStore.filter(
-    (item) =>
-      item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.category?.toLowerCase().includes(searchTerm.toLowerCase()),
+  function getProductType(item) {
+    return item.productType || "material";
+  }
+
+  function getTypeCount(type) {
+    return $inventoryStore.filter((item) => getProductType(item) === type).length;
+  }
+
+  function getProductLocationName(item) {
+    return (
+      $teamLocationsStore.find((location) => location.id === item.locationId)?.name ||
+      item.locationName ||
+      ""
+    );
+  }
+
+  let currentTypeLabel = $derived(
+    inventoryTypes.find((type) => type.value === selectedInventoryType)?.title || "Inventario",
+  );
+
+  let typeFilteredItems = $derived($inventoryStore.filter(
+    (item) => getProductType(item) === selectedInventoryType,
+  ));
+
+  let filteredItems = $derived(typeFilteredItems.filter(
+    (item) => {
+      const normalizedSearch = searchTerm.toLowerCase();
+      return (
+        item.name.toLowerCase().includes(normalizedSearch) ||
+        item.category?.toLowerCase().includes(normalizedSearch) ||
+        getProductLocationName(item).toLowerCase().includes(normalizedSearch)
+      );
+    },
   ));
 
   // Stats
-  let totalItems = $derived($inventoryStore.length);
-  let lowStockItems = $derived($inventoryStore.filter(
+  let totalItems = $derived(typeFilteredItems.length);
+  let lowStockItems = $derived(typeFilteredItems.filter(
     (item) => item.quantity <= item.minStock,
   ).length);
-  let totalValue = $derived($inventoryStore.reduce(
+  let totalValue = $derived(typeFilteredItems.reduce(
     (sum, item) => sum + item.price * item.quantity,
     0,
   ));
@@ -88,7 +159,11 @@
         category: item.category,
         minStock: item.minStock,
         imageUrl: item.imageUrl || "",
+        productType: item.productType || "material",
+        locationId: item.locationId || "",
+        locationName: item.locationName || "",
       };
+      selectedInventoryType = formData.productType;
     } else {
       editingId = null;
       formData = {
@@ -98,6 +173,9 @@
         category: "",
         minStock: 5,
         imageUrl: "",
+        productType: selectedInventoryType,
+        locationId: "",
+        locationName: "",
       };
     }
     pendingImageData = "";
@@ -151,6 +229,75 @@
     pendingImageData = "";
   }
 
+  function openReportModal(product) {
+    reportProduct = product;
+    reportDescription = "";
+    showReportModal = true;
+  }
+
+  function closeReportModal() {
+    showReportModal = false;
+    reportProduct = null;
+    reportDescription = "";
+    isReporting = false;
+  }
+
+  function getReporterName() {
+    return $userStore?.name || $userStore?.displayName || $userStore?.email || "Un miembro";
+  }
+
+  function getReportRecipients() {
+    const reporterId = $userStore?.uid;
+    const members = Array.isArray(team?.members) ? team.members : [];
+    const recipients = members.filter((memberId) => memberId && memberId !== reporterId);
+    return recipients.length ? recipients : reporterId ? [reporterId] : [];
+  }
+
+  async function handleReportProblem() {
+    if (!reportProduct || !reportDescription.trim() || isReporting) return;
+
+    const recipients = getReportRecipients();
+    if (!recipients.length) {
+      alert("No se pudo encontrar a quién notificar.");
+      return;
+    }
+
+    isReporting = true;
+    try {
+      const reporter = getReporterName();
+      const reportDate = new Date().toLocaleString("es-ES", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      const locationText = reportProduct.locationName
+        ? `\nUbicación: ${reportProduct.locationName}`
+        : "";
+      const message = `Producto: ${reportProduct.name}${locationText}\nProblema: ${reportDescription.trim()}\nReportado por: ${reporter}\nFecha: ${reportDate}`;
+
+      await Promise.all(
+        recipients.map((recipientId) =>
+          createNotification(recipientId, "Problema reportado en inventario", message, {
+            type: "inventory-problem",
+            sourceId: reportProduct.id,
+            teamId,
+            url: `/teams/${teamId}/inventory`,
+          }),
+        ),
+      );
+
+      closeReportModal();
+      alert("Problema reportado correctamente.");
+    } catch (error) {
+      console.error("Error reporting product problem:", error);
+      alert("No se pudo reportar el problema.");
+    } finally {
+      isReporting = false;
+    }
+  }
+
   async function handleSubmit() {
     if (!$selectedTeamId) {
       alert("Por favor selecciona un equipo primero");
@@ -160,7 +307,13 @@
     if (isSaving) return;
     isSaving = true;
     try {
-      const productData = { ...formData };
+      const productData = {
+        ...formData,
+        productType: formData.productType || selectedInventoryType,
+        locationName:
+          $teamLocationsStore.find((location) => location.id === formData.locationId)?.name ||
+          "",
+      };
       if (pendingImageData) {
         productData.imageUrl = await uploader(
           pendingImageData,
@@ -172,6 +325,7 @@
       } else {
         await addProduct($selectedTeamId, productData);
       }
+      selectedInventoryType = productData.productType;
       closeModal();
     } catch (error) {
       alert("Error al guardar el producto: " + error.message);
@@ -217,18 +371,15 @@
     </div>
   {:else}
     <div class="inventory-resum-container">
-      <div class="stat-card">
-        <h3>Total Productos</h3>
-        <p class="stat-value">{totalItems}</p>
-      </div>
-      <div class="stat-card warning">
-        <h3>Stock Bajo</h3>
-        <p class="stat-value">{lowStockItems}</p>
-      </div>
-      <div class="stat-card">
-        <h3>Valor Total</h3>
-        <p class="stat-value">{formatCurrency(totalValue)}</p>
-      </div>
+      <BadgetButton text={`Total: ${totalItems}`} >
+        <Package size={24} color="var(--text-primary)" />
+      </BadgetButton>
+      <BadgetButton text={`Bajos: ${lowStockItems}`} >
+        <Archive size={24} color="var(--text-primary)" />
+      </BadgetButton>
+            <BadgetButton text={`${formatCurrency(totalValue)}`} >
+        <Wallet size={24} color="var(--text-primary)" />
+      </BadgetButton>
     </div>
 
     <div class="content">
@@ -237,24 +388,103 @@
         <Search size={20} color="var(--text-secondary)" />
         <input
           type="text"
-          placeholder="Buscar producto..."
+          placeholder={`Buscar en ${currentTypeLabel.toLowerCase()}...`}
           bind:value={searchTerm}
         />
       </div>
     </div>
 
-    <div class="table-container">
-      {#each filteredItems as item (item.id)}
-        <Product 
-          product={item} 
-          isEditable={canEditInventory} 
-          onEdit={(product) => openModal(product)}
-        />
+    <div class="inventory-type-grid" aria-label="Tipos de inventario">
+      {#each inventoryTypes as type}
+        <button
+          class:active={selectedInventoryType === type.value}
+          class="inventory-type-card"
+          type="button"
+          onclick={() => {
+            selectedInventoryType = type.value;
+            searchTerm = "";
+          }}
+        >
+          <span class="type-icon">
+            <svelte:component this={type.Icon} size={28} />
+          </span>
+          <span class="type-copy">
+            <strong>{type.title}</strong>
+            <small>{type.description}</small>
+          </span>
+          <span class="type-meta">
+            <span>{getTypeCount(type.value)}</span>
+            <ArrowRight size={18} />
+          </span>
+        </button>
       {/each}
+    </div>
+
+    <div class="table-container">
+      {#if filteredItems.length}
+        {#each filteredItems as item (item.id)}
+          <Product
+            product={{ ...item, locationName: getProductLocationName(item) }}
+            isEditable={canEditInventory}
+            onEdit={(product) => openModal(product)}
+            onReport={(product) => openReportModal(product)}
+          />
+        {/each}
+      {:else}
+        <div class="empty-state">
+          No hay elementos en {currentTypeLabel.toLowerCase()}.
+        </div>
+      {/if}
     </div>
     </div>
   {/if}
 </div>
+
+<SliceContainer bind:show={showReportModal}>
+  <div class="slice-content">
+    <div class="slice-header">
+      <h2>Reportar problema</h2>
+    </div>
+
+    {#if reportProduct}
+      <div class="report-product-summary">
+        <TriangleAlert size={22} />
+        <div>
+          <strong>{reportProduct.name}</strong>
+          {#if reportProduct.locationName}
+            <span>{reportProduct.locationName}</span>
+          {/if}
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="report-description">Descripción del problema</label>
+        <textarea
+          id="report-description"
+          rows="5"
+          bind:value={reportDescription}
+          placeholder="Describe qué ocurre con este producto..."
+        ></textarea>
+      </div>
+
+      <div class="slice-actions">
+        <button
+          type="button"
+          class="save-btn block-btn"
+          onclick={handleReportProblem}
+          disabled={isReporting || !reportDescription.trim()}
+        >
+          {#if isReporting}
+            <span>Enviando...</span>
+          {:else}
+            <TriangleAlert size={20} />
+            <span>Enviar reporte</span>
+          {/if}
+        </button>
+      </div>
+    {/if}
+  </div>
+</SliceContainer>
 
 <SliceContainer bind:show={showModal}>
   <div class="slice-content">
@@ -303,6 +533,35 @@
           required
           placeholder="Ej. Laptop HP"
         />
+      </div>
+
+      <div class="form-group">
+        <label>Tipo de inventario</label>
+        <div class="type-selector">
+          {#each inventoryTypes as type}
+            <button
+              type="button"
+              class:active={formData.productType === type.value}
+              onclick={() => (formData.productType = type.value)}
+            >
+              <svelte:component this={type.Icon} size={18} />
+              <span>{type.title}</span>
+            </button>
+          {/each}
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="locationId">Ubicación</label>
+        <div class="select-with-icon">
+          <MapPin size={18} />
+          <select id="locationId" bind:value={formData.locationId}>
+            <option value="">Sin ubicación</option>
+            {#each $teamLocationsStore as location (location.id)}
+              <option value={location.id}>{location.name}</option>
+            {/each}
+          </select>
+        </div>
       </div>
 
       <div class="form-row">
@@ -423,8 +682,102 @@
 
   .inventory-resum-container {
     display: flex;
-    gap: 8px;
+    gap: 5px;
+    width: 100%;
+    justify-content: space-between;
+    align-items: center;
   }
+
+  .inventory-type-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .inventory-type-card {
+    min-height: 118px;
+    width: 100%;
+    background: var(--bg-card);
+    border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+    color: var(--text-primary);
+    cursor: pointer;
+    display: grid;
+    grid-template-columns: 50px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+    padding: 18px;
+    text-align: left;
+  }
+
+  .inventory-type-card:hover {
+    border-color: color-mix(in srgb, var(--accent-color) 55%, var(--border-color));
+    box-shadow: var(--shadow-soft);
+    transform: translateY(-1px);
+  }
+
+  .inventory-type-card.active {
+    border-color: var(--accent-color);
+    background: color-mix(in srgb, var(--bg-accent-subtle) 24%, var(--bg-card));
+    box-shadow: var(--shadow-soft);
+  }
+
+  .type-icon {
+    width: 50px;
+    aspect-ratio: 1;
+    border-radius: 14px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .inventory-type-card.active .type-icon {
+    background: var(--accent-strong);
+    color: var(--bg-card);
+  }
+
+  .type-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .type-copy strong {
+    font-size: 17px;
+    line-height: 1.15;
+    color: var(--text-primary);
+  }
+
+  .type-copy small {
+    font-size: 13px;
+    line-height: 1.25;
+    color: var(--text-secondary);
+  }
+
+  .type-meta {
+    min-width: 54px;
+    min-height: 34px;
+    padding: 0 10px;
+    border-radius: 999px;
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .inventory-type-card.active .type-meta {
+    background: var(--bg-card);
+    color: var(--text-primary);
+  }
+
   .fab {
     position: fixed;
     bottom: var(--floating-action-bottom);
@@ -517,6 +870,12 @@
     padding-top: 10px;
   }
 
+  .table-container .empty-state {
+    background: var(--bg-card);
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius-md);
+  }
+
   .icon-btn {
     border: none;
     background: transparent;
@@ -570,6 +929,86 @@
     font-size: 14px;
     box-sizing: border-box;
     transition: border-color 0.2s;
+  }
+
+  textarea {
+    width: 100%;
+    min-height: 132px;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    box-sizing: border-box;
+    font-size: 15px;
+    line-height: 1.4;
+    resize: vertical;
+    outline: none;
+  }
+
+  textarea:focus {
+    border-color: var(--accent-color);
+    background: var(--bg-card);
+  }
+
+  .report-product-summary {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding: 14px;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--bg-warning-subtle);
+    color: var(--warning-color);
+  }
+
+  .report-product-summary div {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .report-product-summary strong {
+    color: var(--text-primary);
+    font-size: 15px;
+    line-height: 1.25;
+  }
+
+  .report-product-summary span {
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.25;
+  }
+
+  .select-with-icon {
+    width: 100%;
+    min-height: 48px;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px;
+    box-sizing: border-box;
+  }
+
+  .select-with-icon:focus-within {
+    border-color: var(--accent-color);
+    background: var(--bg-card);
+  }
+
+  .select-with-icon select {
+    width: 100%;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 15px;
+    min-width: 0;
   }
 
   input:focus {
@@ -684,14 +1123,47 @@
     color: var(--text-primary);
   }
 
+  .type-selector {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .type-selector button {
+    min-height: 48px;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-weight: 700;
+  }
+
+  .type-selector button.active {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+    color: var(--bg-card);
+  }
+
   @media (max-width: 640px) {
     .header {
       align-items: flex-start;
       flex-direction: column;
     }
 
+    .inventory-resum-container,
+    .inventory-type-grid,
     .form-row {
       grid-template-columns: 1fr;
+    }
+
+    .inventory-type-card {
+      min-height: 104px;
+      padding: 16px;
     }
   }
 

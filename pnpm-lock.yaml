@@ -26,6 +26,9 @@ importers:
       svelte-gestures:
         specifier: ^5.2.2
         version: 5.2.2
+      sweetalert2:
+        specifier: ^11.26.24
+        version: 11.26.24
     devDependencies:
       '@stripe/stripe-js':
         specifier: ^8.7.0
@@ -2026,6 +2029,9 @@ packages:
   svelte@5.50.1:
     resolution: {integrity: sha512-/Jlom4ddkISyVHXpM2O5dXP9pYnaiFrVQzPbIL1/pEoOa77ZunCb6nDgUCTNCQ/X3t64z9ukrK6R+BbB3kPR3A==}
     engines: {node: '>=18'}
+
+  sweetalert2@11.26.24:
+    resolution: {integrity: sha512-SLgukW4wicewpW5VOukSXY5Z6DL/z7HCOK2ODSjmQPiSphCN8gJAmh9npoceXOtBRNoDN0xIz+zHYthtfiHmjg==}
 
   temp-dir@2.0.0:
     resolution: {integrity: sha512-aoBAniQmmwtcKp/7BzsH8Cxzv8OL736p7v1ihGb5e9DJ9kTwGWHrQrVB5+lfVDzfGrdRzXch+ig7LHaY1JTOrg==}
@@ -4507,6 +4513,8 @@ snapshots:
       locate-character: 3.0.0
       magic-string: 0.30.21
       zimmerframe: 1.1.4
+
+  sweetalert2@11.26.24: {}
 
   temp-dir@2.0.0: {}
 

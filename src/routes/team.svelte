@@ -27,6 +27,8 @@
     X,
     User,
     Calendar1,
+    MapPinned,
+    Crosshair,
   } from "lucide-svelte";
   import {
     selectedTeam,
@@ -47,6 +49,11 @@
     hasTeamPermission,
     TEAM_PERMISSION_LABELS,
     TEAM_PERMISSION_ACTION_LABELS,
+    teamLocationsStore,
+    subscribeToTeamLocations,
+    addTeamLocation,
+    updateTeamLocation,
+    deleteTeamLocation,
   } from "../data/stores.js";
   import { navigateTo } from "../router.js";
   import SliceContainer from "../components/SliceContainer.svelte";
@@ -80,6 +87,17 @@
   let typeToast = $state("");
   let showToast = $state(false);
   let showWorkdayForm = $state(false);
+  let showLocationForm = $state(false);
+  let editingLocationId = $state(null);
+  let isSavingLocation = $state(false);
+  let isLocating = $state(false);
+  let locationError = $state("");
+  let locationForm = $state({
+    name: "",
+    description: "",
+    lat: "",
+    lon: "",
+  });
   let hasWorkdayToday = $state(false);
   let isCheckingWorkday = $state(false);
   let workDay = $state({
@@ -118,6 +136,13 @@
       subscribeToTeamTasks(team.id);
     }
     return () => subscribeToTeamTasks(null);
+  });
+
+  $effect(() => {
+    if (team?.id) {
+      subscribeToTeamLocations(team.id);
+    }
+    return () => subscribeToTeamLocations(null);
   });
 
   function openAddTask() {
@@ -346,6 +371,139 @@
       isSaving = false;
     }
   }
+
+  function resetLocationForm() {
+    editingLocationId = null;
+    locationForm = {
+      name: "",
+      description: "",
+      lat: "",
+      lon: "",
+    };
+    locationError = "";
+    isLocating = false;
+  }
+
+  function openLocationForm() {
+    resetLocationForm();
+    showLocationForm = true;
+  }
+
+  function openEditLocationForm(location) {
+    editingLocationId = location.id;
+    locationForm = {
+      name: location.name || "",
+      description: location.description || "",
+      lat: location.gps?.lat?.toString() || "",
+      lon: location.gps?.lon?.toString() || "",
+    };
+    locationError = "";
+    isLocating = false;
+    showLocationForm = true;
+  }
+
+  function closeLocationForm() {
+    showLocationForm = false;
+    resetLocationForm();
+  }
+
+  function useCurrentLocation() {
+    if (!navigator.geolocation) {
+      locationError = "Tu navegador no permite obtener la ubicación GPS.";
+      return;
+    }
+
+    isLocating = true;
+    locationError = "";
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        locationForm.lat = position.coords.latitude.toFixed(6);
+        locationForm.lon = position.coords.longitude.toFixed(6);
+        isLocating = false;
+      },
+      (error) => {
+        const messages = {
+          1: "Permiso de ubicación denegado.",
+          2: "No se pudo obtener tu ubicación actual.",
+          3: "La solicitud de ubicación tardó demasiado.",
+        };
+
+        locationError = messages[error.code] || "No se pudo obtener tu ubicación actual.";
+        isLocating = false;
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 60000,
+      },
+    );
+  }
+
+  async function saveTeamLocation() {
+    if (!team?.id || !locationForm.name.trim()) return;
+
+    const hasLat = locationForm.lat.trim() !== "";
+    const hasLon = locationForm.lon.trim() !== "";
+    let gps = null;
+
+    if (hasLat || hasLon) {
+      const lat = Number(locationForm.lat);
+      const lon = Number(locationForm.lon);
+
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        locationError = "Introduce coordenadas GPS válidas.";
+        return;
+      }
+
+      if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+        locationError = "La latitud debe estar entre -90 y 90, y la longitud entre -180 y 180.";
+        return;
+      }
+
+      gps = { lat, lon };
+    }
+
+    isSavingLocation = true;
+    locationError = "";
+    try {
+      const wasEditingLocation = Boolean(editingLocationId);
+      const locationData = {
+        name: locationForm.name.trim(),
+        description: locationForm.description.trim(),
+        gps,
+      };
+
+      if (editingLocationId) {
+        await updateTeamLocation(team.id, editingLocationId, locationData);
+      } else {
+        await addTeamLocation(team.id, locationData);
+      }
+      closeLocationForm();
+      showNotification(
+        wasEditingLocation ? "Ubicación actualizada" : "Ubicación agregada al equipo",
+        "success",
+      );
+    } catch (error) {
+      console.error("Error saving team location:", error);
+      locationError = "No se pudo guardar la ubicación.";
+    } finally {
+      isSavingLocation = false;
+    }
+  }
+
+  async function removeTeamLocation(location) {
+    if (!team?.id || !location?.id) return;
+    if (!confirm(`¿Eliminar "${location.name}"?`)) return;
+
+    try {
+      await deleteTeamLocation(team.id, location.id);
+      showNotification("Ubicación eliminada", "success");
+    } catch (error) {
+      console.error("Error deleting team location:", error);
+      showNotification("No se pudo eliminar la ubicación", "error");
+    }
+  }
 </script>
 
 <div class="team-detail">
@@ -460,6 +618,59 @@
             </button>
           {/if}
         </div>
+      </section>
+
+      <section class="locations-section">
+        <div class="section-header">
+          <h3>Ubicaciones ({$teamLocationsStore.length})</h3>
+          {#if canCreateSettings}
+            <button class="add-member-btn" onclick={openLocationForm} aria-label="Agregar ubicación">
+              <Plus size={18} />
+            </button>
+          {/if}
+        </div>
+
+        {#if $teamLocationsStore.length === 0}
+          <div class="compact-empty">
+            <MapPinned size={24} />
+            <span>No hay ubicaciones del equipo.</span>
+          </div>
+        {:else}
+          <div class="locations-list">
+            {#each $teamLocationsStore as location (location.id)}
+              <article class="location-item">
+                <div class="location-icon">
+                  <MapPinned size={20} />
+                </div>
+                <div class="location-info">
+                  <h4>{location.name}</h4>
+                  <p>{location.description || "Sin descripción"}</p>
+                  {#if location.gps}
+                    <small>{location.gps.lat}, {location.gps.lon}</small>
+                  {/if}
+                </div>
+                {#if canEditSettings}
+                  <div class="location-actions">
+                    <button
+                      class="member-settings-btn"
+                      onclick={() => openEditLocationForm(location)}
+                      aria-label="Editar ubicación"
+                    >
+                      <Edit2 size={18} />
+                    </button>
+                    <button
+                      class="member-settings-btn"
+                      onclick={() => removeTeamLocation(location)}
+                      aria-label="Eliminar ubicación"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
+                {/if}
+              </article>
+            {/each}
+          </div>
+        {/if}
       </section>
 
       <section class="members-section">
@@ -641,6 +852,82 @@
           {:else}
             <Save size={20} />
             <span>Guardar Ajustes</span>
+          {/if}
+        </button>
+      </div>
+    </SliceContainer>
+
+    <SliceContainer bind:show={showLocationForm}>
+      <div class="member-settings-form">
+        <h3>{editingLocationId ? "Editar ubicación" : "Nueva ubicación"}</h3>
+        <p class="form-instruction">
+          {editingLocationId
+            ? "Actualiza este lugar del equipo y sus datos GPS opcionales."
+            : "Guarda un lugar del equipo para enlazarlo con productos del inventario."}
+        </p>
+
+        <div class="form-group">
+          <label for="team-location-name">Nombre</label>
+          <input
+            id="team-location-name"
+            type="text"
+            bind:value={locationForm.name}
+            placeholder="Salón de Barcelona, almacén..."
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="team-location-description">Descripción</label>
+          <textarea
+            id="team-location-description"
+            rows="4"
+            bind:value={locationForm.description}
+            placeholder="Notas sobre esta ubicación"
+          ></textarea>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="team-location-lat">Latitud</label>
+            <input
+              id="team-location-lat"
+              type="number"
+              step="any"
+              bind:value={locationForm.lat}
+              placeholder="41.3874"
+            />
+          </div>
+          <div class="form-group">
+            <label for="team-location-lon">Longitud</label>
+            <input
+              id="team-location-lon"
+              type="number"
+              step="any"
+              bind:value={locationForm.lon}
+              placeholder="2.1686"
+            />
+          </div>
+        </div>
+
+        <button class="secondary-action-btn" onclick={useCurrentLocation} disabled={isLocating}>
+          <Crosshair size={18} />
+          <span>{isLocating ? "Obteniendo ubicación..." : "Usar mi ubicación actual"}</span>
+        </button>
+
+        {#if locationError}
+          <p class="form-error">{locationError}</p>
+        {/if}
+
+        <button
+          class="save-settings-btn"
+          onclick={saveTeamLocation}
+          disabled={isSavingLocation || !locationForm.name.trim()}
+        >
+          {#if isSavingLocation}
+            <span>Guardando...</span>
+          {:else}
+            <Save size={20} />
+            <span>{editingLocationId ? "Actualizar Ubicación" : "Guardar Ubicación"}</span>
           {/if}
         </button>
       </div>
@@ -936,6 +1223,7 @@
     background: var(--bg-danger-subtle);
     color: var(--danger-color);
   }
+  .locations-section,
   .members-section {
     margin-bottom: 32px;
   }
@@ -977,6 +1265,84 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
+  }
+
+  .locations-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .location-item,
+  .compact-empty {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+  }
+
+  .compact-empty {
+    min-height: 82px;
+    padding: 18px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-weight: 600;
+  }
+
+  .location-item {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+  }
+
+  .location-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .location-icon {
+    width: 44px;
+    aspect-ratio: 1;
+    border-radius: 12px;
+    background: var(--bg-info-subtle);
+    color: var(--info-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .location-info {
+    min-width: 0;
+  }
+
+  .location-info h4,
+  .location-info p,
+  .location-info small {
+    margin: 0;
+  }
+
+  .location-info h4 {
+    color: var(--text-primary);
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+
+  .location-info p,
+  .location-info small {
+    color: var(--text-secondary);
+    display: block;
+    font-size: 13px;
+    line-height: 1.35;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .member-item {
@@ -1079,6 +1445,63 @@
     font-weight: 600;
     color: var(--text-primary);
     margin-bottom: 8px;
+  }
+
+  .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .form-group > input,
+  .form-group > textarea {
+    width: 100%;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    box-sizing: border-box;
+    font-size: 15px;
+    padding: 12px 14px;
+    outline: none;
+  }
+
+  .form-group > textarea {
+    resize: vertical;
+    min-height: 104px;
+  }
+
+  .form-group > input:focus,
+  .form-group > textarea:focus {
+    border-color: var(--accent-color);
+    background: var(--bg-card);
+  }
+
+  .secondary-action-btn {
+    width: 100%;
+    min-height: 44px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .secondary-action-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+
+  .form-error {
+    margin: 12px 0 0;
+    color: var(--danger-color);
+    font-size: 13px;
+    font-weight: 600;
   }
 
   .input-with-icon {

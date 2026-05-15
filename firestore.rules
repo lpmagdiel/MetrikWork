@@ -90,6 +90,16 @@ service cloud.firestore {
         allow delete: if hasTeamPermission(teamId, "inventory", "delete");
       }
 
+      match /locations/{locationId} {
+        allow read: if isTeamMember(teamId);
+        allow create: if hasTeamPermission(teamId, "settings", "create") ||
+                      hasTeamPermission(teamId, "inventory", "create");
+        allow update: if hasTeamPermission(teamId, "settings", "edit") ||
+                      hasTeamPermission(teamId, "inventory", "edit");
+        allow delete: if hasTeamPermission(teamId, "settings", "delete") ||
+                      hasTeamPermission(teamId, "inventory", "delete");
+      }
+
       match /messages/{messageId} {
         allow read, write: if isTeamMember(teamId);
       }
