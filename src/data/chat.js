@@ -10,7 +10,8 @@ import {
     startAfter,
     getDocs,
     getDoc,
-    doc
+    doc,
+    updateDoc
 } from 'firebase/firestore';
 import { createNotification } from './notifications.js';
 
@@ -67,6 +68,7 @@ function getMessagePreview(messageData) {
     if (messageData.text) return messageData.text;
     if (messageData.type === 'IMAGE' || messageData.imageUrl) return 'Envió una imagen';
     if (messageData.type === 'SIMPLE_LOCATION') return 'Envió una ubicación';
+    if (messageData.type === 'POLL') return 'Envió una encuesta';
     return 'Nuevo mensaje';
 }
 
@@ -124,6 +126,10 @@ export async function sendTeamMessage(teamId, content, user, imageUrl = null, ex
             messageData.location = extraData.location;
         }
 
+        if (extraData.poll) {
+            messageData.poll = extraData.poll;
+        }
+
         const docRef = await addDoc(collection(db, 'teams', teamId, 'messages'), {
             ...messageData
         });
@@ -137,6 +143,20 @@ export async function sendTeamMessage(teamId, content, user, imageUrl = null, ex
         }
     } catch (error) {
         console.error("Error sending message:", error);
+        throw error;
+    }
+}
+
+export async function voteTeamPoll(teamId, messageId, userId, optionId) {
+    if (!teamId || !messageId || !userId || !optionId) return;
+    try {
+        const messageRef = doc(db, 'teams', teamId, 'messages', messageId);
+        await updateDoc(messageRef, {
+            [`poll.votes.${userId}`]: optionId,
+            updatedAt: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error("Error voting poll:", error);
         throw error;
     }
 }

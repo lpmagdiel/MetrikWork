@@ -94,11 +94,54 @@ function getProjectId() {
 
 function getServiceAccountConfig() {
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+  const privateKey = normalizePrivateKey(
+    process.env.FIREBASE_PRIVATE_KEY,
+    process.env.FIREBASE_PRIVATE_KEY_BASE64
+  );
   if (!clientEmail || !privateKey) {
     throw new Error('FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY are required');
   }
   return { clientEmail, privateKey };
+}
+
+function normalizePrivateKey(rawPrivateKey, base64PrivateKey) {
+  let privateKey = rawPrivateKey || '';
+
+  if (!privateKey && base64PrivateKey) {
+    privateKey = Buffer.from(base64PrivateKey, 'base64').toString('utf8');
+  }
+
+  privateKey = privateKey.trim();
+  if (!privateKey) return '';
+
+  if (
+    (privateKey.startsWith('"') && privateKey.endsWith('"')) ||
+    (privateKey.startsWith("'") && privateKey.endsWith("'"))
+  ) {
+    privateKey = privateKey.slice(1, -1);
+  }
+
+  privateKey = privateKey
+    .replace(/\\n/g, '\n')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
+
+  if (!privateKey.includes('\n') && privateKey.includes('-----BEGIN PRIVATE KEY-----')) {
+    privateKey = privateKey
+      .replace('-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n')
+      .replace('-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----')
+      .replace(/([A-Za-z0-9+/=]{64})/g, '$1\n');
+  }
+
+  try {
+    crypto.createPrivateKey(privateKey);
+  } catch {
+    throw new Error(
+      'FIREBASE_PRIVATE_KEY is not a valid PEM private key. Use escaped newlines (\\n) or FIREBASE_PRIVATE_KEY_BASE64.'
+    );
+  }
+
+  return privateKey;
 }
 
 async function getAccessToken() {

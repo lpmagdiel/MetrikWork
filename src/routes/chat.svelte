@@ -2,12 +2,13 @@
   // @ts-nocheck
 
   import { onMount, onDestroy } from "svelte";
-  import { ChevronLeft, Image as ImageIcon, MapPinned, Plus, Send } from "lucide-svelte";
+  import { BarChart3, ChevronLeft, Image as ImageIcon, MapPinned, Plus, Send, Trash2 } from "lucide-svelte";
   import {
     userStore,
     chatMessagesStore,
     subscribeToTeamChat,
     sendTeamMessage,
+    voteTeamPoll,
     getOlderTeamMessages,
     mergeChatMessages,
     selectedTeamId,
@@ -31,9 +32,13 @@
   let showImageSlice = $state(false);
   let showAttachMenu = $state(false);
   let showLocationSlice = $state(false);
+  let showPollSlice = $state(false);
   let fileInput;
   let previewUrl = $state("");
   let isUploading = $state(false);
+  let isSendingPoll = $state(false);
+  let pollQuestion = $state("");
+  let pollOptions = $state(["", ""]);
   let isLoadingOlder = $state(false);
   let hasOlderMessages = $state(true);
   let shouldStickToBottom = $state(true);
@@ -108,6 +113,94 @@
   function openLocationPicker() {
     showAttachMenu = false;
     showLocationSlice = true;
+  }
+
+  function openPollCreator() {
+    showAttachMenu = false;
+    pollQuestion = "";
+    pollOptions = ["", ""];
+    showPollSlice = true;
+  }
+
+  function addPollOption() {
+    if (pollOptions.length >= 6) return;
+    pollOptions = [...pollOptions, ""];
+  }
+
+  function removePollOption(index) {
+    if (pollOptions.length <= 2) return;
+    pollOptions = pollOptions.filter((_, optionIndex) => optionIndex !== index);
+  }
+
+  function updatePollOption(index, value) {
+    pollOptions = pollOptions.map((option, optionIndex) =>
+      optionIndex === index ? value : option,
+    );
+  }
+
+  function createPollOptionId(index) {
+    if (crypto?.randomUUID) return crypto.randomUUID();
+    return `${Date.now()}-${index}`;
+  }
+
+  async function handleSendPoll() {
+    const question = pollQuestion.trim();
+    const options = pollOptions
+      .map((option) => option.trim())
+      .filter(Boolean)
+      .map((text, index) => ({ id: createPollOptionId(index), text }));
+
+    if (!question || options.length < 2 || !teamId || !$userStore || isSendingPoll) return;
+
+    isSendingPoll = true;
+    try {
+      shouldStickToBottom = true;
+      await sendTeamMessage(teamId, "", $userStore, null, {
+        type: "POLL",
+        poll: {
+          question,
+          options,
+          votes: {},
+          allowMultiple: false,
+        },
+      });
+      showPollSlice = false;
+      pollQuestion = "";
+      pollOptions = ["", ""];
+    } catch (error) {
+      console.error("Error sending poll", error);
+      showErrorAlert("Error", "Error al enviar la encuesta");
+    } finally {
+      isSendingPoll = false;
+    }
+  }
+
+  async function handlePollVote(message, optionId) {
+    if (!teamId || !$userStore?.uid || !message?.id || !optionId) return;
+    try {
+      await voteTeamPoll(teamId, message.id, $userStore.uid, optionId);
+    } catch (error) {
+      console.error("Error voting poll", error);
+      showErrorAlert("Error", "No se pudo registrar tu voto");
+    }
+  }
+
+  function getPollVotes(poll) {
+    return Object.values(poll?.votes || {});
+  }
+
+  function getPollOptionVotes(poll, optionId) {
+    return getPollVotes(poll).filter((vote) => vote === optionId).length;
+  }
+
+  function getPollPercentage(poll, optionId) {
+    const totalVotes = getPollVotes(poll).length;
+    if (!totalVotes) return 0;
+    return Math.round((getPollOptionVotes(poll, optionId) / totalVotes) * 100);
+  }
+
+  function getMyPollVote(poll) {
+    return poll?.votes?.[$userStore?.uid] || "";
   }
 
   async function handleFileChange(e) {
@@ -211,6 +304,7 @@
           <div
             class="message-bubble"
             class:location-bubble={msg.type === "SIMPLE_LOCATION" && msg.location}
+            class:poll-bubble={msg.type === "POLL" && msg.poll}
           >
             {#if msg.type === "SIMPLE_LOCATION" && msg.location}
               <LocationBox
@@ -218,6 +312,31 @@
                 name={msg.location.name}
                 description={msg.location.description || "Sin descripción"}
               />
+            {:else if msg.type === "POLL" && msg.poll}
+              <div class="poll-card">
+                <div class="poll-heading">
+                  <BarChart3 size={18} />
+                  <h3>{msg.poll.question}</h3>
+                </div>
+                <div class="poll-options">
+                  {#each msg.poll.options || [] as option}
+                    {@const voteCount = getPollOptionVotes(msg.poll, option.id)}
+                    {@const percentage = getPollPercentage(msg.poll, option.id)}
+                    {@const isSelected = getMyPollVote(msg.poll) === option.id}
+                    <button
+                      type="button"
+                      class="poll-option"
+                      class:selected={isSelected}
+                      onclick={() => handlePollVote(msg, option.id)}
+                    >
+                      <span class="poll-fill" style={`width: ${percentage}%;`}></span>
+                      <span class="poll-option-text">{option.text}</span>
+                      <span class="poll-option-meta">{voteCount} · {percentage}%</span>
+                    </button>
+                  {/each}
+                </div>
+                <span class="poll-total">{getPollVotes(msg.poll).length} votos</span>
+              </div>
             {:else if msg.imageUrl}
               <img src={msg.imageUrl} alt="Imagen" class="chat-image" />
             {/if}
@@ -251,6 +370,9 @@
           </button>
           <button type="button" onclick={openFilePicker} title="Enviar imagen">
             <ImageIcon size={20} />
+          </button>
+          <button type="button" onclick={openPollCreator} title="Crear encuesta">
+            <BarChart3 size={20} />
           </button>
         </div>
       {/if}
@@ -294,6 +416,68 @@
       {:else}
         <Send size={18} />
         <span>Enviar Imagen</span>
+      {/if}
+    </button>
+  </div>
+</SliceContainer>
+
+<SliceContainer bind:show={showPollSlice} bg="var(--bg-card)">
+  <div class="poll-creator">
+    <div class="location-picker-header">
+      <BarChart3 size={22} />
+      <h2>Nueva encuesta</h2>
+    </div>
+
+    <label for="poll-question">Pregunta</label>
+    <input
+      id="poll-question"
+      type="text"
+      bind:value={pollQuestion}
+      placeholder="Ej. ¿Qué día nos reunimos?"
+    />
+
+    <div class="poll-option-editor">
+      <span>Opciones</span>
+      {#each pollOptions as option, index}
+        <div class="poll-option-input">
+          <input
+            type="text"
+            value={option}
+            oninput={(event) => updatePollOption(index, event.currentTarget.value)}
+            placeholder={`Opción ${index + 1}`}
+          />
+          <button
+            type="button"
+            onclick={() => removePollOption(index)}
+            disabled={pollOptions.length <= 2}
+            aria-label="Eliminar opción"
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
+      {/each}
+    </div>
+
+    <button
+      type="button"
+      class="add-option-btn"
+      onclick={addPollOption}
+      disabled={pollOptions.length >= 6}
+    >
+      <Plus size={16} />
+      Añadir opción
+    </button>
+
+    <button
+      class="send-image-btn"
+      onclick={handleSendPoll}
+      disabled={isSendingPoll || !pollQuestion.trim() || pollOptions.filter((option) => option.trim()).length < 2}
+    >
+      {#if isSendingPoll}
+        <span>Enviando...</span>
+      {:else}
+        <Send size={18} />
+        <span>Enviar encuesta</span>
       {/if}
     </button>
   </div>
@@ -564,6 +748,102 @@
     margin: 0;
   }
 
+  .message-bubble.poll-bubble {
+    width: min(340px, 78vw);
+    padding: 10px;
+    background: var(--bg-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+  }
+
+  .message-wrapper.me .message-bubble.poll-bubble {
+    background: var(--bg-card);
+    color: var(--text-primary);
+  }
+
+  .poll-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .poll-heading {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    color: var(--text-primary);
+  }
+
+  .poll-heading h3 {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.3;
+    font-weight: 800;
+  }
+
+  .poll-options {
+    display: grid;
+    gap: 8px;
+  }
+
+  .poll-option {
+    position: relative;
+    overflow: hidden;
+    width: 100%;
+    min-height: 42px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    cursor: pointer;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 10px;
+    text-align: left;
+  }
+
+  .poll-option.selected {
+    border-color: var(--accent-strong);
+  }
+
+  .poll-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    background: var(--bg-accent-subtle);
+    opacity: 0.75;
+    pointer-events: none;
+  }
+
+  .poll-option-text,
+  .poll-option-meta {
+    position: relative;
+    z-index: 1;
+  }
+
+  .poll-option-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .poll-option-meta {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .poll-total {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
   .send-image-btn {
     width: 100%;
     background: var(--accent-strong);
@@ -664,6 +944,64 @@
     color: var(--bg-card);
     font-weight: 700;
     cursor: pointer;
+  }
+
+  .poll-creator {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 8px 16px 24px;
+  }
+
+  .poll-creator label,
+  .poll-option-editor > span {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .poll-creator input {
+    width: 100%;
+    box-sizing: border-box;
+    border-radius: var(--radius-sm);
+  }
+
+  .poll-option-editor {
+    display: grid;
+    gap: 8px;
+  }
+
+  .poll-option-input {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 42px;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .poll-option-input button,
+  .add-option-btn {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    min-height: 42px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-weight: 800;
+  }
+
+  .poll-option-input button:disabled,
+  .add-option-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .add-option-btn {
+    width: 100%;
   }
   .location-bubble{
     padding: 4px !important;
