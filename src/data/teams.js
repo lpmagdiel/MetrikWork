@@ -228,6 +228,10 @@ export async function updateTeamProfile(teamId, data) {
             updateData.photoURL = data.photoURL;
         }
 
+        if (data.overtimeLimitHours !== undefined) {
+            updateData.overtimeLimitHours = Math.max(0, Number(data.overtimeLimitHours) || 0);
+        }
+
         await updateDoc(doc(db, 'teams', teamId), updateData);
     } catch (error) {
         console.error("Error updating team profile:", error);

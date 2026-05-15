@@ -22,6 +22,10 @@
     getTeamWorks,
     assignWorkdayToMember,
     createNotification,
+    applyWorkdayOvertimeLimit,
+    exceedsOvertimeLimit,
+    getOvertimeLimitHours,
+    getOvertimeLimitMessage,
   } from "../data/stores.js";
 
   let messageToast = $state("");
@@ -49,6 +53,7 @@
   let isAdmin = $derived(
     $userStore?.uid && team?.admin && $userStore.uid === team.admin,
   );
+  let overtimeLimitHours = $derived(getOvertimeLimitHours(team));
 
   const monthNames = [
     "Enero",
@@ -69,6 +74,13 @@
     "full-day": "Jornada completa",
     "half-day": "Media jornada",
     overtime: "Horas extra",
+    variable: "Jornada variable",
+  };
+  const workTypeColors = {
+    "full-day": "#16a34a",
+    "half-day": "#f59e0b",
+    overtime: "#0284c7",
+    variable: "#7c3aed",
   };
 
   let calendarDays = $derived.by(() => {
@@ -186,6 +198,38 @@
       .toUpperCase();
   }
 
+  function getWorkType(work) {
+    if (work?.type === "full-day") return "full-day";
+    if (work?.type === "half-day") return "half-day";
+    if (work?.type === "variable") return "variable";
+    if (work?.type === "overtime" || Number(work?.overtimeHours) > 0) return "overtime";
+    return "full-day";
+  }
+
+  function getWorkColor(work) {
+    return workTypeColors[getWorkType(work)] || workTypeColors["full-day"];
+  }
+
+  function getDayTypes(assignments = []) {
+    return [...new Set(assignments.map(getWorkType))];
+  }
+
+  function getDayStyle(day) {
+    const types = getDayTypes(day?.assignments || []);
+    if (!types.length) return "";
+    const colors = types.map((type) => workTypeColors[type]);
+
+    if (colors.length === 1) {
+      return `--work-color: ${colors[0]}; --work-bg: ${colors[0]}18; --work-border: ${colors[0]};`;
+    }
+
+    const step = 100 / colors.length;
+    const gradientStops = colors
+      .map((color, index) => `${color} ${index * step}% ${(index + 1) * step}%`)
+      .join(", ");
+    return `--work-color: ${colors[0]}; --work-bg: linear-gradient(135deg, ${gradientStops}); --work-border: ${colors[0]};`;
+  }
+
   function prevMonth() {
     if (currentMonth === 0) {
       currentMonth = 11;
@@ -224,24 +268,30 @@
 
   async function handleSaveAssignment() {
     if (!team?.id || !assignmentForm.userId || !assignmentForm.date) return;
+    if (exceedsOvertimeLimit(assignmentForm.overtimeHours, team)) {
+      showNotification(getOvertimeLimitMessage(team), "error");
+      return;
+    }
+
     isSavingAssignment = true;
     try {
+      const limitedAssignment = applyWorkdayOvertimeLimit(assignmentForm, team);
       await assignWorkdayToMember(
         team.id,
-        assignmentForm.userId,
-        getMemberName(assignmentForm.userId),
-        assignmentForm,
+        limitedAssignment.userId,
+        getMemberName(limitedAssignment.userId),
+        limitedAssignment,
         $userStore?.uid || null,
       );
       await createNotification(
-        assignmentForm.userId,
+        limitedAssignment.userId,
         "Nueva jornada asignada",
-        buildAssignmentNotificationMessage(),
+        buildAssignmentNotificationMessage(limitedAssignment),
       );
       await loadWorks();
       openAddEvent = false;
-      selectedCalendarDate = assignmentForm.date;
-      selectedDateFilter = assignmentForm.date;
+      selectedCalendarDate = limitedAssignment.date;
+      selectedDateFilter = limitedAssignment.date;
       showNotification("Jornada asignada correctamente");
     } catch (error) {
       console.error("Error saving assignment:", error);
@@ -256,13 +306,13 @@
     selectedDateFilter = "";
   }
 
-  function buildAssignmentNotificationMessage() {
+  function buildAssignmentNotificationMessage(workDay = assignmentForm) {
     const teamName = team?.name || team?.team || "tu equipo";
-    const typeLabel = workTypeLabels[assignmentForm.type] || "Jornada";
-    const noteText = assignmentForm.note?.trim()
-      ? ` Nota: ${assignmentForm.note.trim()}.`
+    const typeLabel = workTypeLabels[workDay.type] || "Jornada";
+    const noteText = workDay.note?.trim()
+      ? ` Nota: ${workDay.note.trim()}.`
       : "";
-    return `${typeLabel} asignada para el ${formatDisplayDate(assignmentForm.date)} en ${teamName}.${noteText}`;
+    return `${typeLabel} asignada para el ${formatDisplayDate(workDay.date)} en ${teamName}.${noteText}`;
   }
 </script>
 
@@ -310,6 +360,14 @@
           {/each}
         </div>
 
+        <div class="work-legend">
+          {#each Object.entries(workTypeLabels) as [type, label]}
+            <span style={`--legend-color: ${workTypeColors[type]};`}>
+              <i></i>{label}
+            </span>
+          {/each}
+        </div>
+
         <div class="calendar-grid">
           {#each calendarDays as day}
             <button
@@ -317,6 +375,7 @@
               class:empty={!day}
               class:selected={day?.dateKey === selectedCalendarDate}
               class:marked={day?.assignments?.length > 0}
+              style={getDayStyle(day)}
               disabled={!day}
               onclick={() => selectCalendarDay(day)}
             >
@@ -326,7 +385,10 @@
                   <span class="assignment-count">{day.assignments.length}</span>
                   <span class="assignment-dots">
                     {#each day.assignments.slice(0, 3) as work}
-                      <i title={getMemberName(work.userId)}></i>
+                      <i
+                        style={`--dot-color: ${getWorkColor(work)};`}
+                        title={`${getMemberName(work.userId)} · ${workTypeLabels[getWorkType(work)]}`}
+                      ></i>
                     {/each}
                   </span>
                 {/if}
@@ -353,11 +415,11 @@
         <div class="day-assignments">
           {#if selectedDayAssignments.length > 0}
             {#each selectedDayAssignments as work (work.id)}
-              <article class="assignment-card">
+              <article class="assignment-card" style={`--work-color: ${getWorkColor(work)};`}>
                 <div class="avatar">{getMemberInitials(work.userId)}</div>
                 <div>
                   <h3>{getMemberName(work.userId)}</h3>
-                  <p>{workTypeLabels[work.type] || "Jornada"}</p>
+                  <p>{workTypeLabels[getWorkType(work)] || "Jornada"}</p>
                   {#if work.note}
                     <small><StickyNote size={13} /> {work.note}</small>
                   {/if}
@@ -409,14 +471,14 @@
         {:else if filteredWorks.length > 0}
           <div class="records-list">
             {#each filteredWorks as work (work.id)}
-              <article class="record-item">
+              <article class="record-item" style={`--work-color: ${getWorkColor(work)};`}>
                 <div class="record-date">
                   <CalendarDays size={18} />
                   <span>{formatDisplayDate(work.date)}</span>
                 </div>
                 <div class="record-main">
                   <h3>{getMemberName(work.userId)}</h3>
-                  <p>{workTypeLabels[work.type] || "Jornada"}</p>
+                  <p>{workTypeLabels[getWorkType(work)] || "Jornada"}</p>
                   {#if work.note}
                     <small>{work.note}</small>
                   {/if}
@@ -447,6 +509,9 @@
     <div class="assignment-form">
       <h3>Asignar jornada</h3>
       <p>Marca un día de trabajo para un miembro del equipo.</p>
+      {#if overtimeLimitHours > 0}
+        <p class="form-instruction">Límite de horas extra del equipo: {overtimeLimitHours}h.</p>
+      {/if}
 
       <label>
         <span>Miembro</span>
@@ -468,6 +533,7 @@
           <option value="full-day">Jornada completa</option>
           <option value="half-day">Media jornada</option>
           <option value="overtime">Horas extra</option>
+          <option value="variable">Jornada variable</option>
         </select>
       </label>
 
@@ -476,6 +542,7 @@
         <input
           type="number"
           min="0"
+          max={overtimeLimitHours || undefined}
           step="0.5"
           bind:value={assignmentForm.overtimeHours}
         />
@@ -641,6 +708,31 @@
     font-weight: 800;
   }
 
+  .work-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    margin: 0 0 12px;
+  }
+
+  .work-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 800;
+  }
+
+  .work-legend i {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--legend-color);
+    flex-shrink: 0;
+  }
+
   .calendar-day {
     min-width: 0;
     aspect-ratio: 1;
@@ -663,13 +755,19 @@
   }
 
   .calendar-day.marked {
-    background: var(--bg-success-subtle);
-    border-color: var(--accent-color);
+    background: var(--work-bg);
+    border-color: var(--work-border);
+    color: var(--text-primary);
   }
 
   .calendar-day.selected {
     background: var(--text-primary);
     color: var(--bg-card);
+    border-color: var(--text-primary);
+  }
+
+  .calendar-day.selected.marked {
+    box-shadow: inset 0 -4px 0 var(--work-color);
   }
 
   .day-number {
@@ -692,8 +790,7 @@
     width: 4px;
     height: 4px;
     border-radius: 50%;
-    background: currentColor;
-    opacity: 0.7;
+    background: var(--dot-color, currentColor);
   }
 
   .assign-btn,
@@ -724,11 +821,15 @@
   .assignment-card,
   .record-item {
     border: 1px solid var(--border-color);
+    border-left: 5px solid var(--work-color, var(--accent-color));
     border-radius: 12px;
     padding: 12px;
     display: flex;
     align-items: center;
     gap: 12px;
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--work-color, var(--accent-color)) 12%, transparent), transparent 52%),
+      var(--bg-card);
   }
 
   .avatar {

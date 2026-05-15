@@ -1,5 +1,5 @@
 <script>
-    import { ChevronLeft, DollarSign, Filter, CheckCircle, AlertCircle, Eye, History, Printer } from "lucide-svelte";
+    import { ChevronDown, ChevronLeft, DollarSign, Filter, CheckCircle, AlertCircle, Eye, History, Printer } from "lucide-svelte";
     import { selectedTeam, userStore, hasTeamPermission } from "../data/stores.js";
     import { getTeamPaymentsData, registerTeamPayment } from "../data/teamPayments.js";
     import { createNotification } from "../data/notifications.js";
@@ -29,6 +29,7 @@
     // Details Modal
     let showDetailsModal = $state(false);
     let selectedMemberDetails = $state(null);
+    let expandedMemberId = $state(null);
 
     let filteredMembers = $derived.by(() => {
         if (filterStatus === 'paid') return memberBalances.filter(m => m.balance <= 0.01);
@@ -123,6 +124,10 @@
     function openDetailsModal(member) {
         selectedMemberDetails = member;
         showDetailsModal = true;
+    }
+
+    function toggleMemberDetails(memberId) {
+        expandedMemberId = expandedMemberId === memberId ? null : memberId;
     }
 
     function formatMoney(amount) {
@@ -558,6 +563,87 @@
                     </tbody>
                 </table>
             </div>
+
+            <div class="mobile-members-list">
+                {#each filteredMembers as member}
+                    <article class="mobile-member-card">
+                        <div class="mobile-member-summary">
+                            <div class="member-cell mobile">
+                                <div class="avatar">{(member?.name || member?.email || "?").charAt(0).toUpperCase()}</div>
+                                <div class="mobile-member-text">
+                                    <h3>{member?.name || member?.email || "Usuario"}</h3>
+                                    <span>{member.totalWorkDays} días · {member.totalOvertimeHours}h extra</span>
+                                </div>
+                            </div>
+                            <div class="mobile-balance">
+                                <span class="balance-label">Saldo</span>
+                                <strong class:positive={member.balance <= 0.01}>{formatMoney(member.balance)}</strong>
+                            </div>
+                        </div>
+
+                        <div class="mobile-status-row">
+                            <span class="badge {member.balance > 0.01 ? 'unpaid' : 'paid'}">
+                                {member.balance > 0.01 ? 'Pendiente' : 'Al día'}
+                            </span>
+                            <button
+                                class="more-btn"
+                                onclick={() => toggleMemberDetails(member.id)}
+                                aria-expanded={expandedMemberId === member.id}
+                            >
+                                <span>{expandedMemberId === member.id ? "Ocultar" : "Más detalles"}</span>
+                                <ChevronDown size={16} class={expandedMemberId === member.id ? "open" : ""} />
+                            </button>
+                        </div>
+
+                        {#if expandedMemberId === member.id}
+                            <div class="mobile-details-panel">
+                                <div class="mobile-metrics">
+                                    <div>
+                                        <span>Total ganado</span>
+                                        <strong>{formatMoney(member.totalEarned)}</strong>
+                                    </div>
+                                    <div>
+                                        <span>Pagado</span>
+                                        <strong>{formatMoney(member.totalPaid)}</strong>
+                                    </div>
+                                    <div>
+                                        <span>Días trabajados</span>
+                                        <strong>{member.totalWorkDays}</strong>
+                                    </div>
+                                    <div>
+                                        <span>Horas extra</span>
+                                        <strong>{member.totalOvertimeHours}h</strong>
+                                    </div>
+                                </div>
+
+                                <div class="mobile-actions">
+                                    <button class="details-btn" onclick={() => openDetailsModal(member)}>
+                                        <Eye size={17} />
+                                        <span>Historial</span>
+                                    </button>
+                                    {#if member.balance > 0.01}
+                                        {#if canCreatePayments}
+                                            <button class="pay-btn" onclick={() => openPaymentModal(member)}>
+                                                <DollarSign size={16} />
+                                                Pagar
+                                            </button>
+                                        {:else}
+                                            <span class="status-ok">Pendiente</span>
+                                        {/if}
+                                    {:else}
+                                        <span class="status-ok">
+                                            <CheckCircle size={18} /> Al día
+                                        </span>
+                                    {/if}
+                                </div>
+                            </div>
+                        {/if}
+                    </article>
+                {/each}
+                {#if filteredMembers.length === 0}
+                    <div class="empty-row mobile-empty">No hay integrantes en esta categoría.</div>
+                {/if}
+            </div>
         </div>
 
         <SliceContainer bind:show={showPaymentModal}>
@@ -825,6 +911,10 @@
         overflow-x: auto;
     }
 
+    .mobile-members-list {
+        display: none;
+    }
+
     table {
         width: 100%;
         border-collapse: collapse;
@@ -855,6 +945,10 @@
         gap: 12px;
         font-weight: 700;
         color: var(--text-primary);
+    }
+
+    .member-cell.mobile {
+        min-width: 0;
     }
 
     .avatar {
@@ -949,6 +1043,38 @@
         text-align: center;
         color: var(--text-secondary);
         padding: 32px;
+    }
+
+    .details-btn,
+    .more-btn {
+        border: 1px solid var(--border-color);
+        background: var(--bg-card);
+        color: var(--text-primary);
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        font-weight: 800;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+    }
+
+    .details-btn {
+        padding: 10px 14px;
+    }
+
+    .more-btn {
+        padding: 8px 10px;
+        font-size: 13px;
+        white-space: nowrap;
+    }
+
+    .more-btn :global(svg) {
+        transition: transform 0.2s ease;
+    }
+
+    .more-btn :global(svg.open) {
+        transform: rotate(180deg);
     }
 
     /* Modal Styles */
@@ -1265,5 +1391,196 @@
 
     :global(.dark) .history-item {
         background: var(--bg-input);
+    }
+
+    @media (max-width: 760px) {
+        .payments-container {
+            padding: 18px 14px var(--bottom-nav-clearance);
+            padding-top: var(--page-top-safe);
+        }
+
+        header {
+            margin-bottom: 16px;
+        }
+
+        .header-text h1 {
+            font-size: 21px;
+        }
+
+        .content {
+            gap: 14px;
+            padding-bottom: 0;
+        }
+
+        .filters-card {
+            padding: 14px;
+            border-radius: var(--radius-md);
+            align-items: stretch;
+        }
+
+        .filter-group {
+            width: 100%;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .filter-group select {
+            min-width: 0;
+            flex: 1;
+            padding: 9px 10px;
+            font-size: 14px;
+        }
+
+        .summary-stats,
+        .stat {
+            width: 100%;
+            align-items: flex-start;
+        }
+
+        .stat-value {
+            font-size: 20px;
+        }
+
+        .table-container {
+            display: none;
+        }
+
+        .mobile-members-list {
+            display: grid;
+            gap: 12px;
+        }
+
+        .mobile-member-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-card);
+            padding: 14px;
+            min-width: 0;
+        }
+
+        .mobile-member-summary {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .mobile-member-text {
+            min-width: 0;
+        }
+
+        .mobile-member-text h3 {
+            margin: 0;
+            color: var(--text-primary);
+            font-size: 15px;
+            font-weight: 800;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .mobile-member-text span {
+            display: block;
+            margin-top: 2px;
+            color: var(--text-secondary);
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .mobile-balance {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            min-width: 92px;
+        }
+
+        .balance-label {
+            color: var(--text-secondary);
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .mobile-balance strong {
+            color: var(--danger-color);
+            font-size: 15px;
+            font-weight: 900;
+            white-space: nowrap;
+        }
+
+        .mobile-balance strong.positive {
+            color: var(--success-color);
+        }
+
+        .mobile-status-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        .mobile-details-panel {
+            border-top: 1px solid var(--border-color);
+            margin-top: 12px;
+            padding-top: 12px;
+            display: grid;
+            gap: 12px;
+        }
+
+        .mobile-metrics {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        .mobile-metrics div {
+            background: var(--bg-input);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 10px;
+            min-width: 0;
+        }
+
+        .mobile-metrics span {
+            display: block;
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-weight: 800;
+            margin-bottom: 4px;
+        }
+
+        .mobile-metrics strong {
+            display: block;
+            color: var(--text-primary);
+            font-size: 14px;
+            font-weight: 900;
+            overflow-wrap: anywhere;
+        }
+
+        .mobile-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .mobile-actions .details-btn,
+        .mobile-actions .pay-btn {
+            flex: 1;
+            min-width: 118px;
+        }
+
+        .mobile-empty {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+
+        .badge {
+            padding: 6px 10px;
+            font-size: 12px;
+        }
     }
 </style>

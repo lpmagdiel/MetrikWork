@@ -54,12 +54,16 @@
     addTeamLocation,
     updateTeamLocation,
     deleteTeamLocation,
+    applyWorkdayOvertimeLimit,
+    exceedsOvertimeLimit,
+    getOvertimeLimitHours,
+    getOvertimeLimitMessage,
   } from "../data/stores.js";
   import { navigateTo } from "../router.js";
   import SliceContainer from "../components/SliceContainer.svelte";
   import Toast from "../components/Toast.svelte";
   import AvatarCircle from "../components/AvatarCircle.svelte";
-  import { confirmAlert } from "../data/alerts.js";
+  import { confirmAlert, showErrorAlert, showSuccessAlert } from "../data/alerts.js";
 
   let team = $derived($selectedTeam);
   let isAdmin = $derived(team?.admin === $userStore?.uid);
@@ -69,6 +73,7 @@
   let canViewSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "view"));
   let canCreateSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "create"));
   let canEditSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "edit"));
+  let overtimeLimitHours = $derived(getOvertimeLimitHours(team));
   const permissionModules = Object.entries(TEAM_PERMISSION_LABELS);
   const permissionActions = Object.entries(TEAM_PERMISSION_ACTION_LABELS);
 
@@ -310,27 +315,41 @@
         type: alreadyHasWorkday ? "overtime" : workDay.type,
       };
 
-      if (alreadyHasWorkday && workDayToRegister.overtimeHours <= 0) {
-        showNotification("Hoy ya ingresaste una jornada. Añade horas extra para registrar otra entrada.", "error");
+      if (exceedsOvertimeLimit(workDayToRegister.overtimeHours, team)) {
+        await showErrorAlert("Límite de horas extra", getOvertimeLimitMessage(team));
         return;
       }
 
+      if (alreadyHasWorkday && workDayToRegister.overtimeHours <= 0) {
+        await showErrorAlert(
+          "Jornada ya registrada",
+          "Hoy ya ingresaste una jornada. Añade horas extra para registrar otra entrada.",
+        );
+        return;
+      }
+
+      const limitedWorkDay = applyWorkdayOvertimeLimit(workDayToRegister, team);
       await registerWorkday(
         team.id,
         $userStore.uid,
         $userStore.name || $userStore.email,
-        workDayToRegister,
+        limitedWorkDay,
       );
       showWorkdayForm = false;
       hasWorkdayToday = true;
-      showNotification(
-        workDayToRegister.type === "overtime"
-          ? "Horas extra registradas correctamente"
-          : "Jornada registrada correctamente",
-        "success",
+      await showSuccessAlert(
+        limitedWorkDay.type === "overtime"
+          ? "Horas extra registradas"
+          : "Jornada registrada",
+        limitedWorkDay.type === "overtime"
+          ? "Las horas extra se guardaron correctamente."
+          : "La jornada se guardó correctamente.",
       );
     } catch (error) {
-      showNotification("Error al registrar jornada", "error");
+      await showErrorAlert(
+        "Error al registrar jornada",
+        error?.message || "No se pudo guardar la jornada.",
+      );
     }
   }
 
@@ -947,6 +966,9 @@
           {hasWorkdayToday
             ? "Ya ingresaste una jornada hoy. Solo puedes añadir horas extra."
             : "Selecciona el tipo de jornada que deseas registrar para hoy."}
+          {#if overtimeLimitHours > 0}
+            Límite de horas extra: {overtimeLimitHours}h.
+          {/if}
         </p>
 
         <div class="workday-options">
@@ -1011,9 +1033,10 @@
                   class="counter-btn"
                   onclick={() =>
                     (workDay.overtimeHours = Math.min(
-                      12,
+                      overtimeLimitHours || 12,
                       workDay.overtimeHours + 1,
                     ))}
+                  disabled={overtimeLimitHours > 0 && workDay.overtimeHours >= overtimeLimitHours}
                 >
                   <Plus size={18} />
                 </button>

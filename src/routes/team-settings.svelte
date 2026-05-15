@@ -30,7 +30,7 @@
   import { navigateTo } from "../router.js";
   import { resizer, uploader } from "../data/fileHelper.js";
   import Toast from "../components/Toast.svelte";
-  import { confirmAlert } from "../data/alerts.js";
+  import { confirmAlert, showErrorAlert, showSuccessAlert } from "../data/alerts.js";
 
   let team = $derived($selectedTeam);
   let isAdmin = $derived(team?.admin === $userStore?.uid);
@@ -44,6 +44,7 @@
 
   let memberList = $state([]);
   let teamName = $state("");
+  let overtimeLimitHours = $state(0);
   let photoPreview = $state("");
   let pendingPhoto = $state("");
   let newMemberEmail = $state("");
@@ -60,6 +61,7 @@
   $effect(() => {
     if (team) {
       teamName = team.team || team.name || "";
+      overtimeLimitHours = Number(team.overtimeLimitHours) || 0;
       photoPreview = team.photoURL || "";
       pendingPhoto = "";
       const nextEditingPermissions = {};
@@ -126,11 +128,21 @@
       if (pendingPhoto) {
         photoURL = await uploader(pendingPhoto);
       }
-      await updateTeamProfile(team.id, { name: teamName, photoURL });
+      await updateTeamProfile(team.id, {
+        name: teamName,
+        photoURL,
+        overtimeLimitHours,
+      });
       pendingPhoto = "";
-      showNotification("Equipo actualizado");
+      await showSuccessAlert(
+        "Equipo actualizado",
+        "Los datos del perfil del equipo se guardaron correctamente.",
+      );
     } catch (error) {
-      showNotification("Error al actualizar el equipo", "error");
+      await showErrorAlert(
+        "Error al actualizar el equipo",
+        error?.message || "No se pudieron guardar los datos del perfil.",
+      );
     } finally {
       isSavingProfile = false;
     }
@@ -245,6 +257,21 @@
             <label for="teamName">Nombre del equipo</label>
             <input id="teamName" bind:value={teamName} disabled={!canEditSettings} />
           </div>
+        </div>
+        <div class="profile-fields settings-field">
+          <label for="overtimeLimitHours">Límite de horas extra</label>
+          <input
+            id="overtimeLimitHours"
+            type="number"
+            min="0"
+            step="0.25"
+            bind:value={overtimeLimitHours}
+            disabled={!canEditSettings}
+            placeholder="0 = sin límite"
+          />
+          <p class="field-help">
+            Usa 0 para no limitar. Las jornadas flexibles se recortan al máximo configurado.
+          </p>
         </div>
         {#if canEditSettings}
           <button class="primary-btn" onclick={handleSaveProfile} disabled={isSavingProfile || !teamName.trim()}>
@@ -510,6 +537,17 @@
   .profile-fields,
   .input-with-icon {
     flex: 1;
+  }
+
+  .settings-field {
+    margin-bottom: 14px;
+  }
+
+  .field-help {
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.4;
+    margin-top: 6px;
   }
 
   label,

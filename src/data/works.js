@@ -1,5 +1,6 @@
 import { db } from './firebase.js';
 import { collection, addDoc, query, where, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { applyWorkdayOvertimeLimit } from './workLimits.js';
 
 export function getTodayDateString() {
     const now = new Date();
@@ -27,12 +28,14 @@ export async function hasWorkdayForDate(teamId, userId, date = getTodayDateStrin
 export async function registerWorkday(teamId, userId, userName, workDay) {
     if (!workDay) throw new Error("workDay is missing");
     try {
+        const teamSnapshot = await getDoc(doc(db, 'teams', teamId));
+        const limitedWorkDay = applyWorkdayOvertimeLimit(workDay, teamSnapshot.data());
         const newWork = {
             teamId,
             userId,
             userName,
-            type: (workDay && workDay.type) ? workDay.type : 'full-day',
-            overtimeHours: (workDay && workDay.overtimeHours) ? Number(workDay.overtimeHours) : 0,
+            type: (limitedWorkDay && limitedWorkDay.type) ? limitedWorkDay.type : 'full-day',
+            overtimeHours: (limitedWorkDay && limitedWorkDay.overtimeHours) ? Number(limitedWorkDay.overtimeHours) : 0,
             date: getTodayDateString(),
             createdAt: new Date().toISOString(),
             paid: false
@@ -48,8 +51,8 @@ export async function registerWorkday(teamId, userId, userName, workDay) {
             'timerMode'
         ];
         optionalFields.forEach((field) => {
-            if (workDay[field] !== undefined && workDay[field] !== null) {
-                newWork[field] = workDay[field];
+            if (limitedWorkDay[field] !== undefined && limitedWorkDay[field] !== null) {
+                newWork[field] = limitedWorkDay[field];
             }
         });
         await addDoc(collection(db, 'works'), newWork);
@@ -71,6 +74,8 @@ export async function registerWorkday(teamId, userId, userName, workDay) {
 
 export async function assignWorkdayToMember(teamId, userId, userName, workDay, assignedBy = null) {
     if (!teamId || !userId || !workDay?.date) throw new Error("Datos de jornada incompletos");
+    const teamSnapshot = await getDoc(doc(db, 'teams', teamId));
+    const limitedWorkDay = applyWorkdayOvertimeLimit(workDay, teamSnapshot.data());
     const worksQuery = query(
         collection(db, 'works'),
         where('teamId', '==', teamId),
@@ -82,13 +87,19 @@ export async function assignWorkdayToMember(teamId, userId, userName, workDay, a
         teamId,
         userId,
         userName,
-        type: workDay.type || 'full-day',
-        overtimeHours: workDay.overtimeHours ? Number(workDay.overtimeHours) : 0,
-        date: workDay.date,
-        note: workDay.note?.trim() || '',
+        type: limitedWorkDay.type || 'full-day',
+        overtimeHours: limitedWorkDay.overtimeHours ? Number(limitedWorkDay.overtimeHours) : 0,
+        date: limitedWorkDay.date,
+        note: limitedWorkDay.note?.trim() || '',
         assignedBy,
         updatedAt: new Date().toISOString()
     };
+
+    ['taskTitle', 'startedAt', 'endedAt', 'durationSeconds', 'durationHours', 'variableHours', 'timerMode'].forEach((field) => {
+        if (limitedWorkDay[field] !== undefined && limitedWorkDay[field] !== null) {
+            workData[field] = limitedWorkDay[field];
+        }
+    });
 
     if (!snapshot.empty) {
         await updateDoc(snapshot.docs[0].ref, workData);

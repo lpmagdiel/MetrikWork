@@ -18,7 +18,12 @@
     selectedTeamId,
     teamsStore,
     userStore,
+    applyWorkdayOvertimeLimit,
+    exceedsOvertimeLimit,
+    getOvertimeLimitHours,
+    getOvertimeLimitMessage,
   } from "../data/stores.js";
+  import { showErrorAlert, showSuccessAlert } from "../data/alerts.js";
 
   const ACTIVE_TIMER_KEY = "metricwork.activeVariableTimer";
 
@@ -39,6 +44,7 @@
   let selectedTeam = $derived(
     $teamsStore.find((team) => team.id === activeTeamId) || null,
   );
+  let overtimeLimitHours = $derived(getOvertimeLimitHours(selectedTeam));
   let isRunning = $derived(Boolean(startedAt && !endedAt));
   let elapsedSeconds = $derived.by(() => {
     if (!startedAt) return 0;
@@ -194,10 +200,15 @@
     const totalHours = Number(formatHours(totalSeconds));
 
     try {
-      await registerWorkday(
-        selectedTeam.id,
-        $userStore.uid,
-        $userStore.name || $userStore.email,
+      if (timerMode === "overtime" && exceedsOvertimeLimit(totalHours, selectedTeam)) {
+        endedAt = null;
+        startTicker();
+        persistActiveTimer();
+        await showErrorAlert("Límite de horas extra", getOvertimeLimitMessage(selectedTeam));
+        return;
+      }
+
+      const workDayToRegister = applyWorkdayOvertimeLimit(
         {
           type: "variable",
           overtimeHours: timerMode === "overtime" ? totalHours : 0,
@@ -210,12 +221,21 @@
           note: note.trim(),
           timerMode,
         },
+        selectedTeam,
       );
 
+      await registerWorkday(
+        selectedTeam.id,
+        $userStore.uid,
+        $userStore.name || $userStore.email,
+        workDayToRegister,
+      );
+
+      const savedSeconds = Number(workDayToRegister.durationSeconds) || totalSeconds;
       lastEntry = {
         teamName: selectedTeam.name || selectedTeam.team || "Equipo",
         taskTitle: taskTitle.trim(),
-        duration: formatTime(totalSeconds),
+        duration: formatTime(savedSeconds),
         startedAt,
         endedAt: finishDate,
         timerMode,
@@ -226,13 +246,21 @@
       endedAt = null;
       now = Date.now();
       clearActiveTimer();
-      showNotification("Jornada variable registrada correctamente.");
+      await showSuccessAlert(
+        timerMode === "overtime" ? "Horas extra registradas" : "Jornada registrada",
+        overtimeLimitHours > 0 && totalHours > overtimeLimitHours && timerMode === "variable"
+          ? `Jornada registrada con el máximo permitido: ${overtimeLimitHours}h.`
+          : "Jornada variable registrada correctamente.",
+      );
     } catch (error) {
       console.error("Error registering variable workday:", error);
       endedAt = null;
       startTicker();
       persistActiveTimer();
-      showNotification("No se pudo registrar la jornada variable.", "error");
+      await showErrorAlert(
+        "Error al registrar jornada",
+        error?.message || "No se pudo registrar la jornada variable.",
+      );
     } finally {
       isSaving = false;
     }
@@ -324,6 +352,9 @@
           <span>Tipo de jornada: {timerMode === "overtime" ? "Horas extra" : "Variable"}</span>
           <strong>{formatTime(elapsedSeconds)}</strong>
           <small>{formatHours(elapsedSeconds)} h</small>
+          {#if overtimeLimitHours > 0}
+            <small>Máximo: {overtimeLimitHours} h</small>
+          {/if}
         </div>
       </div>
 
