@@ -4,10 +4,10 @@
   import { navigateTo } from "../router";
   import LoadingSpinner from "../components/LoadingSpinner.svelte";
   import SliceContainer from "../components/SliceContainer.svelte";
-  import Alert from "../components/Alert.svelte";
   import { userStore } from "../data/stores";
   import { auth, googleProvider } from "../data/firebase";
   import { BETA_TESTERS_MODE } from "../data/features.js";
+  import { showErrorAlert, showInfoAlert, showSuccessAlert } from "../data/alerts.js";
   import {
     signInWithPopup,
     signInWithRedirect,
@@ -20,36 +20,11 @@
 
   let loadingShow = $state(false);
   let openMailForm = $state(false);
-  let showAlert = $state(false);
-  let alertType = $state('info');
-  let alertTitle = $state('');
-  let alertMessage = $state('');
 
   let email = $state("");
   let password = $state("");
   let name = $state("");
   let isRegistering = $state(false);
-
-  function showErrorAlert(title, message) {
-    alertType = 'error';
-    alertTitle = title;
-    alertMessage = message;
-    showAlert = true;
-  }
-
-  function showSuccessAlert(title, message) {
-    alertType = 'success';
-    alertTitle = title;
-    alertMessage = message;
-    showAlert = true;
-  }
-
-  function showInfoAlert(title, message) {
-    alertType = 'info';
-    alertTitle = title;
-    alertMessage = message;
-    showAlert = true;
-  }
 
   let skipAutoRedirect = false;
 
@@ -174,7 +149,6 @@
 
 <div class="hello-page">
   <LoadingSpinner show={loadingShow} />
-  <Alert bind:show={showAlert} type={alertType} title={alertTitle} message={alertMessage} duration={4000} />
   <div class="hello-card">
     <div class="hero-row">
       <div class="hero-copy">

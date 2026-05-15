@@ -29,6 +29,7 @@
   import Toast from "../components/Toast.svelte";
   import UpdateFeaturesModal from "../components/UpdateFeaturesModal.svelte";
   import {updateData} from "../data/updateFeatures.js";
+  import { showErrorAlert } from "../data/alerts.js";
 
   let name = $state("");
   let email = $state("");
@@ -82,7 +83,7 @@
       await logout();
       navigateTo("/hello");
     } catch (error) {
-      alert("Error al cerrar sesión");
+      showErrorAlert("Error", "Error al cerrar sesión");
     }
   }
 
@@ -135,7 +136,7 @@
 
 <div class="settings-page">
   <Toast message={toastMessage} type={toastType} bind:show={showToast} />
-  <UpdateFeaturesModal open={showUpdateModal} />
+  <UpdateFeaturesModal open={showUpdateModal} onClose={() => (showUpdateModal = false)} />
   <header>
     <h1>Configuración</h1>
   </header>

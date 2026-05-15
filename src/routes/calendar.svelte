@@ -22,6 +22,7 @@
   } from "../data/stores.js";
   import SliceContainer from "../components/SliceContainer.svelte";
   import LoadingSpinner from "../components/LoadingSpinner.svelte";
+  import { showErrorAlert } from "../data/alerts.js";
   import { useSwipe } from "svelte-gestures";
 
   let currentMonth = $state(new Date().getMonth());
@@ -182,7 +183,7 @@
   async function handleAddNote() {
     if (!newNoteContent.trim()) return;
     if (!$userStore?.uid) {
-      alert("No se pudo identificar el usuario para guardar la nota");
+      showErrorAlert("Error", "No se pudo identificar el usuario para guardar la nota");
       return;
     }
     const [year, month, day] = selectedDate.split("-").map(Number);
@@ -192,7 +193,7 @@
       newNoteContent = "";
       showAddNote = false;
     } catch (error) {
-      alert("Error al guardar la nota");
+      showErrorAlert("Error", "Error al guardar la nota");
     } finally {
       isSubmittingNote = false;
     }
@@ -212,7 +213,7 @@
       await deleteNote($userStore.uid, noteId);
       if (swipedNoteId === noteId) swipedNoteId = null;
     } catch (error) {
-      alert("Error al eliminar la nota");
+      showErrorAlert("Error", "Error al eliminar la nota");
     }
   }
 </script>

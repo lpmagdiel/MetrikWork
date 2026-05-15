@@ -30,6 +30,7 @@
   import { navigateTo } from "../router.js";
   import { resizer, uploader } from "../data/fileHelper.js";
   import Toast from "../components/Toast.svelte";
+  import { confirmAlert } from "../data/alerts.js";
 
   let team = $derived($selectedTeam);
   let isAdmin = $derived(team?.admin === $userStore?.uid);
@@ -163,7 +164,13 @@
 
   async function handleRemoveMember(member) {
     if (!team?.id || !canDeleteSettings || member.id === team.admin) return;
-    if (!confirm(`¿Quitar a ${member.name || member.email || "este miembro"} del equipo?`)) return;
+    const confirmed = await confirmAlert({
+      title: "Quitar miembro",
+      text: `¿Quitar a ${member.name || member.email || "este miembro"} del equipo?`,
+      confirmButtonText: "Quitar",
+      danger: true,
+    });
+    if (!confirmed) return;
 
     try {
       await removeTeamMember(team.id, member.id);
@@ -175,7 +182,13 @@
 
   async function handleDeleteTeam() {
     if (!team?.id || !isAdmin) return;
-    if (!confirm(`¿Eliminar definitivamente el equipo "${team.team || team.name}"?`)) return;
+    const confirmed = await confirmAlert({
+      title: "Eliminar equipo",
+      text: `¿Eliminar definitivamente el equipo "${team.team || team.name}"?`,
+      confirmButtonText: "Eliminar",
+      danger: true,
+    });
+    if (!confirmed) return;
 
     try {
       await deleteTeam(team.id);

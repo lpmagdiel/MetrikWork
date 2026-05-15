@@ -59,6 +59,7 @@
   import SliceContainer from "../components/SliceContainer.svelte";
   import Toast from "../components/Toast.svelte";
   import AvatarCircle from "../components/AvatarCircle.svelte";
+  import { confirmAlert } from "../data/alerts.js";
 
   let team = $derived($selectedTeam);
   let isAdmin = $derived(team?.admin === $userStore?.uid);
@@ -494,7 +495,13 @@
 
   async function removeTeamLocation(location) {
     if (!team?.id || !location?.id) return;
-    if (!confirm(`¿Eliminar "${location.name}"?`)) return;
+    const confirmed = await confirmAlert({
+      title: "Eliminar ubicación",
+      text: `¿Eliminar "${location.name}"?`,
+      confirmButtonText: "Eliminar",
+      danger: true,
+    });
+    if (!confirmed) return;
 
     try {
       await deleteTeamLocation(team.id, location.id);

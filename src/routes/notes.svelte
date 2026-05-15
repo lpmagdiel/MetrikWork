@@ -22,6 +22,7 @@
   } from "lucide-svelte";
   import SliceContainer from "../components/SliceContainer.svelte";
   import { useSwipe } from "svelte-gestures";
+  import { confirmAlert, showErrorAlert } from "../data/alerts.js";
 
   let searchQuery = $state("");
   let showAddMenu = $state(false);
@@ -103,7 +104,7 @@
     }
 
     if (!$userStore?.uid) {
-      alert("No se pudo identificar el usuario para guardar la nota");
+      showErrorAlert("Error", "No se pudo identificar el usuario para guardar la nota");
       return;
     }
 
@@ -133,7 +134,7 @@
       closeEditor();
     } catch (e) {
       console.error("Error saving note:", e);
-      alert("Error al guardar la nota");
+      showErrorAlert("Error", "Error al guardar la nota");
     }
   }
 
@@ -164,10 +165,15 @@
 
   async function deleteCurrentNote() {
     if (!currentNoteId || !$userStore?.uid) return;
-    if (confirm("¿Estás seguro de eliminar esta nota?")) {
-      await deleteNote($userStore.uid, currentNoteId);
-      closeEditor();
-    }
+    const confirmed = await confirmAlert({
+      title: "Eliminar nota",
+      text: "¿Estás seguro de eliminar esta nota?",
+      confirmButtonText: "Eliminar",
+      danger: true,
+    });
+    if (!confirmed) return;
+    await deleteNote($userStore.uid, currentNoteId);
+    closeEditor();
   }
 
   // Format date helper

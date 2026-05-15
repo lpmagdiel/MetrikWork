@@ -6,6 +6,7 @@
     uploader,
     destroyer,
   } from "../data/fileHelper.js";
+  import { showErrorAlert } from "../data/alerts.js";
   import { Camera, Loader2, User } from "lucide-svelte";
 
   const { editable = true, size = 100 } = $props();
@@ -65,7 +66,7 @@
         }
       } catch (error) {
         console.error("Error processing image:", error);
-        alert("No se pudo subir la imagen. Inténtalo de nuevo.");
+        showErrorAlert("Error", "No se pudo subir la imagen. Inténtalo de nuevo.");
         optimisticAvatar = null;
       } finally {
         isSaving = false;

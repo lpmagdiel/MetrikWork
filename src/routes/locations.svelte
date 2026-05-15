@@ -4,6 +4,7 @@
   import { navigateTo } from "../router.js";
   import LocationBox from "../components/LocationBox.svelte";
   import SliceContainer from "../components/SliceContainer.svelte";
+  import { confirmAlert, showErrorAlert } from "../data/alerts.js";
 
   let showForm = $state(false);
   let previousShowForm = $state(false);
@@ -127,13 +128,19 @@
 
   async function removeLocation(location) {
     if (!$userStore?.uid || !location?.id) return;
-    if (!confirm(`¿Eliminar "${location.name}"?`)) return;
+    const confirmed = await confirmAlert({
+      title: "Eliminar ubicación",
+      text: `¿Eliminar "${location.name}"?`,
+      confirmButtonText: "Eliminar",
+      danger: true,
+    });
+    if (!confirmed) return;
 
     try {
       await deleteLocation($userStore.uid, location.id);
     } catch (error) {
       console.error("Error deleting location:", error);
-      alert("No se pudo eliminar la ubicación");
+      showErrorAlert("Error", "No se pudo eliminar la ubicación");
     }
   }
 </script>

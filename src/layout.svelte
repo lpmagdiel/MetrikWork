@@ -12,7 +12,7 @@
   import UpdateFeaturesModal from "./components/UpdateFeaturesModal.svelte";
   import { updateData } from "./data/updateFeatures.js";
   // Modal de novedades
-  let showUpdateModal = false;
+  let showUpdateModal = $state(false);
 
   let cleanPath = $derived($currentPath.split("?")[0]);
   let hasCheckedUpdate = false;

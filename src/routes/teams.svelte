@@ -2,6 +2,7 @@
   import { Search, Plus, Users, ChevronRight, X } from "lucide-svelte";
   import { teamsStore, createTeam, selectedTeamId } from "../data/stores.js";
   import { navigateTo } from "../router.js";
+  import { promptAlert, showErrorAlert } from "../data/alerts.js";
 
   let searchQuery = $state("");
   let isCreating = $state(false);
@@ -20,7 +21,12 @@
   }
 
   async function handleCreateTeam() {
-    const teamName = prompt("Nombre del nuevo equipo");
+    const teamName = await promptAlert({
+      title: "Nuevo equipo",
+      inputLabel: "Nombre del nuevo equipo",
+      inputPlaceholder: "Ej. Equipo de obra",
+      confirmButtonText: "Crear equipo",
+    });
     if (!teamName?.trim()) return;
     isCreating = true;
     try {
@@ -30,7 +36,7 @@
         navigateTo(`/teams/${id}`);
       }
     } catch (error) {
-      alert("No se pudo crear el equipo");
+      showErrorAlert("Error", "No se pudo crear el equipo");
     } finally {
       isCreating = false;
     }

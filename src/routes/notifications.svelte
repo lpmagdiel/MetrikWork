@@ -13,12 +13,11 @@
   import { navigateTo } from "../router.js";
   import { fly } from "svelte/transition";
   import Toast from "../components/Toast.svelte";
-  import ConfirmToast from "../components/ConfirmToast.svelte";
+  import { confirmAlert } from "../data/alerts.js";
 
   let notifications = $derived($notificationsStore);
   let swipedNotificationId = $state(null);
   let showToast = $state(false);
-  let showConfirmToast = $state(false);
   let messageToast = $state("");
   let typeToast = $state("");
   let canUsePush = $state(false);
@@ -101,14 +100,19 @@
     }
   }
 
-  function openDeleteAllConfirm() {
-    showConfirmToast = true;
+  async function openDeleteAllConfirm() {
+    const confirmed = await confirmAlert({
+      title: "Eliminar notificaciones",
+      text: "¿Estás seguro de que deseas eliminar todas las notificaciones?",
+      confirmButtonText: "Eliminar",
+      danger: true,
+    });
+    if (confirmed) await handleDeleteAll();
   }
 
   async function handleDeleteAll() {
     try {
       await deleteAllNotifications($userStore?.uid);
-      showConfirmToast = false;
       messageToast = "Notificaciones eliminadas";
       typeToast = "success";
       showToast = true;
@@ -168,12 +172,6 @@
     message={messageToast}
     duration={3000}
     show={showToast}
-  />
-  <ConfirmToast
-    message="¿Estás seguro de que deseas eliminar todas las notificaciones?"
-    duration={3000}
-    bind:show={showConfirmToast}
-    onConfirm={handleDeleteAll}
   />
   <header>
     <button class="back-btn" onclick={goBack}>

@@ -7,6 +7,7 @@
     DollarSign,
     TimerReset,
   } from "lucide-svelte";
+  import { showErrorAlert, showSuccessAlert } from "../data/alerts.js";
 
   let hourlyRate = 8;
   let typingTime = "0";
@@ -83,9 +84,9 @@
     } else {
       try {
         await navigator.clipboard.writeText(text);
-        alert("Cálculo copiado al portapapeles");
+        showSuccessAlert("Copiado", "Cálculo copiado al portapapeles");
       } catch (err) {
-        alert("No se pudo compartir");
+        showErrorAlert("Error", "No se pudo compartir");
       }
     }
   }

@@ -19,6 +19,7 @@
   import { uploader, resizer } from "../data/fileHelper.js";
   import SliceContainer from "../components/SliceContainer.svelte";
   import LocationBox from "../components/LocationBox.svelte";
+  import { showErrorAlert } from "../data/alerts.js";
 
   let messageInput = $state("");
   let messages = $derived($chatMessagesStore);
@@ -138,7 +139,7 @@
       previewUrl = "";
     } catch (error) {
       console.error("Error uploading image", error);
-      alert("Error al enviar la imagen");
+      showErrorAlert("Error", "Error al enviar la imagen");
     } finally {
       isUploading = false;
     }
@@ -161,7 +162,7 @@
       showLocationSlice = false;
     } catch (error) {
       console.error("Error sending location", error);
-      alert("Error al enviar la ubicación");
+      showErrorAlert("Error", "Error al enviar la ubicación");
     }
   }
 

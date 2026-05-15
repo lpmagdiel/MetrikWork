@@ -39,6 +39,7 @@
   import SliceContainer from "../components/SliceContainer.svelte";
   import Product from "../components/Product.svelte";
   import BadgetButton from "../components/BadgetButton.svelte";
+  import { confirmAlert, showErrorAlert, showInfoAlert, showSuccessAlert } from "../data/alerts.js";
 
   const CLOUDINARY_PRESET_INVENTARY =
     import.meta.env.CLOUDINARY_PRESET_INVENTARY || "MetricWorkInventary";
@@ -197,7 +198,7 @@
     const file = e.target.files && e.target.files[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      alert("Selecciona un archivo de imagen válido");
+      showInfoAlert("Archivo no válido", "Selecciona un archivo de imagen válido");
       e.target.value = null;
       return;
     }
@@ -209,7 +210,7 @@
       formData.imageUrl = resizedImage;
     } catch (error) {
       console.error("Error processing product image", error);
-      alert("No se pudo cargar la imagen");
+      showErrorAlert("Error", "No se pudo cargar la imagen");
     } finally {
       e.target.value = null;
     }
@@ -258,7 +259,7 @@
 
     const recipients = getReportRecipients();
     if (!recipients.length) {
-      alert("No se pudo encontrar a quién notificar.");
+      showErrorAlert("Error", "No se pudo encontrar a quién notificar.");
       return;
     }
 
@@ -289,10 +290,10 @@
       );
 
       closeReportModal();
-      alert("Problema reportado correctamente.");
+      showSuccessAlert("Listo", "Problema reportado correctamente.");
     } catch (error) {
       console.error("Error reporting product problem:", error);
-      alert("No se pudo reportar el problema.");
+      showErrorAlert("Error", "No se pudo reportar el problema.");
     } finally {
       isReporting = false;
     }
@@ -300,7 +301,7 @@
 
   async function handleSubmit() {
     if (!$selectedTeamId) {
-      alert("Por favor selecciona un equipo primero");
+      showInfoAlert("Selecciona un equipo", "Por favor selecciona un equipo primero");
       return;
     }
     if ((editingId && !canEditInventory) || (!editingId && !canCreateInventory)) return;
@@ -328,7 +329,7 @@
       selectedInventoryType = productData.productType;
       closeModal();
     } catch (error) {
-      alert("Error al guardar el producto: " + error.message);
+      showErrorAlert("Error al guardar el producto", error.message);
     } finally {
       isSaving = false;
     }
@@ -336,9 +337,14 @@
 
   async function handleDelete(id) {
     if (!$selectedTeamId || !canDeleteInventory) return;
-    if (confirm("¿Estás seguro de eliminar este producto?")) {
-      await deleteProduct($selectedTeamId, id);
-    }
+    const confirmed = await confirmAlert({
+      title: "Eliminar producto",
+      text: "¿Estás seguro de eliminar este producto?",
+      confirmButtonText: "Eliminar",
+      danger: true,
+    });
+    if (!confirmed) return;
+    await deleteProduct($selectedTeamId, id);
   }
 
   function formatCurrency(amount) {
