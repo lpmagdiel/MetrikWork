@@ -1,11 +1,13 @@
 export const updateData = {
-  version: "0.9.4", // Actualiza este valor en cada release
-  message: "¡Novedades de MetricWork 0.9.4! ⚠️ Beta",
+  version: "0.9.5", // Actualiza este valor en cada release
+  message: "¡Novedades de MetricWork 0.9.5! ⚠️ Beta",
   features: [
-    "Los equipos ahora pueden crear, editar y eliminar sus propias ubicaciones.",
-    "El inventario permite enlazar productos y herramientas a ubicaciones del equipo.",
-    "Las tarjetas de inventario muestran la ubicación asignada para ubicar cada elemento más rápido.",
-    "Los productos tienen un botón para reportar problemas con descripción, responsable y fecha.",
-    "Los reportes de inventario envían notificaciones a los miembros del equipo."
+    "Los avisos y confirmaciones principales ahora se ven mejor.",
+    "El calendario de Planning muestra colores por tipo de jornada.",
+    "Los equipos pueden configurar un límite máximo de horas extra.",
+    "La pantalla de pagos tiene una vista móvil más compacta con detalles desplegables.",
+    "Los pagos pueden generar comprobantes imprimibles en PDF.",
+    "El chat permite crear encuestas desde el menú de adjuntos.",
+    "Se mejoró la compatibilidad de las notificaciones push con claves privadas y encriptaciones."
   ]
 };
