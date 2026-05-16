@@ -40,6 +40,8 @@
   import Product from "../components/Product.svelte";
   import BadgetButton from "../components/BadgetButton.svelte";
   import { confirmAlert, showErrorAlert, showInfoAlert, showSuccessAlert } from "../data/alerts.js";
+  import CircleAddButton from "../components/CircleAddButton.svelte";
+  import TitleHeader from "../components/TitleHeader.svelte";
 
   const CLOUDINARY_PRESET_INVENTARY =
     import.meta.env.CLOUDINARY_PRESET_INVENTARY || "MetricWorkInventary";
@@ -357,18 +359,10 @@
 
 <div class="page-container">
   {#if canCreateInventory}
-    <button class="fab" onclick={() => openModal()}>
-      <Plus size={30} />
-    </button>
+    <CircleAddButton onClick={() => openModal()} floating={true} />
   {/if}
   <div class="header">
-    <div class="title-group">
-    <button class="back-btn" onclick={() => navigateTo(`/teams/${teamId}`)}>
-    <ChevronLeft size={24} />
-    </button>
-      <Package size={32} color="var(--text-primary)" />
-      <h1>Inventario</h1>
-    </div>
+      <TitleHeader title="Inventario" description={$selectedTeam?.name || ""} action={() => navigateTo(`/teams/${teamId}`)}/>
   </div>
 
   {#if !canViewInventory}

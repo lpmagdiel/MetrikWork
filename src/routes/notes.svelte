@@ -22,6 +22,8 @@
   } from "lucide-svelte";
   import SliceContainer from "../components/SliceContainer.svelte";
   import { useSwipe } from "svelte-gestures";
+  import TitleHeader from "../components/TitleHeader.svelte";
+  import CircleAddButton from "../components/CircleAddButton.svelte";
   import { confirmAlert, showErrorAlert } from "../data/alerts.js";
 
   let searchQuery = $state("");
@@ -186,9 +188,7 @@
 
 <div class="notes-page">
   <header>
-    <div class="header-row">
-      <h1>Notas</h1>
-    </div>
+    <TitleHeader title="Notas" description="Tus notas personales" icon={StickyNote} iconPosition="right" />
     <div class="search-bar">
       <Search size={20} color="#878787" />
       <input
@@ -260,9 +260,7 @@
     {/if}
   </div>
 
-  <button class="fab" onclick={() => (showAddMenu = true)}>
-    <Plus size={24} />
-  </button>
+  <CircleAddButton onClick={() => (showAddMenu = true)} floating={true}/>
 
   <SliceContainer bind:show={showAddMenu}>
     <div class="add-menu">

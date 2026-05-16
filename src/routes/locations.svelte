@@ -5,6 +5,8 @@
   import LocationBox from "../components/LocationBox.svelte";
   import SliceContainer from "../components/SliceContainer.svelte";
   import { confirmAlert, showErrorAlert } from "../data/alerts.js";
+  import TitleHeader from "../components/TitleHeader.svelte";
+  import CircleAddButton from "../components/CircleAddButton.svelte";
 
   let showForm = $state(false);
   let previousShowForm = $state(false);
@@ -146,19 +148,8 @@
 </script>
 
 <div class="locations-page">
-  <header>
-    <button class="icon-btn" onclick={() => navigateTo("/")}>
-      <ArrowLeft size={22} />
-    </button>
-    <div class="title-block">
-      <MapPinned size={22} />
-      <h1>Ubicaciones</h1>
-    </div>
-    <button class="add-btn" onclick={openForm}>
-      <Plus size={20} />
-    </button>
-  </header>
-
+<TitleHeader title="Ubicaciones" description="Administra tus ubicaciones" icon={MapPinned} iconPosition="right" />
+ <CircleAddButton onClick={openForm} floating={true} />
   <main class="locations-content">
     {#if sortedLocations.length === 0}
       <div class="empty-state">

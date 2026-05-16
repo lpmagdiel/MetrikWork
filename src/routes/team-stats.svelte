@@ -13,6 +13,7 @@
   import Toast from "../components/Toast.svelte";
   import { navigateTo } from "../router.js";
   import { selectedTeam, selectedTeamId, userStore, getUserTeamWorks } from "../data/stores.js";
+  import TitleHeader from "../components/TitleHeader.svelte";
 
   let team = $derived($selectedTeam);
   let works = $state([]);
@@ -217,19 +218,7 @@
   <Toast message={messageToast} type={typeToast} show={showToast} />
 
   {#if team}
-    <header>
-      <button
-        class="back-btn"
-        onclick={() => navigateTo(`/teams/${team?.id || $selectedTeamId}`)}
-        aria-label="Volver al equipo"
-      >
-        <ChevronLeft size={24} />
-      </button>
-      <div class="header-title">
-        <h1>Mis estadísticas</h1>
-        <span>{periodLabels[period]}</span>
-      </div>
-    </header>
+  <TitleHeader title="Mis estadísticas" description={periodLabels[period] || team?.name} action={() => navigateTo(`/teams/${team?.id || $selectedTeamId}`)} paddingHorizontal={true}/>
 
     <main class="stats-content">
       <section class="summary-band">

@@ -29,6 +29,7 @@
     isNonWorkingDay,
     getNonWorkingDayMessage,
   } from "../data/stores.js";
+  import TitleHeader from "../components/TitleHeader.svelte";
 
   let messageToast = $state("");
   let typeToast = $state("success");
@@ -340,19 +341,9 @@
 
   {#if team}
     <header>
-      <button
-        class="back-btn"
-        onclick={() => navigateTo("/teams/" + (team?.id || $selectedTeamId))}
-        aria-label="Volver al equipo"
-      >
-        <ChevronLeft size={24} />
-      </button>
-      <div class="header-title">
-        <h1>Planning</h1>
-        <span>{works.length} jornadas</span>
-      </div>
+    <TitleHeader title="Planning" description={`${works.length} jornadas`} action={() => navigateTo("/teams/" + (team?.id || $selectedTeamId))} />
       {#if isAdmin}
-        <CircleAddButton onClick={() => openAssignment()} />
+        <CircleAddButton onClick={() => openAssignment()} floating={true}/>
       {/if}
     </header>
 

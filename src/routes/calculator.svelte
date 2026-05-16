@@ -8,6 +8,7 @@
     TimerReset,
   } from "lucide-svelte";
   import { showErrorAlert, showSuccessAlert } from "../data/alerts.js";
+  import TitleHeader from "../components/TitleHeader.svelte";
 
   let hourlyRate = 8;
   let typingTime = "0";
@@ -95,12 +96,7 @@
 <div class="page-container">
   <!-- Header -->
   <div class="header">
-    <div class="title-group">
-      <h1>Calculadora</h1>
-    </div>
-    <button class="reset-btn" onclick={resetTotal} title="Reiniciar">
-      <TimerReset size={18} />
-    </button>
+    <TitleHeader title="Calculadora" icon={TimerReset} action={resetTotal} iconPosition="right" />
   </div>
 
   <!-- Rate input -->

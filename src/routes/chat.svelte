@@ -21,6 +21,7 @@
   import SliceContainer from "../components/SliceContainer.svelte";
   import LocationBox from "../components/LocationBox.svelte";
   import { showErrorAlert } from "../data/alerts.js";
+  import TitleHeader from "../components/TitleHeader.svelte";
 
   let messageInput = $state("");
   let messages = $derived($chatMessagesStore);
@@ -268,15 +269,7 @@
 </script>
 
 <div class="chat-page">
-  <header>
-    <button
-      class="back-btn"
-      onclick={() => navigateTo(`/teams/${teamId}`)}
-    >
-      <ChevronLeft size={24} />
-    </button>
-    <h1>{teamName}</h1>
-  </header>
+  <TitleHeader title="Chat" description={teamName} action={()=>navigateTo(`/teams/${teamId}`)} paddingHorizontal={true}/>
 
   <div class="messages-container" bind:this={chatContainer} onscroll={handleMessagesScroll}>
     {#if messages.length === 0}

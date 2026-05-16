@@ -1,14 +1,14 @@
 <script>
     import { Plus } from "lucide-svelte";
 
-    const { onClick } = $props()
+    const { onClick, floating = false } = $props()
 </script>
 
 
 <style>
     .fab {
-        width: 46px;
-        height: 46px;
+        width: 60px;
+        height: 60px;
         border-radius: 50%;
         background: var(--accent-strong);
         color: var(--bg-card);
@@ -24,6 +24,12 @@
     .fab:active {
         transform: scale(0.92);
     }
+    .floating {
+        position: fixed;
+        bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px) + 20px);
+        right: 20px;
+        z-index: 100;
+    }
 </style>
 
-<button class="fab" onclick={onClick}><Plus size={22} /></button>
+<button class={"fab " + (floating ? "floating" : "")} onclick={onClick}><Plus size={22} /></button>

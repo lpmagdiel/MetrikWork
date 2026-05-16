@@ -3,6 +3,7 @@
   import { teamsStore, createTeam, selectedTeamId } from "../data/stores.js";
   import { navigateTo } from "../router.js";
   import { promptAlert, showErrorAlert } from "../data/alerts.js";
+  import TitleHeader from "../components/TitleHeader.svelte";
 
   let searchQuery = $state("");
   let isCreating = $state(false);
@@ -45,7 +46,7 @@
 
 <div class="teams-page">
   <header>
-    <h1>Equipos</h1>
+  <TitleHeader title="Equipos" description="MetricWork" icon={Users} iconPosition="right"/>
     <div class="search-container">
       <span class="search-icon" aria-hidden="true">
         <Search size={20} />

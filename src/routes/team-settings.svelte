@@ -33,6 +33,7 @@
   import { resizer, uploader } from "../data/fileHelper.js";
   import Toast from "../components/Toast.svelte";
   import { confirmAlert, showErrorAlert, showSuccessAlert } from "../data/alerts.js";
+  import TitleHeader from "../components/TitleHeader.svelte";
 
   let team = $derived($selectedTeam);
   let isAdmin = $derived(team?.admin === $userStore?.uid);
@@ -229,15 +230,8 @@
 
 <div class="team-settings-page">
   <Toast message={toastMessage} type={toastType} bind:show={showToast} />
-
   <header>
-    <button class="back-btn" onclick={() => navigateTo(`/teams/${team?.id || ""}`)}>
-      <ChevronLeft size={24} />
-    </button>
-    <div class="header-title">
-      <Settings size={21} />
-      <h1>Ajustes del equipo</h1>
-    </div>
+  <TitleHeader title="Ajustes del equipo" description={team?.name || ""} action={() => navigateTo(`/teams/${team?.id || ""}`)} />
   </header>
 
   {#if !team}

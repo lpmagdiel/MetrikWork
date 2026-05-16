@@ -27,6 +27,7 @@
     getNonWorkingDayMessage,
   } from "../data/stores.js";
   import { showErrorAlert, showSuccessAlert } from "../data/alerts.js";
+  import TitleHeader from "../components/TitleHeader.svelte";
 
   const ACTIVE_TIMER_KEY = "metricwork.activeVariableTimer";
 
@@ -294,10 +295,7 @@
   <Toast message={messageToast} type={typeToast} show={showToast} />
 
   <header class="timer-header">
-    <div class="header-title">
-      <Clock size={22} />
-      <h1>Jornada variable</h1>
-    </div>
+    <TitleHeader title="Jornada variable" icon={Clock} iconPosition="right" description="Registra tu tiempo trabajando."/>
     <div class="status-pill" class:active={isRunning}>
       {#if isRunning}
         <Hourglass size={18} />

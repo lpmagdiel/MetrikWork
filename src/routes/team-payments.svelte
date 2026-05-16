@@ -6,6 +6,7 @@
     import { navigateTo } from "../router.js";
     import Toast from "../components/Toast.svelte";
     import SliceContainer from "../components/SliceContainer.svelte";
+  import TitleHeader from "../components/TitleHeader.svelte";
 
     let team = $derived($selectedTeam);
     let canViewPayments = $derived(hasTeamPermission(team, $userStore?.uid, "payments", "view"));
@@ -460,15 +461,7 @@
     <Toast message={messageToast} type={typeToast} show={showToast} />
     
     <header>
-        <button class="back-btn" onclick={() => navigateTo(`/teams/${team?.id}`)}>
-            <ChevronLeft size={24} />
-        </button>
-        <div class="header-text">
-            <h1>Pagos del Equipo</h1>
-            {#if team}
-                <p class="subtitle">{team.name}</p>
-            {/if}
-        </div>
+        <TitleHeader title="Pagos del Equipo" description={team?.name || ""} action={() => navigateTo(`/teams/${team?.id}`)} />
     </header>
 
     {#if !canViewPayments}

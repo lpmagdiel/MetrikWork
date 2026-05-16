@@ -30,6 +30,7 @@
   import Toast from "../components/Toast.svelte";
     import AvatarCircle from "../components/AvatarCircle.svelte";
     import CircleAddButton from "../components/CircleAddButton.svelte";
+  import TitleHeader from "../components/TitleHeader.svelte";
 
   let team = $derived($selectedTeam);
   let canViewTasks = $derived(hasTeamPermission(team, $userStore?.uid, "tasks", "view"));
@@ -179,29 +180,10 @@
   <Toast message={messageToast} type={typeToast} show={showToast} />
 
   <!-- Header -->
-  <header>
-    <button
-      class="back-btn"
-      onclick={() => navigateTo("/teams/" + $selectedTeamId)}
-    >
-      <ChevronLeft size={24} />
-    </button>
-    <div class="header-title">
-      <ClipboardList size={20} color="var(--text-primary)" />
-      <h1>Tareas</h1>
-      <span class="tasks-total">{$teamTasksStore.length}</span>
-    </div>
+   <TitleHeader title="Tareas" description={team?.name || "" + $teamTasksStore.length} action={() => navigateTo("/teams/" + $selectedTeamId)} icon={ChevronLeft} paddingHorizontal={true}/>
     {#if canCreateTasks}
-      <CircleAddButton onClick={openAddTask} />
+      <CircleAddButton onClick={openAddTask} floating={true}/>
     {/if}
-  </header>
-
-  <!-- Team name badge -->
-  {#if team}
-    <div class="team-badge">
-      <span>{team.name}</span>
-    </div>
-  {/if}
 
   {#if !canViewTasks}
     <div class="empty-state">

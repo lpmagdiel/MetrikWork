@@ -67,6 +67,7 @@
   import Toast from "../components/Toast.svelte";
   import AvatarCircle from "../components/AvatarCircle.svelte";
   import { confirmAlert, showErrorAlert, showSuccessAlert } from "../data/alerts.js";
+  import TitleHeader from "../components/TitleHeader.svelte";
 
   let team = $derived($selectedTeam);
   let isAdmin = $derived(team?.admin === $userStore?.uid);
@@ -552,10 +553,7 @@
 <div class="team-detail">
   <Toast message={messageToast} type={typeToast} show={showToast} />
   <header>
-    <button class="back-btn" onclick={() => (navigateTo("/teams"))}>
-      <ChevronLeft size={24} />
-    </button>
-    <h1>Detalles del Equipo</h1>
+  <TitleHeader title="Detalles del Equipo" description={team?.name || ""} action={() => navigateTo("/teams")} />
   </header>
 
   {#if team}
