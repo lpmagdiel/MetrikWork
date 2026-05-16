@@ -12,6 +12,7 @@
     Save,
     Info,
     Album,
+    Settings
   } from "lucide-svelte";
   import {
     userStore,
@@ -30,6 +31,7 @@
   import UpdateFeaturesModal from "../components/UpdateFeaturesModal.svelte";
   import {updateData} from "../data/updateFeatures.js";
   import { showErrorAlert } from "../data/alerts.js";
+  import TitleHeader from "../components/TitleHeader.svelte";
 
   let name = $state("");
   let email = $state("");
@@ -138,7 +140,7 @@
   <Toast message={toastMessage} type={toastType} bind:show={showToast} />
   <UpdateFeaturesModal open={showUpdateModal} onClose={() => (showUpdateModal = false)} />
   <header>
-    <h1>Configuración</h1>
+    <TitleHeader title="Configuración" description={$userStore?.email || ""} icon={Settings} iconPosition="right"/>
   </header>
 
   <div class="content">
