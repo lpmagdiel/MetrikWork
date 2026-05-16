@@ -129,6 +129,7 @@
             colorText: "var(--text-primary, #333333)",
             borderRadius: "12px",
             fontFamily: "Inter, sans-serif",
+            fontSizeBase: "16px",
           }}
           rules={{
             ".Input": {
