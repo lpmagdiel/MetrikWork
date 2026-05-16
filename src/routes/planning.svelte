@@ -26,6 +26,8 @@
     exceedsOvertimeLimit,
     getOvertimeLimitHours,
     getOvertimeLimitMessage,
+    isNonWorkingDay,
+    getNonWorkingDayMessage,
   } from "../data/stores.js";
 
   let messageToast = $state("");
@@ -54,6 +56,8 @@
     $userStore?.uid && team?.admin && $userStore.uid === team.admin,
   );
   let overtimeLimitHours = $derived(getOvertimeLimitHours(team));
+  let isAssignmentNonWorkingDay = $derived(isNonWorkingDay(team, assignmentForm.date));
+  let assignmentNonWorkingMessage = $derived(getNonWorkingDayMessage(team, assignmentForm.date));
 
   const monthNames = [
     "Enero",
@@ -141,6 +145,16 @@
 
   $effect(() => {
     if (team?.id) loadWorks();
+  });
+
+  $effect(() => {
+    if (!isAssignmentNonWorkingDay) return;
+    if (assignmentForm.overtimeHours !== 0) {
+      assignmentForm.overtimeHours = 0;
+    }
+    if (assignmentForm.type === "overtime") {
+      assignmentForm.type = "full-day";
+    }
   });
 
   function showNotification(message, type = "success") {
@@ -268,6 +282,11 @@
 
   async function handleSaveAssignment() {
     if (!team?.id || !assignmentForm.userId || !assignmentForm.date) return;
+    if (isAssignmentNonWorkingDay) {
+      showNotification(assignmentNonWorkingMessage, "error");
+      return;
+    }
+
     if (exceedsOvertimeLimit(assignmentForm.overtimeHours, team)) {
       showNotification(getOvertimeLimitMessage(team), "error");
       return;
@@ -375,6 +394,7 @@
               class:empty={!day}
               class:selected={day?.dateKey === selectedCalendarDate}
               class:marked={day?.assignments?.length > 0}
+              class:non-working={day && isNonWorkingDay(team, day.dateKey)}
               style={getDayStyle(day)}
               disabled={!day}
               onclick={() => selectCalendarDay(day)}
@@ -512,6 +532,9 @@
       {#if overtimeLimitHours > 0}
         <p class="form-instruction">Límite de horas extra del equipo: {overtimeLimitHours}h.</p>
       {/if}
+      {#if isAssignmentNonWorkingDay}
+        <p class="form-instruction error">{assignmentNonWorkingMessage}</p>
+      {/if}
 
       <label>
         <span>Miembro</span>
@@ -529,7 +552,7 @@
 
       <label>
         <span>Tipo de jornada</span>
-        <select bind:value={assignmentForm.type}>
+        <select bind:value={assignmentForm.type} disabled={isAssignmentNonWorkingDay}>
           <option value="full-day">Jornada completa</option>
           <option value="half-day">Media jornada</option>
           <option value="overtime">Horas extra</option>
@@ -545,6 +568,7 @@
           max={overtimeLimitHours || undefined}
           step="0.5"
           bind:value={assignmentForm.overtimeHours}
+          disabled={isAssignmentNonWorkingDay}
         />
       </label>
 
@@ -560,7 +584,7 @@
       <button
         class="save-btn"
         onclick={handleSaveAssignment}
-        disabled={isSavingAssignment || !assignmentForm.userId || !assignmentForm.date}
+        disabled={isSavingAssignment || !assignmentForm.userId || !assignmentForm.date || isAssignmentNonWorkingDay}
       >
         <Save size={18} />
         <span>{isSavingAssignment ? "Guardando..." : "Guardar jornada"}</span>
@@ -770,6 +794,12 @@
     box-shadow: inset 0 -4px 0 var(--work-color);
   }
 
+  .calendar-day.non-working:not(.selected) {
+    border-color: color-mix(in srgb, var(--danger-color) 38%, transparent);
+    background: var(--bg-danger-subtle);
+    color: var(--danger-color);
+  }
+
   .day-number {
     font-size: 13px;
     font-weight: 800;
@@ -959,6 +989,14 @@
     color: var(--text-secondary);
     font-size: 14px;
     margin-top: -8px;
+  }
+
+  .assignment-form > p.error {
+    color: var(--danger-color);
+    background: var(--bg-danger-subtle);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    margin-top: -4px;
   }
 
   .save-btn {

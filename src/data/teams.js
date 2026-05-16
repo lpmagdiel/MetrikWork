@@ -4,6 +4,7 @@ import { doc, onSnapshot, collection, addDoc, query, where, updateDoc, getDoc, a
 import { userStore } from './auth.js';
 import { createNotification } from './notifications.js';
 import { createTeamPermissions, normalizeTeamPermissions } from './permissions.js';
+import { normalizeNonWorkingDays } from './workLimits.js';
 
 export const teamsStore = writable([]);
 export const selectedTeamId = writable(null);
@@ -230,6 +231,10 @@ export async function updateTeamProfile(teamId, data) {
 
         if (data.overtimeLimitHours !== undefined) {
             updateData.overtimeLimitHours = Math.max(0, Number(data.overtimeLimitHours) || 0);
+        }
+
+        if (data.nonWorkingDays !== undefined) {
+            updateData.nonWorkingDays = normalizeNonWorkingDays(data.nonWorkingDays);
         }
 
         await updateDoc(doc(db, 'teams', teamId), updateData);

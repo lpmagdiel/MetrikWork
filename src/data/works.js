@@ -1,6 +1,6 @@
 import { db } from './firebase.js';
 import { collection, addDoc, query, where, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
-import { applyWorkdayOvertimeLimit } from './workLimits.js';
+import { applyWorkdayOvertimeLimit, assertWorkingDay } from './workLimits.js';
 
 export function getTodayDateString() {
     const now = new Date();
@@ -29,14 +29,17 @@ export async function registerWorkday(teamId, userId, userName, workDay) {
     if (!workDay) throw new Error("workDay is missing");
     try {
         const teamSnapshot = await getDoc(doc(db, 'teams', teamId));
-        const limitedWorkDay = applyWorkdayOvertimeLimit(workDay, teamSnapshot.data());
+        const teamData = teamSnapshot.data();
+        const workDate = workDay.date || getTodayDateString();
+        assertWorkingDay(teamData, workDate);
+        const limitedWorkDay = applyWorkdayOvertimeLimit(workDay, teamData);
         const newWork = {
             teamId,
             userId,
             userName,
             type: (limitedWorkDay && limitedWorkDay.type) ? limitedWorkDay.type : 'full-day',
             overtimeHours: (limitedWorkDay && limitedWorkDay.overtimeHours) ? Number(limitedWorkDay.overtimeHours) : 0,
-            date: getTodayDateString(),
+            date: workDate,
             createdAt: new Date().toISOString(),
             paid: false
         };
@@ -75,7 +78,9 @@ export async function registerWorkday(teamId, userId, userName, workDay) {
 export async function assignWorkdayToMember(teamId, userId, userName, workDay, assignedBy = null) {
     if (!teamId || !userId || !workDay?.date) throw new Error("Datos de jornada incompletos");
     const teamSnapshot = await getDoc(doc(db, 'teams', teamId));
-    const limitedWorkDay = applyWorkdayOvertimeLimit(workDay, teamSnapshot.data());
+    const teamData = teamSnapshot.data();
+    assertWorkingDay(teamData, workDay.date);
+    const limitedWorkDay = applyWorkdayOvertimeLimit(workDay, teamData);
     const worksQuery = query(
         collection(db, 'works'),
         where('teamId', '==', teamId),

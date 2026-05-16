@@ -58,6 +58,9 @@
     exceedsOvertimeLimit,
     getOvertimeLimitHours,
     getOvertimeLimitMessage,
+    getTodayDateString,
+    isNonWorkingDay,
+    getNonWorkingDayMessage,
   } from "../data/stores.js";
   import { navigateTo } from "../router.js";
   import SliceContainer from "../components/SliceContainer.svelte";
@@ -74,6 +77,9 @@
   let canCreateSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "create"));
   let canEditSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "edit"));
   let overtimeLimitHours = $derived(getOvertimeLimitHours(team));
+  let todayDate = $derived(getTodayDateString());
+  let isTodayNonWorkingDay = $derived(isNonWorkingDay(team, todayDate));
+  let todayNonWorkingMessage = $derived(getNonWorkingDayMessage(team, todayDate));
   const permissionModules = Object.entries(TEAM_PERMISSION_LABELS);
   const permissionActions = Object.entries(TEAM_PERMISSION_ACTION_LABELS);
 
@@ -149,6 +155,12 @@
       subscribeToTeamLocations(team.id);
     }
     return () => subscribeToTeamLocations(null);
+  });
+
+  $effect(() => {
+    if (isTodayNonWorkingDay && workDay.overtimeHours !== 0) {
+      workDay.overtimeHours = 0;
+    }
   });
 
   function openAddTask() {
@@ -309,6 +321,11 @@
   async function handleRegisterWorkday() {
     if (!team?.id || !$userStore?.uid) return;
     try {
+      if (isTodayNonWorkingDay) {
+        await showErrorAlert("Día no laborable", todayNonWorkingMessage);
+        return;
+      }
+
       const alreadyHasWorkday = await checkTodayWorkday();
       const workDayToRegister = {
         ...workDay,
@@ -963,9 +980,11 @@
       <div class="workday-form">
         <h3>Registrar Jornada</h3>
         <p class="form-instruction">
-          {hasWorkdayToday
-            ? "Ya ingresaste una jornada hoy. Solo puedes añadir horas extra."
-            : "Selecciona el tipo de jornada que deseas registrar para hoy."}
+          {isTodayNonWorkingDay
+            ? todayNonWorkingMessage
+            : hasWorkdayToday
+              ? "Ya ingresaste una jornada hoy. Solo puedes añadir horas extra."
+              : "Selecciona el tipo de jornada que deseas registrar para hoy."}
           {#if overtimeLimitHours > 0}
             Límite de horas extra: {overtimeLimitHours}h.
           {/if}
@@ -975,12 +994,12 @@
           <button
             class="workday-option {workDay.type === 'full-day'
               ? 'work-option-active'
-              : ''} {hasWorkdayToday ? 'work-option-disabled' : ''}"
+              : ''} {hasWorkdayToday || isTodayNonWorkingDay ? 'work-option-disabled' : ''}"
             onclick={() => {
-              if (!hasWorkdayToday) workDay.type = "full-day";
+              if (!hasWorkdayToday && !isTodayNonWorkingDay) workDay.type = "full-day";
             }}
-            disabled={hasWorkdayToday || isCheckingWorkday}
-            aria-disabled={hasWorkdayToday || isCheckingWorkday}
+            disabled={hasWorkdayToday || isCheckingWorkday || isTodayNonWorkingDay}
+            aria-disabled={hasWorkdayToday || isCheckingWorkday || isTodayNonWorkingDay}
           >
             <div class="option-icon full-day">
               <Clock size={24} />
@@ -994,12 +1013,12 @@
           <button
             class="workday-option {workDay.type === 'half-day'
               ? 'work-option-active'
-              : ''} {hasWorkdayToday ? 'work-option-disabled' : ''}"
+              : ''} {hasWorkdayToday || isTodayNonWorkingDay ? 'work-option-disabled' : ''}"
             onclick={() => {
-              if (!hasWorkdayToday) workDay.type = "half-day";
+              if (!hasWorkdayToday && !isTodayNonWorkingDay) workDay.type = "half-day";
             }}
-            disabled={hasWorkdayToday || isCheckingWorkday}
-            aria-disabled={hasWorkdayToday || isCheckingWorkday}
+            disabled={hasWorkdayToday || isCheckingWorkday || isTodayNonWorkingDay}
+            aria-disabled={hasWorkdayToday || isCheckingWorkday || isTodayNonWorkingDay}
           >
             <div class="option-icon half-day">
               <Clock size={24} />
@@ -1010,7 +1029,7 @@
             </div>
           </button>
 
-          <div class="workday-option overtime">
+          <div class="workday-option overtime" class:work-option-disabled={isTodayNonWorkingDay}>
             <div class="option-icon overtime-icon">
               <Clock size={24} />
             </div>
@@ -1024,7 +1043,7 @@
                       0,
                       workDay.overtimeHours - 1,
                     ))}
-                  disabled={workDay.overtimeHours === 0}
+                  disabled={isTodayNonWorkingDay || workDay.overtimeHours === 0}
                 >
                   <Minus size={18} />
                 </button>
@@ -1036,7 +1055,7 @@
                       overtimeLimitHours || 12,
                       workDay.overtimeHours + 1,
                     ))}
-                  disabled={overtimeLimitHours > 0 && workDay.overtimeHours >= overtimeLimitHours}
+                  disabled={isTodayNonWorkingDay || (overtimeLimitHours > 0 && workDay.overtimeHours >= overtimeLimitHours)}
                 >
                   <Plus size={18} />
                 </button>
@@ -1048,7 +1067,7 @@
         <button
           class="register-workday-btn"
           onclick={handleRegisterWorkday}
-          disabled={isCheckingWorkday || (hasWorkdayToday && workDay.overtimeHours <= 0)}
+          disabled={isCheckingWorkday || isTodayNonWorkingDay || (hasWorkdayToday && workDay.overtimeHours <= 0)}
         >
           <Save size={20} />
           <span>{hasWorkdayToday ? "Registrar Horas Extra" : "Registrar Jornada"}</span>

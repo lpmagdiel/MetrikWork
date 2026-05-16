@@ -22,6 +22,9 @@
     exceedsOvertimeLimit,
     getOvertimeLimitHours,
     getOvertimeLimitMessage,
+    getTodayDateString,
+    isNonWorkingDay,
+    getNonWorkingDayMessage,
   } from "../data/stores.js";
   import { showErrorAlert, showSuccessAlert } from "../data/alerts.js";
 
@@ -45,13 +48,16 @@
     $teamsStore.find((team) => team.id === activeTeamId) || null,
   );
   let overtimeLimitHours = $derived(getOvertimeLimitHours(selectedTeam));
+  let todayDate = $derived(getTodayDateString());
+  let isTodayNonWorkingDay = $derived(isNonWorkingDay(selectedTeam, todayDate));
+  let todayNonWorkingMessage = $derived(getNonWorkingDayMessage(selectedTeam, todayDate));
   let isRunning = $derived(Boolean(startedAt && !endedAt));
   let elapsedSeconds = $derived.by(() => {
     if (!startedAt) return 0;
     const end = endedAt || now;
     return Math.max(0, Math.floor((end - startedAt.getTime()) / 1000));
   });
-  let canStart = $derived(Boolean(activeTeamId && taskTitle.trim() && !isRunning));
+  let canStart = $derived(Boolean(activeTeamId && taskTitle.trim() && !isRunning && !isTodayNonWorkingDay));
   let canFinish = $derived(Boolean(isRunning && elapsedSeconds > 0));
 
   $effect(() => {
@@ -160,6 +166,11 @@
   }
 
   function startTimer() {
+    if (isTodayNonWorkingDay) {
+      showNotification(todayNonWorkingMessage, "error");
+      return;
+    }
+
     if (!canStart) {
       showNotification("Selecciona un equipo y escribe la tarea antes de iniciar.", "error");
       return;
@@ -200,6 +211,14 @@
     const totalHours = Number(formatHours(totalSeconds));
 
     try {
+      if (isTodayNonWorkingDay) {
+        endedAt = null;
+        startTicker();
+        persistActiveTimer();
+        await showErrorAlert("Día no laborable", todayNonWorkingMessage);
+        return;
+      }
+
       if (timerMode === "overtime" && exceedsOvertimeLimit(totalHours, selectedTeam)) {
         endedAt = null;
         startTicker();
@@ -329,8 +348,10 @@
         <button
           type="button"
           class:active={timerMode === "overtime"}
-          disabled={isRunning || isSaving}
-          onclick={() => (timerMode = "overtime")}
+          disabled={isRunning || isSaving || isTodayNonWorkingDay}
+          onclick={() => {
+            if (!isTodayNonWorkingDay) timerMode = "overtime";
+          }}
         >
           <TimerReset size={16} />
           Extra
@@ -370,6 +391,10 @@
           <strong>{formatHour(endedAt)}</strong>
         </div>
       </div>
+
+      {#if isTodayNonWorkingDay}
+        <p class="form-note error">{todayNonWorkingMessage}</p>
+      {/if}
 
       <div class="actions">
         {#if isRunning}
@@ -561,6 +586,22 @@
 
   .select-shell {
     position: relative;
+  }
+
+  .form-note {
+    margin: 0;
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+
+  .form-note.error {
+    background: var(--bg-danger-subtle);
+    color: var(--danger-color);
   }
 
   .mode-tabs {

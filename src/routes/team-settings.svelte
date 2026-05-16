@@ -26,6 +26,8 @@
     hasTeamPermission,
     TEAM_PERMISSION_LABELS,
     TEAM_PERMISSION_ACTION_LABELS,
+    WEEKDAY_OPTIONS,
+    normalizeNonWorkingDays,
   } from "../data/stores.js";
   import { navigateTo } from "../router.js";
   import { resizer, uploader } from "../data/fileHelper.js";
@@ -45,6 +47,7 @@
   let memberList = $state([]);
   let teamName = $state("");
   let overtimeLimitHours = $state(0);
+  let nonWorkingDays = $state([]);
   let photoPreview = $state("");
   let pendingPhoto = $state("");
   let newMemberEmail = $state("");
@@ -62,6 +65,7 @@
     if (team) {
       teamName = team.team || team.name || "";
       overtimeLimitHours = Number(team.overtimeLimitHours) || 0;
+      nonWorkingDays = normalizeNonWorkingDays(team.nonWorkingDays);
       photoPreview = team.photoURL || "";
       pendingPhoto = "";
       const nextEditingPermissions = {};
@@ -103,6 +107,13 @@
     newMemberPermissions[module][action] = !newMemberPermissions[module][action];
   }
 
+  function toggleNonWorkingDay(day) {
+    const normalizedDay = Number(day);
+    nonWorkingDays = nonWorkingDays.includes(normalizedDay)
+      ? nonWorkingDays.filter((selectedDay) => selectedDay !== normalizedDay)
+      : [...nonWorkingDays, normalizedDay];
+  }
+
   async function handlePhotoChange(event) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -132,6 +143,7 @@
         name: teamName,
         photoURL,
         overtimeLimitHours,
+        nonWorkingDays,
       });
       pendingPhoto = "";
       await showSuccessAlert(
@@ -271,6 +283,25 @@
           />
           <p class="field-help">
             Usa 0 para no limitar. Las jornadas flexibles se recortan al máximo configurado.
+          </p>
+        </div>
+        <div class="profile-fields settings-field">
+          <span class="field-label">Días no laborables</span>
+          <div class="weekday-grid">
+            {#each WEEKDAY_OPTIONS as day}
+              <label class="weekday-toggle" class:active={nonWorkingDays.includes(day.value)}>
+                <input
+                  type="checkbox"
+                  checked={nonWorkingDays.includes(day.value)}
+                  onchange={() => toggleNonWorkingDay(day.value)}
+                  disabled={!canEditSettings}
+                />
+                <span>{day.shortLabel}</span>
+              </label>
+            {/each}
+          </div>
+          <p class="field-help">
+            Los usuarios no podrán registrar jornadas en los días marcados. Si desmarcas un día, vuelve a permitir fichar.
           </p>
         </div>
         {#if canEditSettings}
@@ -550,7 +581,44 @@
     margin-top: 6px;
   }
 
+  .field-label {
+    display: block;
+    margin-bottom: 8px;
+  }
+
+  .weekday-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+    gap: 8px;
+  }
+
+  .weekday-toggle {
+    min-height: 42px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 10px;
+    cursor: pointer;
+  }
+
+  .weekday-toggle.active {
+    border-color: var(--danger-color);
+    background: var(--bg-danger-subtle);
+    color: var(--danger-color);
+  }
+
+  .weekday-toggle input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
   label,
+  .field-label,
   .permission-row span {
     font-size: 13px;
     font-weight: 700;
