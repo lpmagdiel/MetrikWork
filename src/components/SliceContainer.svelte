@@ -36,7 +36,10 @@
     bottom: 0;
     left: 0;
     width: 100%;
-    height: 70vh;
+    height: auto;
+    min-height: 65vh;
+    max-height: 95vh;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
     align-items: center;
