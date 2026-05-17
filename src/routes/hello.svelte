@@ -58,13 +58,13 @@
     if (provider === "mail") {
       openMailForm = true;
     } else if (provider === "google") {
-      if (BETA_TESTERS_MODE) {
+      /*if (BETA_TESTERS_MODE) {
         showInfoAlert(
           "No disponible",
           "Esa opción no está disponible en la versión de pruebas.",
         );
         return;
-      }
+      }*/
       loadingShow = true;
       skipAutoRedirect = true;
       try {
