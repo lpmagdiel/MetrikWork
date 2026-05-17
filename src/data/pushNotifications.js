@@ -85,6 +85,7 @@ function setupForegroundMessages() {
     foregroundUnsubscribe = onMessage(messaging, (payload) => {
         const notification = payload.notification || {};
         const data = payload.data || {};
+        if (isChatNotification(data) && !isAppInBackground()) return;
         if (data.showInForeground === 'false' && !isAppInBackground()) return;
         showDeviceNotification({
             id: data.notificationId || payload.messageId,
@@ -93,6 +94,11 @@ function setupForegroundMessages() {
             url: data.url || '/notifications',
         });
     });
+}
+
+function isChatNotification(data = {}) {
+    return data.type === 'chat_message' ||
+        data.type === 'private_chat_message';
 }
 
 function isAppInBackground() {

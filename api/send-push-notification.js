@@ -243,6 +243,8 @@ async function markPushAsSent(projectId, accessToken, notificationId) {
 async function sendFcmMessage(projectId, accessToken, token, notification) {
   const url = normalizeAppUrl(notification.url);
   const absoluteUrl = `${notification.origin}${url}`;
+  const isChatNotification = notification.type === 'chat_message' ||
+    notification.type === 'private_chat_message';
   const data = {
     notificationId: notification.notificationId,
     url,
@@ -267,21 +269,25 @@ async function sendFcmMessage(projectId, accessToken, token, notification) {
     body: JSON.stringify({
       message: {
         token,
-        notification: {
-          title: notification.title,
-          body: notification.body,
-        },
+        ...(isChatNotification ? {} : {
+          notification: {
+            title: notification.title,
+            body: notification.body,
+          },
+        }),
         data,
         webpush: {
           fcm_options: {
             link: absoluteUrl,
           },
-          notification: {
-            icon: `${notification.origin}/icon.png`,
-            badge: `${notification.origin}/icons/android/launchericon-192x192.png`,
-            tag: `metricwork-${notification.notificationId}`,
-            renotify: true,
-          },
+          ...(isChatNotification ? {} : {
+            notification: {
+              icon: `${notification.origin}/icon.png`,
+              badge: `${notification.origin}/icons/android/launchericon-192x192.png`,
+              tag: `metricwork-${notification.notificationId}`,
+              renotify: true,
+            },
+          }),
         },
       },
     }),

@@ -24,8 +24,14 @@ function isAppInBackground() {
     return document.visibilityState === 'hidden' || !document.hasFocus();
 }
 
+function isChatNotification(notification) {
+    return notification.type === 'chat_message' ||
+        notification.type === 'private_chat_message';
+}
+
 function shouldShowDeviceNotification(notification) {
     if (notification.opened) return false;
+    if (isChatNotification(notification)) return isAppInBackground();
     if (notification.showInForeground === false) return isAppInBackground();
     return true;
 }

@@ -40,6 +40,7 @@
     selectedTeamId,
     teamsStore,
     locationsStore,
+    getUserProfile,
   } from "../data/stores.js";
   import { get } from "svelte/store";
   import { navigateTo } from "../router.js";
@@ -81,6 +82,8 @@
   let callStatus = $state("idle");
   let isMuted = $state(false);
   let isCameraOff = $state(false);
+  let remoteHasVideo = $state(false);
+  let remoteProfile = $state(null);
   let localVideo = $state();
   let remoteVideo = $state();
   let localStream = null;
@@ -90,6 +93,19 @@
   let hasHandledRemoteDescription = false;
   let currentCallId = "";
   let pendingRemoteCandidates = [];
+  let remoteUserId = $derived(activeCall
+    ? (activeCall.callerId === $userStore?.uid ? activeCall.receiverId : activeCall.callerId)
+    : selectedMember?.id);
+  let remoteDisplayName = $derived(
+    remoteProfile?.name ||
+    selectedMember?.name ||
+    activeCall?.callerName ||
+    activeCall?.receiverName ||
+    "Usuario",
+  );
+  let remoteAvatarUrl = $derived(remoteProfile?.avatar || remoteProfile?.photoURL || selectedMember?.avatar || selectedMember?.photoURL || "");
+  let remoteVideoEnabled = $derived(activeCall?.media?.[remoteUserId]?.videoEnabled !== false);
+  let showRemoteAvatar = $derived(!remoteHasVideo || !remoteVideoEnabled);
   const pageSize = 30;
   const rtcConfig = {
     iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
@@ -128,6 +144,20 @@
       subscribeToPrivateCalls(null, null);
       activeCall = null;
     }
+  });
+
+  $effect(() => {
+    const uid = remoteUserId;
+    if (!uid) {
+      remoteProfile = null;
+      return;
+    }
+
+    getUserProfile(uid).then((profile) => {
+      if (remoteUserId === uid) {
+        remoteProfile = profile;
+      }
+    });
   });
 
   onDestroy(() => {
@@ -387,6 +417,7 @@
     localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
     peerConnection.ontrack = (event) => {
       event.streams[0].getTracks().forEach((track) => remoteStream.addTrack(track));
+      remoteHasVideo = remoteStream.getVideoTracks().some((track) => track.readyState === "live");
       if (remoteVideo) remoteVideo.srcObject = remoteStream;
     };
     peerConnection.onicecandidate = (event) => {
@@ -416,6 +447,8 @@
       await peerConnection.setLocalDescription(offer);
       await updatePrivateCall(chatId, currentCallId, {
         offer: { type: offer.type, sdp: offer.sdp },
+        [`media.${$userStore.uid}.videoEnabled`]: true,
+        [`media.${$userStore.uid}.audioEnabled`]: true,
         status: "ringing",
       });
       candidateUnsubscribe = subscribeToCallCandidates(chatId, currentCallId, "receiver", async (candidate) => {
@@ -446,6 +479,8 @@
       await peerConnection.setLocalDescription(answer);
       await updatePrivateCall(privateChatId, activeCall.id, {
         answer: { type: answer.type, sdp: answer.sdp },
+        [`media.${$userStore.uid}.videoEnabled`]: true,
+        [`media.${$userStore.uid}.audioEnabled`]: true,
         status: "active",
       });
       candidateUnsubscribe = subscribeToCallCandidates(privateChatId, activeCall.id, "caller", async (candidate) => {
@@ -511,6 +546,7 @@
     if (remoteVideo) remoteVideo.srcObject = null;
     currentCallId = "";
     pendingRemoteCandidates = [];
+    remoteHasVideo = false;
     hasHandledRemoteDescription = false;
     isCallOpen = false;
     callStatus = "idle";
@@ -523,6 +559,11 @@
     localStream?.getAudioTracks().forEach((track) => {
       track.enabled = !isMuted;
     });
+    if (privateChatId && (currentCallId || activeCall?.id) && $userStore?.uid) {
+      updatePrivateCall(privateChatId, currentCallId || activeCall.id, {
+        [`media.${$userStore.uid}.audioEnabled`]: !isMuted,
+      }).catch(console.error);
+    }
   }
 
   function toggleCamera() {
@@ -530,6 +571,11 @@
     localStream?.getVideoTracks().forEach((track) => {
       track.enabled = !isCameraOff;
     });
+    if (privateChatId && (currentCallId || activeCall?.id) && $userStore?.uid) {
+      updatePrivateCall(privateChatId, currentCallId || activeCall.id, {
+        [`media.${$userStore.uid}.videoEnabled`]: !isCameraOff,
+      }).catch(console.error);
+    }
   }
 </script>
 
@@ -734,7 +780,22 @@
         </div>
       {:else}
         <div class="video-grid">
-          <video bind:this={remoteVideo} autoplay playsinline></video>
+          <div class="remote-avatar-backdrop" class:visible={showRemoteAvatar}>
+            <div class="remote-avatar-ring">
+              {#if remoteAvatarUrl}
+                <img src={remoteAvatarUrl} alt={remoteDisplayName} />
+              {:else}
+                <span>{remoteDisplayName.slice(0, 1).toUpperCase()}</span>
+              {/if}
+            </div>
+            <strong>{remoteDisplayName}</strong>
+          </div>
+          <video
+            bind:this={remoteVideo}
+            autoplay
+            playsinline
+            class:hidden-video={showRemoteAvatar}
+          ></video>
           <video bind:this={localVideo} autoplay playsinline muted class="local-video"></video>
         </div>
 
@@ -1483,19 +1544,84 @@
   .video-grid {
     position: relative;
     min-height: 300px;
-    background: #050608;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at 30% 18%, rgba(31, 157, 85, 0.28), transparent 34%),
+      radial-gradient(circle at 78% 72%, rgba(93, 95, 239, 0.24), transparent 36%),
+      linear-gradient(135deg, #12151c, #050608);
   }
 
   .video-grid video {
+    position: relative;
+    z-index: 2;
     width: 100%;
     height: 100%;
     min-height: 300px;
     object-fit: cover;
-    background: #050608;
+    background: transparent;
+    transition: opacity 0.2s ease;
+  }
+
+  .video-grid video.hidden-video {
+    opacity: 0;
+  }
+
+  .remote-avatar-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    opacity: 0;
+    transform: scale(0.98);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    pointer-events: none;
+  }
+
+  .remote-avatar-backdrop.visible {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  .remote-avatar-ring {
+    width: 138px;
+    height: 138px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.14);
+    border: 3px solid rgba(255, 255, 255, 0.26);
+    box-shadow: 0 18px 46px rgba(0, 0, 0, 0.38);
+  }
+
+  .remote-avatar-ring img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .remote-avatar-ring span {
+    font-size: 60px;
+    line-height: 1;
+    font-weight: 900;
+    color: white;
+  }
+
+  .remote-avatar-backdrop strong {
+    color: white;
+    font-size: 18px;
+    font-weight: 900;
+    text-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
   }
 
   .video-grid .local-video {
     position: absolute;
+    z-index: 3;
     right: 14px;
     bottom: 14px;
     width: 132px;
