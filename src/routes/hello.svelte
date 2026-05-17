@@ -181,10 +181,7 @@
           <button
             type="button"
             class="login-option google"
-            class:google-disabled={BETA_TESTERS_MODE}
-            onclick={() => handleLogin("google")}
-            aria-disabled={BETA_TESTERS_MODE ? "true" : undefined}
-          >
+            onclick={() => handleLogin("google")}>
             <img src="/google.png" alt="" width="22" aria-hidden="true" />
             <span>Google</span>
           </button>
