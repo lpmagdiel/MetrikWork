@@ -13,7 +13,7 @@
   import { navigateTo } from "../router.js";
   import { fly } from "svelte/transition";
   import Toast from "../components/Toast.svelte";
-  import { confirmAlert } from "../data/alerts.js";
+  import { confirmAlert, showErrorAlert, showSuccessAlert } from "../data/alerts.js";
 
   let notifications = $derived($notificationsStore);
   let swipedNotificationId = $state(null);
@@ -94,9 +94,7 @@
       await deleteNotification(notificationId, $userStore?.uid);
       if (swipedNotificationId === notificationId) swipedNotificationId = null;
     } catch (e) {
-      messageToast = "Error al eliminar";
-      typeToast = "error";
-      showToast = true;
+      showErrorAlert("Error", "No se pudo eliminar la notificación.");
     }
   }
 
@@ -113,13 +111,9 @@
   async function handleDeleteAll() {
     try {
       await deleteAllNotifications($userStore?.uid);
-      messageToast = "Notificaciones eliminadas";
-      typeToast = "success";
-      showToast = true;
+      showSuccessAlert("Notificaciones eliminadas", "Se eliminaron todas las notificaciones.");
     } catch (e) {
-      messageToast = "Error al eliminar notificaciones";
-      typeToast = "error";
-      showToast = true;
+      showErrorAlert("Error", "No se pudieron eliminar las notificaciones.");
     }
   }
 

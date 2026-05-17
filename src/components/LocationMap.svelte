@@ -64,9 +64,6 @@
       loading="lazy"
       referrerpolicy="no-referrer-when-downgrade"
     ></iframe>
-    <a class="map-link" href={mapLink} target="_blank" rel="noreferrer">
-      Ver en OpenStreetMap
-    </a>
   {:else}
     <div class="empty-map">
       <span>Ubicación no disponible</span>
@@ -92,19 +89,6 @@
     border: 0;
   }
 
-  .map-link {
-    position: absolute;
-    right: 10px;
-    bottom: 10px;
-    padding: 6px 8px;
-    border-radius: 8px;
-    background: var(--bg-card);
-    color: var(--text-primary);
-    font-size: 12px;
-    font-weight: 600;
-    text-decoration: none;
-    box-shadow: var(--shadow-card);
-  }
 
   .empty-map {
     display: flex;
