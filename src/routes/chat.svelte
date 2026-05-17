@@ -1,13 +1,39 @@
 <script>
   // @ts-nocheck
 
-  import { onMount, onDestroy } from "svelte";
-  import { BarChart3, ChevronLeft, Image as ImageIcon, MapPinned, Plus, Send, Trash2 } from "lucide-svelte";
+  import { onDestroy } from "svelte";
+  import {
+    BarChart3,
+    Image as ImageIcon,
+    MapPinned,
+    Mic,
+    MicOff,
+    Phone,
+    PhoneOff,
+    Plus,
+    Send,
+    Trash2,
+    UserRound,
+    UsersRound,
+    Video,
+    VideoOff,
+  } from "lucide-svelte";
   import {
     userStore,
     chatMessagesStore,
     subscribeToTeamChat,
     sendTeamMessage,
+    subscribeToPrivateChat,
+    sendPrivateMessage,
+    getOrCreatePrivateChat,
+    getOlderPrivateMessages,
+    createPrivateCall,
+    subscribeToPrivateCalls,
+    updatePrivateCall,
+    endPrivateCall,
+    addCallCandidate,
+    subscribeToCallCandidates,
+    clearCallCandidates,
     voteTeamPoll,
     getOlderTeamMessages,
     mergeChatMessages,
@@ -26,9 +52,16 @@
   let messageInput = $state("");
   let messages = $derived($chatMessagesStore);
   let teamId = $derived($selectedTeamId);
+  let team = $derived($teamsStore.find((t) => t.id === teamId));
   let teamName = $derived(
-    $teamsStore.find((t) => t.id === teamId)?.name || "Chat de Equipo",
+    team?.name || "Chat de Equipo",
   );
+  let teamMembers = $derived((team?.membersData || []).filter((member) => member.id !== $userStore?.uid));
+  let chatMode = $state("team");
+  let selectedMemberId = $state("");
+  let selectedMember = $derived(teamMembers.find((member) => member.id === selectedMemberId) || null);
+  let privateChatId = $state("");
+  let chatTitle = $derived(chatMode === "private" && selectedMember ? selectedMember.name : teamName);
   let chatContainer;
   let showImageSlice = $state(false);
   let showAttachMenu = $state(false);
@@ -43,15 +76,64 @@
   let isLoadingOlder = $state(false);
   let hasOlderMessages = $state(true);
   let shouldStickToBottom = $state(true);
+  let activeCall = $state(null);
+  let isCallOpen = $state(false);
+  let callStatus = $state("idle");
+  let isMuted = $state(false);
+  let isCameraOff = $state(false);
+  let localVideo = $state();
+  let remoteVideo = $state();
+  let localStream = null;
+  let remoteStream = null;
+  let peerConnection = null;
+  let candidateUnsubscribe = null;
+  let hasHandledRemoteDescription = false;
+  let currentCallId = "";
+  let pendingRemoteCandidates = [];
   const pageSize = 30;
+  const rtcConfig = {
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  };
 
   $effect(() => {
-    if (teamId) {
-      hasOlderMessages = true;
-      shouldStickToBottom = true;
+    if (chatMode === "private" && !selectedMemberId && teamMembers.length > 0) {
+      selectedMemberId = teamMembers[0].id;
+    }
+  });
+
+  $effect(() => {
+    hasOlderMessages = true;
+    shouldStickToBottom = true;
+    privateChatId = "";
+
+    if (chatMode === "team" && teamId) {
       subscribeToTeamChat(teamId, pageSize);
+    } else if (chatMode === "private" && teamId && $userStore && selectedMember) {
+      subscribeToPrivateChat(teamId, $userStore, selectedMember, pageSize).then((chatId) => {
+        privateChatId = chatId || "";
+      });
+    } else {
+      subscribeToTeamChat(null);
     }
     return () => subscribeToTeamChat(null);
+  });
+
+  $effect(() => {
+    if (chatMode === "private" && privateChatId && $userStore?.uid) {
+      subscribeToPrivateCalls(privateChatId, $userStore.uid, (call) => {
+        activeCall = call;
+        handleCallSnapshot(call);
+      });
+    } else {
+      subscribeToPrivateCalls(null, null);
+      activeCall = null;
+    }
+  });
+
+  onDestroy(() => {
+    subscribeToTeamChat(null);
+    subscribeToPrivateCalls(null, null);
+    cleanupCall(false);
   });
 
   $effect(() => {
@@ -76,7 +158,9 @@
     const previousHeight = chatContainer?.scrollHeight || 0;
     const oldestMessage = messages[0];
     try {
-      const olderMessages = await getOlderTeamMessages(teamId, oldestMessage, pageSize);
+      const olderMessages = chatMode === "private"
+        ? await getOlderPrivateMessages(privateChatId, oldestMessage, pageSize)
+        : await getOlderTeamMessages(teamId, oldestMessage, pageSize);
       if (olderMessages.length < pageSize) {
         hasOlderMessages = false;
       }
@@ -96,10 +180,17 @@
 
   async function handleSendMessage() {
     if (!messageInput.trim() || !teamId || !$userStore) return;
+    if (chatMode === "private" && !selectedMember) return;
 
     try {
       shouldStickToBottom = true;
-      await sendTeamMessage(teamId, messageInput.trim(), $userStore);
+      if (chatMode === "private") {
+        const chatId = privateChatId || await getOrCreatePrivateChat(teamId, $userStore, selectedMember);
+        privateChatId = chatId || "";
+        await sendPrivateMessage(chatId, messageInput.trim(), $userStore, selectedMember, null, teamId);
+      } else {
+        await sendTeamMessage(teamId, messageInput.trim(), $userStore);
+      }
       messageInput = "";
     } catch (error) {
       console.error("Error sending message", error);
@@ -112,11 +203,13 @@
   }
 
   function openLocationPicker() {
+    if (chatMode === "private") return;
     showAttachMenu = false;
     showLocationSlice = true;
   }
 
   function openPollCreator() {
+    if (chatMode === "private") return;
     showAttachMenu = false;
     pollQuestion = "";
     pollOptions = ["", ""];
@@ -145,6 +238,7 @@
   }
 
   async function handleSendPoll() {
+    if (chatMode === "private") return;
     const question = pollQuestion.trim();
     const options = pollOptions
       .map((option) => option.trim())
@@ -177,6 +271,7 @@
   }
 
   async function handlePollVote(message, optionId) {
+    if (chatMode === "private") return;
     if (!teamId || !$userStore?.uid || !message?.id || !optionId) return;
     try {
       await voteTeamPoll(teamId, message.id, $userStore.uid, optionId);
@@ -228,7 +323,13 @@
     try {
       const imageUrl = await uploader(previewUrl);
       shouldStickToBottom = true;
-      await sendTeamMessage(teamId, "", $userStore, imageUrl, { type: "IMAGE" });
+      if (chatMode === "private") {
+        const chatId = privateChatId || await getOrCreatePrivateChat(teamId, $userStore, selectedMember);
+        privateChatId = chatId || "";
+        await sendPrivateMessage(chatId, "", $userStore, selectedMember, imageUrl, teamId);
+      } else {
+        await sendTeamMessage(teamId, "", $userStore, imageUrl, { type: "IMAGE" });
+      }
       showImageSlice = false;
       previewUrl = "";
     } catch (error) {
@@ -240,6 +341,7 @@
   }
 
   async function handleSendLocation(location) {
+    if (chatMode === "private") return;
     if (!teamId || !$userStore || !location) return;
 
     try {
@@ -266,15 +368,222 @@
       handleSendMessage();
     }
   }
+
+  function setChatMode(mode) {
+    chatMode = mode;
+    showAttachMenu = false;
+    messageInput = "";
+  }
+
+  async function prepareMedia() {
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+    remoteStream = new MediaStream();
+    if (localVideo) localVideo.srcObject = localStream;
+    if (remoteVideo) remoteVideo.srcObject = remoteStream;
+  }
+
+  function createPeerConnection(candidateSide) {
+    peerConnection = new RTCPeerConnection(rtcConfig);
+    localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
+    peerConnection.ontrack = (event) => {
+      event.streams[0].getTracks().forEach((track) => remoteStream.addTrack(track));
+      if (remoteVideo) remoteVideo.srcObject = remoteStream;
+    };
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate && privateChatId && currentCallId) {
+        addCallCandidate(privateChatId, currentCallId, candidateSide, event.candidate).catch(console.error);
+      }
+    };
+  }
+
+  async function startCall() {
+    if (chatMode !== "private" || !teamId || !$userStore || !selectedMember || callStatus !== "idle") return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      showErrorAlert("Llamadas no disponibles", "Tu navegador no permite usar cámara o micrófono.");
+      return;
+    }
+
+    try {
+      const chatId = privateChatId || await getOrCreatePrivateChat(teamId, $userStore, selectedMember);
+      privateChatId = chatId || "";
+      currentCallId = await createPrivateCall(chatId, teamId, $userStore, selectedMember);
+      isCallOpen = true;
+      callStatus = "calling";
+      hasHandledRemoteDescription = false;
+      await prepareMedia();
+      createPeerConnection("caller");
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+      await updatePrivateCall(chatId, currentCallId, {
+        offer: { type: offer.type, sdp: offer.sdp },
+        status: "ringing",
+      });
+      candidateUnsubscribe = subscribeToCallCandidates(chatId, currentCallId, "receiver", async (candidate) => {
+        if (peerConnection?.remoteDescription) {
+          await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        } else {
+          pendingRemoteCandidates = [...pendingRemoteCandidates, candidate];
+        }
+      });
+    } catch (error) {
+      console.error("Error starting call", error);
+      showErrorAlert("Error", "No se pudo iniciar la llamada.");
+      cleanupCall(true);
+    }
+  }
+
+  async function acceptCall() {
+    if (!activeCall || !privateChatId || !$userStore || callStatus === "active") return;
+    try {
+      currentCallId = activeCall.id;
+      isCallOpen = true;
+      callStatus = "connecting";
+      hasHandledRemoteDescription = true;
+      await prepareMedia();
+      createPeerConnection("receiver");
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(activeCall.offer));
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+      await updatePrivateCall(privateChatId, activeCall.id, {
+        answer: { type: answer.type, sdp: answer.sdp },
+        status: "active",
+      });
+      candidateUnsubscribe = subscribeToCallCandidates(privateChatId, activeCall.id, "caller", async (candidate) => {
+        await peerConnection?.addIceCandidate(new RTCIceCandidate(candidate));
+      });
+      callStatus = "active";
+    } catch (error) {
+      console.error("Error accepting call", error);
+      showErrorAlert("Error", "No se pudo aceptar la llamada.");
+      cleanupCall(true);
+    }
+  }
+
+  async function handleCallSnapshot(call) {
+    if (!call) {
+      if (callStatus !== "idle") cleanupCall(false);
+      return;
+    }
+
+    const isCaller = call.callerId === $userStore?.uid;
+    const isIncoming = call.receiverId === $userStore?.uid && call.status === "ringing";
+    if (isIncoming && callStatus === "idle") {
+      currentCallId = call.id;
+      isCallOpen = true;
+      callStatus = "incoming";
+      return;
+    }
+
+    if (isCaller && peerConnection && call.answer && !hasHandledRemoteDescription) {
+      hasHandledRemoteDescription = true;
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(call.answer));
+      await Promise.all(
+        pendingRemoteCandidates.map((candidate) =>
+          peerConnection.addIceCandidate(new RTCIceCandidate(candidate)),
+        ),
+      );
+      pendingRemoteCandidates = [];
+      callStatus = "active";
+    }
+  }
+
+  async function hangUp() {
+    const callId = currentCallId || activeCall?.id;
+    if (privateChatId && callId) {
+      await endPrivateCall(privateChatId, callId).catch(console.error);
+      await clearCallCandidates(privateChatId, callId).catch(console.error);
+    }
+    cleanupCall(false);
+  }
+
+  function cleanupCall(shouldNotify) {
+    if (shouldNotify && privateChatId && currentCallId) {
+      endPrivateCall(privateChatId, currentCallId).catch(console.error);
+    }
+    candidateUnsubscribe?.();
+    candidateUnsubscribe = null;
+    peerConnection?.close();
+    peerConnection = null;
+    localStream?.getTracks().forEach((track) => track.stop());
+    localStream = null;
+    remoteStream = null;
+    if (localVideo) localVideo.srcObject = null;
+    if (remoteVideo) remoteVideo.srcObject = null;
+    currentCallId = "";
+    pendingRemoteCandidates = [];
+    hasHandledRemoteDescription = false;
+    isCallOpen = false;
+    callStatus = "idle";
+    isMuted = false;
+    isCameraOff = false;
+  }
+
+  function toggleMute() {
+    isMuted = !isMuted;
+    localStream?.getAudioTracks().forEach((track) => {
+      track.enabled = !isMuted;
+    });
+  }
+
+  function toggleCamera() {
+    isCameraOff = !isCameraOff;
+    localStream?.getVideoTracks().forEach((track) => {
+      track.enabled = !isCameraOff;
+    });
+  }
 </script>
 
 <div class="chat-page">
-  <TitleHeader title="Chat" description={teamName} action={()=>navigateTo(`/teams/${teamId}`)} paddingHorizontal={true}/>
+  <TitleHeader title="Chat" description={chatTitle} action={()=>navigateTo(`/teams/${teamId}`)} paddingHorizontal={true}/>
+
+  <div class="chat-switcher">
+    <div class="mode-tabs" aria-label="Tipo de chat">
+      <button
+        type="button"
+        class:active={chatMode === "team"}
+        onclick={() => setChatMode("team")}
+      >
+        <UsersRound size={17} />
+        Equipo
+      </button>
+      <button
+        type="button"
+        class:active={chatMode === "private"}
+        onclick={() => setChatMode("private")}
+      >
+        <UserRound size={17} />
+        Privado
+      </button>
+    </div>
+
+    {#if chatMode === "private"}
+      <div class="private-toolbar">
+        <select bind:value={selectedMemberId} aria-label="Seleccionar miembro">
+          {#if teamMembers.length === 0}
+            <option value="">Sin miembros disponibles</option>
+          {:else}
+            {#each teamMembers as member (member.id)}
+              <option value={member.id}>{member.name || member.email || "Miembro"}</option>
+            {/each}
+          {/if}
+        </select>
+        <button
+          type="button"
+          class="call-btn"
+          onclick={startCall}
+          disabled={!selectedMember || callStatus !== "idle"}
+          title="Iniciar llamada"
+        >
+          <Phone size={18} />
+        </button>
+      </div>
+    {/if}
+  </div>
 
   <div class="messages-container" bind:this={chatContainer} onscroll={handleMessagesScroll}>
     {#if messages.length === 0}
       <div class="empty-state">
-        <p>No hay mensajes aún. ¡Di hola!</p>
+        <p>{chatMode === "private" && !selectedMember ? "No hay miembros para iniciar un chat privado." : "No hay mensajes aún. ¡Di hola!"}</p>
       </div>
     {:else}
       {#if hasOlderMessages}
@@ -354,19 +663,24 @@
       placeholder="Escribe un mensaje..."
       bind:value={messageInput}
       onkeydown={handleKeydown}
+      disabled={chatMode === "private" && !selectedMember}
     />
     <div class="attach-wrapper">
       {#if showAttachMenu}
         <div class="attach-menu">
-          <button type="button" onclick={openLocationPicker} title="Enviar ubicación">
-            <MapPinned size={20} />
-          </button>
+          {#if chatMode === "team"}
+            <button type="button" onclick={openLocationPicker} title="Enviar ubicación">
+              <MapPinned size={20} />
+            </button>
+          {/if}
           <button type="button" onclick={openFilePicker} title="Enviar imagen">
             <ImageIcon size={20} />
           </button>
-          <button type="button" onclick={openPollCreator} title="Crear encuesta">
-            <BarChart3 size={20} />
-          </button>
+          {#if chatMode === "team"}
+            <button type="button" onclick={openPollCreator} title="Crear encuesta">
+              <BarChart3 size={20} />
+            </button>
+          {/if}
         </div>
       {/if}
       <button class="attach-btn" onclick={() => (showAttachMenu = !showAttachMenu)} title="Adjuntar">
@@ -383,13 +697,63 @@
     <button
       class="send-btn"
       onclick={handleSendMessage}
-      disabled={!messageInput.trim()}
+      disabled={!messageInput.trim() || (chatMode === "private" && !selectedMember)}
     >
       <Send size={20} />
     </button>
   </div>
 </div>
 <div class="space"></div>
+
+{#if isCallOpen}
+  <div class="call-overlay">
+    <div class="call-panel">
+      <div class="call-header">
+        <span>{selectedMember?.name || activeCall?.callerName || activeCall?.receiverName || "Llamada"}</span>
+        <small>
+          {#if callStatus === "incoming"}
+            Llamada entrante
+          {:else if callStatus === "calling"}
+            Llamando...
+          {:else if callStatus === "connecting"}
+            Conectando...
+          {:else}
+            En llamada
+          {/if}
+        </small>
+      </div>
+
+      {#if callStatus === "incoming"}
+        <div class="incoming-call-actions">
+          <button class="decline-call" type="button" onclick={hangUp} title="Rechazar">
+            <PhoneOff size={22} />
+          </button>
+          <button class="accept-call" type="button" onclick={acceptCall} title="Aceptar">
+            <Phone size={22} />
+          </button>
+        </div>
+      {:else}
+        <div class="video-grid">
+          <video bind:this={remoteVideo} autoplay playsinline></video>
+          <video bind:this={localVideo} autoplay playsinline muted class="local-video"></video>
+        </div>
+
+        <div class="call-controls">
+          <button type="button" onclick={toggleMute} title={isMuted ? "Activar micrófono" : "Silenciar"}>
+            {#if isMuted}<MicOff size={21} />{:else}<Mic size={21} />{/if}
+          </button>
+          <button type="button" onclick={toggleCamera} title={isCameraOff ? "Activar cámara" : "Desactivar cámara"}>
+            {#if isCameraOff}<VideoOff size={21} />{:else}<Video size={21} />{/if}
+          </button>
+          <button class="decline-call" type="button" onclick={hangUp} title="Colgar">
+            <PhoneOff size={21} />
+          </button>
+        </div>
+      {/if}
+    </div>
+  </div>
+{/if}
+
 <SliceContainer bind:show={showImageSlice} bg="var(--bg-card)">
   <div
     style="padding:24px; display:flex; flex-direction:column; align-items:center; gap:20px;"
@@ -544,6 +908,81 @@
     font-size: 22px;
     font-weight: 800;
     color: var(--text-primary);
+  }
+
+  .chat-switcher {
+    display: grid;
+    gap: 10px;
+    padding: 0 24px 10px;
+  }
+
+  .mode-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    padding: 5px;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    background: var(--bg-card);
+  }
+
+  .mode-tabs button,
+  .call-btn,
+  .call-controls button,
+  .incoming-call-actions button {
+    border: 0;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .mode-tabs button {
+    min-height: 38px;
+    gap: 7px;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .mode-tabs button.active {
+    background: var(--accent-color);
+    color: var(--accent-ink);
+  }
+
+  .private-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .private-toolbar select {
+    width: 100%;
+    min-height: 44px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    padding: 0 12px;
+    font-size: 14px;
+    font-weight: 800;
+    outline: none;
+  }
+
+  .call-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: #1f9d55;
+    color: white;
+  }
+
+  .call-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
   }
 
   .messages-container {
@@ -998,5 +1437,102 @@
   }
   .location-bubble{
     padding: 4px !important;
+  }
+
+  .call-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 300;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(0, 0, 0, 0.68);
+  }
+
+  .call-panel {
+    width: min(560px, 100%);
+    min-height: 420px;
+    border-radius: 20px;
+    background: #111318;
+    color: white;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    overflow: hidden;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+  }
+
+  .call-header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 18px 20px;
+  }
+
+  .call-header span {
+    font-size: 18px;
+    font-weight: 900;
+  }
+
+  .call-header small {
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .video-grid {
+    position: relative;
+    min-height: 300px;
+    background: #050608;
+  }
+
+  .video-grid video {
+    width: 100%;
+    height: 100%;
+    min-height: 300px;
+    object-fit: cover;
+    background: #050608;
+  }
+
+  .video-grid .local-video {
+    position: absolute;
+    right: 14px;
+    bottom: 14px;
+    width: 132px;
+    height: 176px;
+    min-height: 0;
+    border-radius: 14px;
+    border: 2px solid rgba(255, 255, 255, 0.28);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+  }
+
+  .call-controls,
+  .incoming-call-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 18px;
+  }
+
+  .call-controls button,
+  .incoming-call-actions button {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.14);
+    color: white;
+  }
+
+  .incoming-call-actions {
+    min-height: 260px;
+  }
+
+  .accept-call {
+    background: #1f9d55 !important;
+  }
+
+  .decline-call {
+    background: #e03131 !important;
   }
 </style>

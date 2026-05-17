@@ -75,7 +75,7 @@
     background: var(--nav-bg);
     border: 1px solid var(--border-color);
     border-radius: 40px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     pointer-events: auto;

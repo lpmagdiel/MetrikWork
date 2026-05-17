@@ -11,12 +11,15 @@ import {
     getDocs,
     getDoc,
     doc,
-    updateDoc
+    updateDoc,
+    setDoc,
+    deleteDoc
 } from 'firebase/firestore';
 import { createNotification } from './notifications.js';
 
 export const chatMessagesStore = writable([]);
 let chatUnsubscribe;
+let privateCallsUnsubscribe;
 const CHAT_PAGE_SIZE = 30;
 
 function normalizeMessageDoc(doc) {
@@ -145,6 +148,191 @@ export async function sendTeamMessage(teamId, content, user, imageUrl = null, ex
         console.error("Error sending message:", error);
         throw error;
     }
+}
+
+export function getPrivateChatId(teamId, firstUserId, secondUserId) {
+    if (!teamId || !firstUserId || !secondUserId) return '';
+    return `${teamId}_${[firstUserId, secondUserId].sort().join('_')}`;
+}
+
+async function ensurePrivateChat(teamId, currentUser, member) {
+    const chatId = getPrivateChatId(teamId, currentUser?.uid, member?.id);
+    if (!chatId) return null;
+
+    await setDoc(doc(db, 'privateChats', chatId), {
+        teamId,
+        participants: [currentUser.uid, member.id].sort(),
+        participantNames: {
+            [currentUser.uid]: currentUser.name || currentUser.email || 'Usuario',
+            [member.id]: member.name || member.email || 'Usuario'
+        },
+        updatedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString()
+    }, { merge: true });
+
+    return chatId;
+}
+
+export async function getOrCreatePrivateChat(teamId, currentUser, member) {
+    return ensurePrivateChat(teamId, currentUser, member);
+}
+
+export async function subscribeToPrivateChat(teamId, currentUser, member, pageSize = CHAT_PAGE_SIZE) {
+    if (chatUnsubscribe) chatUnsubscribe();
+    chatMessagesStore.set([]);
+    if (!teamId || !currentUser?.uid || !member?.id) return null;
+
+    const chatId = await ensurePrivateChat(teamId, currentUser, member);
+    if (!chatId) return null;
+
+    const messagesQuery = query(
+        collection(db, 'privateChats', chatId, 'messages'),
+        orderBy('createdAt', 'desc'),
+        limit(pageSize)
+    );
+    chatUnsubscribe = onSnapshot(messagesQuery, (snapshot) => {
+        const messages = snapshot.docs.map(normalizeMessageDoc);
+        chatMessagesStore.set(sortMessages(messages));
+    }, (error) => {
+        console.error("Error in private chat listener:", error);
+    });
+
+    return chatId;
+}
+
+export async function getOlderPrivateMessages(chatId, oldestMessage, pageSize = CHAT_PAGE_SIZE) {
+    if (!chatId || !oldestMessage?._snapshot) return [];
+    const messagesQuery = query(
+        collection(db, 'privateChats', chatId, 'messages'),
+        orderBy('createdAt', 'desc'),
+        startAfter(oldestMessage._snapshot),
+        limit(pageSize)
+    );
+    const snapshot = await getDocs(messagesQuery);
+    return sortMessages(snapshot.docs.map(normalizeMessageDoc));
+}
+
+export async function sendPrivateMessage(chatId, content, user, recipient, imageUrl = null, teamId = '') {
+    if (!chatId || !user?.uid || !recipient?.id) return;
+    try {
+        const messageData = {
+            text: content,
+            imageUrl,
+            type: imageUrl ? 'IMAGE' : 'TEXT',
+            senderId: user.uid,
+            senderName: user.name || user.email,
+            recipientId: recipient.id,
+            createdAt: new Date().toISOString()
+        };
+
+        const docRef = await addDoc(collection(db, 'privateChats', chatId, 'messages'), messageData);
+        await updateDoc(doc(db, 'privateChats', chatId), {
+            lastMessage: getMessagePreview(messageData),
+            lastMessageAt: messageData.createdAt,
+            updatedAt: messageData.createdAt
+        });
+
+        createNotification(recipient.id, user.name || 'Mensaje privado', getMessagePreview(messageData), {
+            url: teamId ? `/teams/${teamId}/chat` : '/teams',
+            type: 'private_chat_message',
+            sourceId: docRef.id,
+            chatId,
+            showInForeground: false
+        }).catch((error) => {
+            console.warn('Private chat notification failed:', error);
+        });
+    } catch (error) {
+        console.error("Error sending private message:", error);
+        throw error;
+    }
+}
+
+export async function createPrivateCall(chatId, teamId, caller, receiver) {
+    if (!chatId || !caller?.uid || !receiver?.id) return null;
+    const now = new Date().toISOString();
+    const callRef = await addDoc(collection(db, 'privateChats', chatId, 'calls'), {
+        teamId,
+        chatId,
+        callerId: caller.uid,
+        callerName: caller.name || caller.email || 'Usuario',
+        receiverId: receiver.id,
+        receiverName: receiver.name || receiver.email || 'Usuario',
+        participants: [caller.uid, receiver.id].sort(),
+        status: 'ringing',
+        createdAt: now,
+        updatedAt: now
+    });
+
+    createNotification(receiver.id, 'Llamada entrante', `${caller.name || caller.email || 'Alguien'} te está llamando`, {
+        url: `/teams/${teamId}/chat`,
+        type: 'private_call',
+        sourceId: callRef.id,
+        chatId,
+        showInForeground: true
+    }).catch((error) => {
+        console.warn('Private call notification failed:', error);
+    });
+
+    return callRef.id;
+}
+
+export function subscribeToPrivateCalls(chatId, userId, callback) {
+    if (privateCallsUnsubscribe) privateCallsUnsubscribe();
+    if (!chatId || !userId) {
+        callback?.(null);
+        return;
+    }
+
+    privateCallsUnsubscribe = onSnapshot(collection(db, 'privateChats', chatId, 'calls'), (snapshot) => {
+        const activeCall = snapshot.docs
+            .map((callDoc) => ({ id: callDoc.id, ...callDoc.data() }))
+            .filter((call) =>
+                call.participants?.includes(userId) &&
+                ['ringing', 'connecting', 'active'].includes(call.status)
+            )
+            .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0] || null;
+        callback?.(activeCall);
+    }, (error) => {
+        console.error('Error in private calls listener:', error);
+    });
+}
+
+export async function updatePrivateCall(chatId, callId, data) {
+    if (!chatId || !callId) return;
+    await updateDoc(doc(db, 'privateChats', chatId, 'calls', callId), {
+        ...data,
+        updatedAt: new Date().toISOString()
+    });
+}
+
+export async function endPrivateCall(chatId, callId) {
+    if (!chatId || !callId) return;
+    await updatePrivateCall(chatId, callId, { status: 'ended', endedAt: new Date().toISOString() });
+}
+
+export async function addCallCandidate(chatId, callId, side, candidate) {
+    if (!chatId || !callId || !candidate) return;
+    await addDoc(collection(db, 'privateChats', chatId, 'calls', callId, `${side}Candidates`), candidate.toJSON());
+}
+
+export function subscribeToCallCandidates(chatId, callId, side, callback) {
+    if (!chatId || !callId || !side) return () => {};
+    return onSnapshot(collection(db, 'privateChats', chatId, 'calls', callId, `${side}Candidates`), (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+            if (change.type === 'added') callback?.(change.doc.data());
+        });
+    }, (error) => {
+        console.error('Error in call candidates listener:', error);
+    });
+}
+
+export async function clearCallCandidates(chatId, callId) {
+    if (!chatId || !callId) return;
+    const candidateGroups = ['callerCandidates', 'receiverCandidates'];
+    await Promise.all(candidateGroups.map(async (group) => {
+        const snapshot = await getDocs(collection(db, 'privateChats', chatId, 'calls', callId, group));
+        await Promise.all(snapshot.docs.map((candidateDoc) => deleteDoc(candidateDoc.ref)));
+    }));
 }
 
 export async function voteTeamPoll(teamId, messageId, userId, optionId) {

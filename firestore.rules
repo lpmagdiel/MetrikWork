@@ -32,6 +32,29 @@ service cloud.firestore {
              );
     }
 
+    function isPrivateChatParticipant(chatId) {
+      return request.auth != null &&
+             exists(/databases/$(database)/documents/privateChats/$(chatId)) &&
+             request.auth.uid in get(/databases/$(database)/documents/privateChats/$(chatId)).data.participants;
+    }
+
+    function isValidPrivateChatCreate() {
+      return request.auth != null &&
+             request.resource.data.keys().hasAll(["teamId", "participants"]) &&
+             request.resource.data.participants.size() == 2 &&
+             request.auth.uid in request.resource.data.participants &&
+             teamExists(request.resource.data.teamId) &&
+             request.resource.data.participants[0] in teamData(request.resource.data.teamId).members &&
+             request.resource.data.participants[1] in teamData(request.resource.data.teamId).members;
+    }
+
+    function isValidPrivateChatUpdate() {
+      return request.auth != null &&
+             request.auth.uid in resource.data.participants &&
+             request.resource.data.teamId == resource.data.teamId &&
+             request.resource.data.participants == resource.data.participants;
+    }
+
     // --- USUARIOS ---
     match /users/{userId} {
       // Necesario para ver miembros y buscar usuarios por email.
@@ -102,6 +125,30 @@ service cloud.firestore {
 
       match /messages/{messageId} {
         allow read, write: if isTeamMember(teamId);
+      }
+    }
+
+    // --- CHATS PRIVADOS ---
+    match /privateChats/{chatId} {
+      allow read, delete: if request.auth != null &&
+                           request.auth.uid in resource.data.participants;
+
+      allow create: if isValidPrivateChatCreate();
+
+      allow update: if isValidPrivateChatUpdate();
+
+      match /messages/{messageId} {
+        allow read, write: if isPrivateChatParticipant(chatId);
+      }
+
+      match /calls/{callId} {
+        allow read, write: if isPrivateChatParticipant(chatId);
+
+        match /{candidateCollection}/{candidateId} {
+          allow read, write: if isPrivateChatParticipant(chatId) &&
+                             (candidateCollection == "callerCandidates" ||
+                              candidateCollection == "receiverCandidates");
+        }
       }
     }
 
