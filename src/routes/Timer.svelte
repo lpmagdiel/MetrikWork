@@ -4,6 +4,7 @@
     BriefcaseBusiness,
     Check,
     Clock,
+    Coffee,
     Flag,
     Hourglass,
     Play,
@@ -30,11 +31,20 @@
   import TitleHeader from "../components/TitleHeader.svelte";
 
   const ACTIVE_TIMER_KEY = "metricwork.activeVariableTimer";
+  const POMODORO_FOCUS_SECONDS = 25 * 60;
+  const POMODORO_SHORT_BREAK_SECONDS = 5 * 60;
+  const POMODORO_LONG_BREAK_SECONDS = 15 * 60;
 
   let activeTeamId = $state("");
   let taskTitle = $state("");
   let note = $state("");
   let timerMode = $state("variable");
+  let pomodoroEnabled = $state(false);
+  let pomodoroPhase = $state("focus");
+  let pomodoroCycle = $state(1);
+  let pomodoroPhaseStartedAt = $state(null);
+  let accumulatedFocusSeconds = $state(0);
+  let completedPomodoros = $state(0);
   let startedAt = $state(null);
   let endedAt = $state(null);
   let now = $state(Date.now());
@@ -58,8 +68,24 @@
     const end = endedAt || now;
     return Math.max(0, Math.floor((end - startedAt.getTime()) / 1000));
   });
+  let pomodoroPhaseDurationSeconds = $derived(
+    getPomodoroPhaseDurationSeconds(pomodoroPhase, completedPomodoros),
+  );
+  let pomodoroPhaseElapsedSeconds = $derived.by(() => {
+    if (!pomodoroEnabled || !pomodoroPhaseStartedAt) return 0;
+    return Math.max(0, Math.floor((now - pomodoroPhaseStartedAt.getTime()) / 1000));
+  });
+  let pomodoroRemainingSeconds = $derived(
+    Math.max(0, pomodoroPhaseDurationSeconds - pomodoroPhaseElapsedSeconds),
+  );
+  let pomodoroProgress = $derived.by(() => {
+    if (!pomodoroEnabled || pomodoroPhaseDurationSeconds <= 0) return 0;
+    return Math.min(100, (pomodoroPhaseElapsedSeconds / pomodoroPhaseDurationSeconds) * 100);
+  });
+  let trackedWorkSeconds = $derived.by(() => getTrackedWorkSeconds(now));
+  let pomodoroPhaseLabel = $derived(pomodoroPhase === "break" ? "Descanso" : "Enfoque");
   let canStart = $derived(Boolean(activeTeamId && taskTitle.trim() && !isRunning && !isTodayNonWorkingDay));
-  let canFinish = $derived(Boolean(isRunning && elapsedSeconds > 0));
+  let canFinish = $derived(Boolean(isRunning && trackedWorkSeconds > 0));
 
   $effect(() => {
     const preferredTeamId = $selectedTeamId || $teamsStore[0]?.id || "";
@@ -71,6 +97,12 @@
   $effect(() => {
     if (isRunning) {
       persistActiveTimer();
+    }
+  });
+
+  $effect(() => {
+    if (isRunning && pomodoroEnabled) {
+      syncPomodoro(now);
     }
   });
 
@@ -106,6 +138,95 @@
     return (seconds / 3600).toFixed(2);
   }
 
+  function getPomodoroBreakSeconds(completedFocusSessions) {
+    return completedFocusSessions > 0 && completedFocusSessions % 4 === 0
+      ? POMODORO_LONG_BREAK_SECONDS
+      : POMODORO_SHORT_BREAK_SECONDS;
+  }
+
+  function getPomodoroPhaseDurationSeconds(phase, completedFocusSessions) {
+    return phase === "break"
+      ? getPomodoroBreakSeconds(completedFocusSessions)
+      : POMODORO_FOCUS_SECONDS;
+  }
+
+  function getTrackedWorkSeconds(timestamp = Date.now()) {
+    if (!startedAt) return 0;
+
+    if (!pomodoroEnabled) {
+      const end = endedAt?.getTime() || timestamp;
+      return Math.max(0, Math.floor((end - startedAt.getTime()) / 1000));
+    }
+
+    let seconds = accumulatedFocusSeconds;
+    if (pomodoroPhase === "focus" && pomodoroPhaseStartedAt) {
+      const currentFocusSeconds = Math.max(
+        0,
+        Math.floor((timestamp - pomodoroPhaseStartedAt.getTime()) / 1000),
+      );
+      seconds += Math.min(POMODORO_FOCUS_SECONDS, currentFocusSeconds);
+    }
+
+    return seconds;
+  }
+
+  function resetPomodoroProgress() {
+    pomodoroPhase = "focus";
+    pomodoroCycle = 1;
+    pomodoroPhaseStartedAt = null;
+    accumulatedFocusSeconds = 0;
+    completedPomodoros = 0;
+  }
+
+  function handlePomodoroToggle(event) {
+    pomodoroEnabled = event.currentTarget.checked;
+    resetPomodoroProgress();
+  }
+
+  function syncPomodoro(timestamp = Date.now()) {
+    if (!pomodoroEnabled || !startedAt || endedAt || !pomodoroPhaseStartedAt) return;
+
+    let phase = pomodoroPhase;
+    let cycle = pomodoroCycle;
+    let phaseStartMs = pomodoroPhaseStartedAt.getTime();
+    let focusSeconds = accumulatedFocusSeconds;
+    let completedFocusSessions = completedPomodoros;
+    let switched = false;
+    let guard = 0;
+
+    while (guard < 256) {
+      const phaseDurationMs =
+        getPomodoroPhaseDurationSeconds(phase, completedFocusSessions) * 1000;
+
+      if (timestamp - phaseStartMs < phaseDurationMs) break;
+
+      phaseStartMs += phaseDurationMs;
+      switched = true;
+
+      if (phase === "focus") {
+        focusSeconds += POMODORO_FOCUS_SECONDS;
+        completedFocusSessions += 1;
+        phase = "break";
+      } else {
+        phase = "focus";
+        cycle += 1;
+      }
+
+      guard += 1;
+    }
+
+    if (!switched) return;
+
+    pomodoroPhase = phase;
+    pomodoroCycle = cycle;
+    pomodoroPhaseStartedAt = new Date(phaseStartMs);
+    accumulatedFocusSeconds = focusSeconds;
+    completedPomodoros = completedFocusSessions;
+    showNotification(
+      phase === "break" ? "Bloque Pomodoro completado. Toca descanso." : "Descanso terminado. Nuevo bloque listo.",
+    );
+  }
+
   function startTicker() {
     stopTicker();
     now = Date.now();
@@ -124,6 +245,12 @@
           taskTitle,
           note,
           timerMode,
+          pomodoroEnabled,
+          pomodoroPhase,
+          pomodoroCycle,
+          pomodoroPhaseStartedAt: pomodoroPhaseStartedAt?.toISOString() || null,
+          accumulatedFocusSeconds,
+          completedPomodoros,
           startedAt: startedAt.toISOString(),
         }),
       );
@@ -156,6 +283,17 @@
       taskTitle = savedTimer.taskTitle || "";
       note = savedTimer.note || "";
       timerMode = savedTimer.timerMode === "overtime" ? "overtime" : "variable";
+      pomodoroEnabled = Boolean(savedTimer.pomodoroEnabled);
+      pomodoroPhase = savedTimer.pomodoroPhase === "break" ? "break" : "focus";
+      pomodoroCycle = Math.max(1, Number(savedTimer.pomodoroCycle) || 1);
+      pomodoroPhaseStartedAt = savedTimer.pomodoroPhaseStartedAt
+        ? new Date(savedTimer.pomodoroPhaseStartedAt)
+        : savedStart;
+      if (Number.isNaN(pomodoroPhaseStartedAt.getTime())) {
+        pomodoroPhaseStartedAt = savedStart;
+      }
+      accumulatedFocusSeconds = Math.max(0, Number(savedTimer.accumulatedFocusSeconds) || 0);
+      completedPomodoros = Math.max(0, Number(savedTimer.completedPomodoros) || 0);
       startedAt = savedStart;
       endedAt = null;
       startTicker();
@@ -178,6 +316,15 @@
     }
     startedAt = new Date();
     endedAt = null;
+    if (pomodoroEnabled) {
+      pomodoroPhase = "focus";
+      pomodoroCycle = 1;
+      pomodoroPhaseStartedAt = new Date(startedAt);
+      accumulatedFocusSeconds = 0;
+      completedPomodoros = 0;
+    } else {
+      resetPomodoroProgress();
+    }
     startTicker();
     persistActiveTimer();
   }
@@ -194,6 +341,7 @@
     clearActiveTimer();
     startedAt = null;
     endedAt = null;
+    resetPomodoroProgress();
     now = Date.now();
   }
 
@@ -201,15 +349,14 @@
     if (!canFinish || !selectedTeam || !$userStore?.uid) return;
 
     const finishDate = new Date();
+    if (pomodoroEnabled) {
+      syncPomodoro(finishDate.getTime());
+    }
+    const totalSeconds = Math.max(1, getTrackedWorkSeconds(finishDate.getTime()));
+    const totalHours = Number(formatHours(totalSeconds));
     endedAt = finishDate;
     stopTicker();
     isSaving = true;
-
-    const totalSeconds = Math.max(
-      1,
-      Math.floor((finishDate.getTime() - startedAt.getTime()) / 1000),
-    );
-    const totalHours = Number(formatHours(totalSeconds));
 
     try {
       if (isTodayNonWorkingDay) {
@@ -240,6 +387,8 @@
           taskTitle: taskTitle.trim(),
           note: note.trim(),
           timerMode,
+          pomodoroEnabled,
+          completedPomodoros,
         },
         selectedTeam,
       );
@@ -259,16 +408,20 @@
         startedAt,
         endedAt: finishDate,
         timerMode,
+        pomodoroEnabled,
       };
       taskTitle = "";
       note = "";
       startedAt = null;
       endedAt = null;
+      resetPomodoroProgress();
       now = Date.now();
       clearActiveTimer();
       await showSuccessAlert(
         timerMode === "overtime" ? "Horas extra registradas" : "Jornada registrada",
-        overtimeLimitHours > 0 && totalHours > overtimeLimitHours && timerMode === "variable"
+        pomodoroEnabled
+          ? "Tiempo de enfoque registrado correctamente."
+          : overtimeLimitHours > 0 && totalHours > overtimeLimitHours && timerMode === "variable"
           ? `Jornada registrada con el máximo permitido: ${overtimeLimitHours}h.`
           : "Jornada variable registrada correctamente.",
       );
@@ -356,6 +509,22 @@
         </button>
       </div>
 
+      <label class="pomodoro-toggle">
+        <input
+          type="checkbox"
+          checked={pomodoroEnabled}
+          disabled={isRunning || isSaving}
+          onchange={handlePomodoroToggle}
+        />
+        <span class="switch-track" aria-hidden="true">
+          <span></span>
+        </span>
+        <span class="toggle-copy">
+          <strong>Pomodoro</strong>
+          <small>25 min / 5 min</small>
+        </span>
+      </label>
+
       <label for="note">Nota opcional</label>
       <textarea
         id="note"
@@ -368,9 +537,18 @@
     <section class="clock-panel">
       <div class="timer-face" class:running={isRunning}>
         <div class="face-content">
-          <span>Tipo de jornada: {timerMode === "overtime" ? "Horas extra" : "Variable"}</span>
-          <strong>{formatTime(elapsedSeconds)}</strong>
-          <small>{formatHours(elapsedSeconds)} h</small>
+          {#if pomodoroEnabled}
+            <span>Pomodoro · {pomodoroPhaseLabel} {pomodoroCycle}</span>
+            <strong>{formatTime(pomodoroRemainingSeconds)}</strong>
+            <small>{formatTime(trackedWorkSeconds)} de enfoque</small>
+            <div class="pomodoro-progress" aria-hidden="true">
+              <span style={`width: ${pomodoroProgress}%`}></span>
+            </div>
+          {:else}
+            <span>Tipo de jornada: {timerMode === "overtime" ? "Horas extra" : "Variable"}</span>
+            <strong>{formatTime(elapsedSeconds)}</strong>
+            <small>{formatHours(elapsedSeconds)} h</small>
+          {/if}
           {#if overtimeLimitHours > 0}
             <small>Máximo: {overtimeLimitHours} h</small>
           {/if}
@@ -389,6 +567,21 @@
           <strong>{formatHour(endedAt)}</strong>
         </div>
       </div>
+
+      {#if pomodoroEnabled}
+        <div class="pomodoro-stats">
+          <div>
+            <Clock size={16} />
+            <span>Enfoque</span>
+            <strong>{formatHours(trackedWorkSeconds)} h</strong>
+          </div>
+          <div>
+            <Coffee size={16} />
+            <span>Bloques</span>
+            <strong>{completedPomodoros}</strong>
+          </div>
+        </div>
+      {/if}
 
       {#if isTodayNonWorkingDay}
         <p class="form-note error">{todayNonWorkingMessage}</p>
@@ -609,6 +802,75 @@
     margin: 0 0 2px;
   }
 
+  .pomodoro-toggle {
+    min-height: 56px;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    cursor: pointer;
+  }
+
+  .pomodoro-toggle input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .switch-track {
+    width: 46px;
+    height: 26px;
+    padding: 3px;
+    border-radius: 999px;
+    background: var(--border-color);
+    box-sizing: border-box;
+    transition: background-color 0.18s ease;
+  }
+
+  .switch-track span {
+    width: 20px;
+    height: 20px;
+    display: block;
+    border-radius: 50%;
+    background: var(--bg-card);
+    box-shadow: var(--shadow-soft);
+    transition: transform 0.18s ease;
+  }
+
+  .pomodoro-toggle input:checked + .switch-track {
+    background: var(--accent-color);
+  }
+
+  .pomodoro-toggle input:checked + .switch-track span {
+    transform: translateX(20px);
+  }
+
+  .pomodoro-toggle input:focus-visible + .switch-track {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 22%, transparent);
+  }
+
+  .toggle-copy {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .toggle-copy strong {
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 800;
+  }
+
+  .toggle-copy small {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
   .mode-tabs button,
   .start-btn,
   .finish-btn,
@@ -694,6 +956,22 @@
     font-weight: 700;
   }
 
+  .pomodoro-progress {
+    width: min(100%, 250px);
+    height: 8px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--border-color);
+  }
+
+  .pomodoro-progress span {
+    height: 100%;
+    display: block;
+    border-radius: inherit;
+    background: var(--accent-color);
+    transition: width 0.25s linear;
+  }
+
   .timeline {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -714,7 +992,24 @@
     background: var(--bg-input);
   }
 
+  .pomodoro-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .pomodoro-stats div {
+    min-height: 64px;
+    display: grid;
+    gap: 5px;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+  }
+
   .timeline span,
+  .pomodoro-stats span,
   .last-entry p,
   .entry-meta span {
     color: var(--text-secondary);
@@ -723,6 +1018,7 @@
   }
 
   .timeline strong,
+  .pomodoro-stats strong,
   .entry-meta strong {
     color: var(--text-primary);
     font-size: 17px;
@@ -763,6 +1059,11 @@
   input:disabled,
   select:disabled,
   textarea:disabled {
+    opacity: 0.58;
+    cursor: not-allowed;
+  }
+
+  .pomodoro-toggle:has(input:disabled) {
     opacity: 0.58;
     cursor: not-allowed;
   }
@@ -834,6 +1135,7 @@
     }
 
     .timeline,
+    .pomodoro-stats,
     .mode-tabs {
       grid-template-columns: 1fr;
     }
