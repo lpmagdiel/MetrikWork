@@ -7,6 +7,7 @@
   import { confirmAlert, showErrorAlert } from "../data/alerts.js";
   import TitleHeader from "../components/TitleHeader.svelte";
   import CircleAddButton from "../components/CircleAddButton.svelte";
+  import { getCurrentGpsPosition } from "../data/geolocation.js";
 
   let showForm = $state(false);
   let previousShowForm = $state(false);
@@ -95,37 +96,19 @@
     }
   }
 
-  function useCurrentLocation() {
-    if (!navigator.geolocation) {
-      errorMessage = "Tu navegador no permite obtener la ubicación GPS.";
-      return;
-    }
-
+  async function useCurrentLocation() {
     isLocating = true;
     errorMessage = "";
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        form.lat = position.coords.latitude.toFixed(6);
-        form.lon = position.coords.longitude.toFixed(6);
-        isLocating = false;
-      },
-      (error) => {
-        const messages = {
-          1: "Permiso de ubicación denegado.",
-          2: "No se pudo obtener tu ubicación actual.",
-          3: "La solicitud de ubicación tardó demasiado.",
-        };
-
-        errorMessage = messages[error.code] || "No se pudo obtener tu ubicación actual.";
-        isLocating = false;
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 60000,
-      },
-    );
+    try {
+      const gps = await getCurrentGpsPosition();
+      form.lat = gps.lat;
+      form.lon = gps.lon;
+    } catch (error) {
+      errorMessage = error.message || "No se pudo obtener tu ubicación actual.";
+    } finally {
+      isLocating = false;
+    }
   }
 
   async function removeLocation(location) {

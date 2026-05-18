@@ -68,6 +68,7 @@
   import AvatarCircle from "../components/AvatarCircle.svelte";
   import { confirmAlert, showErrorAlert, showSuccessAlert } from "../data/alerts.js";
   import TitleHeader from "../components/TitleHeader.svelte";
+  import { getCurrentGpsPosition } from "../data/geolocation.js";
 
   let team = $derived($selectedTeam);
   let isAdmin = $derived(team?.admin === $userStore?.uid);
@@ -445,37 +446,19 @@
     resetLocationForm();
   }
 
-  function useCurrentLocation() {
-    if (!navigator.geolocation) {
-      locationError = "Tu navegador no permite obtener la ubicación GPS.";
-      return;
-    }
-
+  async function useCurrentLocation() {
     isLocating = true;
     locationError = "";
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        locationForm.lat = position.coords.latitude.toFixed(6);
-        locationForm.lon = position.coords.longitude.toFixed(6);
-        isLocating = false;
-      },
-      (error) => {
-        const messages = {
-          1: "Permiso de ubicación denegado.",
-          2: "No se pudo obtener tu ubicación actual.",
-          3: "La solicitud de ubicación tardó demasiado.",
-        };
-
-        locationError = messages[error.code] || "No se pudo obtener tu ubicación actual.";
-        isLocating = false;
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 60000,
-      },
-    );
+    try {
+      const gps = await getCurrentGpsPosition();
+      locationForm.lat = gps.lat;
+      locationForm.lon = gps.lon;
+    } catch (error) {
+      locationError = error.message || "No se pudo obtener tu ubicación actual.";
+    } finally {
+      isLocating = false;
+    }
   }
 
   async function saveTeamLocation() {
