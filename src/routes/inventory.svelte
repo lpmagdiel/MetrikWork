@@ -79,6 +79,10 @@
     },
   ];
 
+  function goToTeamHome() {
+    navigateTo(teamId ? `/teams/${teamId}` : "/teams");
+  }
+
   $effect(() => {
     if ($selectedTeamId && canViewInventory) {
       subscribeToTeamInventory($selectedTeamId);
@@ -362,7 +366,7 @@
     <CircleAddButton onClick={() => openModal()} floating={true} />
   {/if}
   <div class="header">
-      <TitleHeader title="Inventario" description={$selectedTeam?.name || ""} action={() => navigateTo(`/teams/${teamId}`)}/>
+      <TitleHeader title="Inventario" description={$selectedTeam?.name || ""} action={goToTeamHome}/>
   </div>
 
   {#if !canViewInventory}

@@ -7,6 +7,15 @@ export const teamLocationsStore = writable([]);
 let locationsUnsubscribe;
 let teamLocationsUnsubscribe;
 
+function normalizeAssignedMemberIds(value) {
+    if (!Array.isArray(value)) return [];
+    return [...new Set(value.filter(Boolean).map((id) => String(id)))];
+}
+
+function normalizeBudget(value) {
+    return Math.max(0, Number(value) || 0);
+}
+
 export function subscribeToLocations(uid) {
     if (locationsUnsubscribe) locationsUnsubscribe();
     locationsStore.set([]);
@@ -33,6 +42,8 @@ export async function addLocation(uid, data) {
             name: data.name,
             description: data.description || '',
             gps: data.gps || null,
+            assignedMemberIds: normalizeAssignedMemberIds(data.assignedMemberIds),
+            budget: normalizeBudget(data.budget),
             createdAt: new Date().toISOString()
         };
 
@@ -82,6 +93,8 @@ export async function addTeamLocation(teamId, data) {
             name: data.name,
             description: data.description || '',
             gps: data.gps || null,
+            assignedMemberIds: normalizeAssignedMemberIds(data.assignedMemberIds),
+            budget: normalizeBudget(data.budget),
             createdAt: new Date().toISOString()
         };
 
@@ -101,6 +114,8 @@ export async function updateTeamLocation(teamId, locationId, data) {
             name: data.name,
             description: data.description || '',
             gps: data.gps || null,
+            assignedMemberIds: normalizeAssignedMemberIds(data.assignedMemberIds),
+            budget: normalizeBudget(data.budget),
             updatedAt: new Date().toISOString()
         };
 

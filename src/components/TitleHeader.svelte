@@ -1,15 +1,21 @@
 <script>
   import { ChevronLeft } from "lucide-svelte";
   const { title = "MetricWork", description = "", action, icon = ChevronLeft, iconPosition = "left" ,paddingHorizontal=false} = $props();
-  const Component = icon;
+  let Component = $derived(icon);
 </script>
 
 <header class={`header-container ${iconPosition} ${paddingHorizontal ? "padding-h" : ""}`}>
   <div class="header-action">
     {#if icon}
-      <button onclick={action} aria-label="{title}">
-        <Component size={20} />
-      </button>
+      {#if action}
+        <button type="button" onclick={action} aria-label={title}>
+          <Component size={20} />
+        </button>
+      {:else}
+        <span class="static-icon" aria-hidden="true">
+          <Component size={20} />
+        </span>
+      {/if}
     {:else}
       <ChevronLeft />
     {/if}
@@ -72,5 +78,18 @@
         background: none;
         border: none;
         padding: 0;
+        width: 100%;
+        height: 100%;
+        color: inherit;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+    }
+
+    .static-icon{
+        display: flex;
+        align-items: center;
+        justify-content: center;
     }
 </style>

@@ -1,6 +1,8 @@
 export const TEAM_PERMISSION_MODULES = {
+    stats: 'stats',
     payments: 'payments',
     inventory: 'inventory',
+    locations: 'locations',
     tasks: 'tasks',
     settings: 'settings'
 };
@@ -13,8 +15,10 @@ export const TEAM_PERMISSION_ACTIONS = {
 };
 
 export const TEAM_PERMISSION_LABELS = {
+    stats: 'Estadísticas',
     payments: 'Pagos',
     inventory: 'Inventario',
+    locations: 'Ubicaciones',
     tasks: 'Tareas',
     settings: 'Ajustes'
 };

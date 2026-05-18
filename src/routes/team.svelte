@@ -61,6 +61,8 @@
     getTodayDateString,
     isNonWorkingDay,
     getNonWorkingDayMessage,
+    getProfileImage,
+    isProfileImage,
   } from "../data/stores.js";
   import { navigateTo } from "../router.js";
   import SliceContainer from "../components/SliceContainer.svelte";
@@ -75,9 +77,29 @@
   let canViewTasks = $derived(hasTeamPermission(team, $userStore?.uid, "tasks", "view"));
   let canViewInventory = $derived(hasTeamPermission(team, $userStore?.uid, "inventory", "view"));
   let canViewPayments = $derived(hasTeamPermission(team, $userStore?.uid, "payments", "view"));
+  let canViewStats = $derived(hasTeamPermission(team, $userStore?.uid, "stats", "view"));
   let canViewSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "view"));
   let canCreateSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "create"));
   let canEditSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "edit"));
+  let canDeleteSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "delete"));
+  let canViewLocations = $derived(
+    hasTeamPermission(team, $userStore?.uid, "locations", "view") ||
+      canViewInventory ||
+      canViewStats ||
+      canViewSettings,
+  );
+  let canCreateLocations = $derived(
+    hasTeamPermission(team, $userStore?.uid, "locations", "create") ||
+      canCreateSettings,
+  );
+  let canEditLocations = $derived(
+    hasTeamPermission(team, $userStore?.uid, "locations", "edit") ||
+      canEditSettings,
+  );
+  let canDeleteLocations = $derived(
+    hasTeamPermission(team, $userStore?.uid, "locations", "delete") ||
+      canDeleteSettings,
+  );
   let overtimeLimitHours = $derived(getOvertimeLimitHours(team));
   let todayDate = $derived(getTodayDateString());
   let isTodayNonWorkingDay = $derived(isNonWorkingDay(team, todayDate));
@@ -111,6 +133,8 @@
     description: "",
     lat: "",
     lon: "",
+    budget: 0,
+    assignedMemberIds: [],
   });
   let hasWorkdayToday = $state(false);
   let isCheckingWorkday = $state(false);
@@ -241,6 +265,15 @@
     if (!member) return "?";
     const parts = (member.name || member.email || "?").split(" ");
     return parts.length > 1 ? parts[0][0] + parts[1][0] : parts[0][0];
+  }
+
+  function getMemberPhoto(member) {
+    return getProfileImage(member);
+  }
+
+  function getMemberFallbackAvatar(member) {
+    if (member?.avatar && !isProfileImage(member.avatar)) return member.avatar;
+    return "";
   }
 
   $effect(() => {
@@ -418,6 +451,8 @@
       description: "",
       lat: "",
       lon: "",
+      budget: 0,
+      assignedMemberIds: [],
     };
     locationError = "";
     isLocating = false;
@@ -435,6 +470,10 @@
       description: location.description || "",
       lat: location.gps?.lat?.toString() || "",
       lon: location.gps?.lon?.toString() || "",
+      budget: Number(location.budget) || 0,
+      assignedMemberIds: Array.isArray(location.assignedMemberIds)
+        ? [...location.assignedMemberIds]
+        : [],
     };
     locationError = "";
     isLocating = false;
@@ -444,6 +483,28 @@
   function closeLocationForm() {
     showLocationForm = false;
     resetLocationForm();
+  }
+
+  function toggleLocationMember(memberId) {
+    if (!memberId) return;
+    locationForm.assignedMemberIds = locationForm.assignedMemberIds.includes(memberId)
+      ? locationForm.assignedMemberIds.filter((id) => id !== memberId)
+      : [...locationForm.assignedMemberIds, memberId];
+  }
+
+  function getLocationAssignedMembers(location) {
+    const assignedIds = Array.isArray(location?.assignedMemberIds)
+      ? location.assignedMemberIds
+      : [];
+    return memberList.filter((member) => assignedIds.includes(member.id));
+  }
+
+  function formatLocationBudget(value) {
+    return new Intl.NumberFormat("es-MX", {
+      style: "currency",
+      currency: team?.projectBudgetCurrency || "MXN",
+      maximumFractionDigits: 2,
+    }).format(Number(value) || 0);
   }
 
   async function useCurrentLocation() {
@@ -493,6 +554,8 @@
         name: locationForm.name.trim(),
         description: locationForm.description.trim(),
         gps,
+        budget: locationForm.budget,
+        assignedMemberIds: locationForm.assignedMemberIds,
       };
 
       if (editingLocationId) {
@@ -590,13 +653,24 @@
           </button>
           <button
             class="menu-card"
-            onclick={() => navigateTo(`/teams/${team.id}/stats`)}
+            onclick={() => navigateTo(`/teams/${team.id}/my-stats`)}
           >
-            <div class="menu-icon stats">
-              <BarChart2 size={24} />
+            <div class="menu-icon user-stats">
+              <UserCheck size={24} />
             </div>
             <span>Mis estadísticas</span>
           </button>
+          {#if canViewStats}
+            <button
+              class="menu-card"
+              onclick={() => navigateTo(`/teams/${team.id}/stats`)}
+            >
+              <div class="menu-icon stats">
+                <BarChart2 size={24} />
+              </div>
+              <span>Avanzadas</span>
+            </button>
+          {/if}
           {#if canViewInventory}
             <button
               class="menu-card"
@@ -644,10 +718,11 @@
         </div>
       </section>
 
+      {#if canViewLocations}
       <section class="locations-section">
         <div class="section-header">
           <h3>Ubicaciones ({$teamLocationsStore.length})</h3>
-          {#if canCreateSettings}
+          {#if canCreateLocations}
             <button class="add-member-btn" onclick={openLocationForm} aria-label="Agregar ubicación">
               <Plus size={18} />
             </button>
@@ -669,26 +744,43 @@
                 <div class="location-info">
                   <h4>{location.name}</h4>
                   <p>{location.description || "Sin descripción"}</p>
+                  {#if Number(location.budget) > 0}
+                    <small class="location-budget">Presupuesto: {formatLocationBudget(location.budget)}</small>
+                  {/if}
                   {#if location.gps}
                     <small>{location.gps.lat}, {location.gps.lon}</small>
                   {/if}
+                  {#if getLocationAssignedMembers(location).length}
+                    <div class="assigned-members">
+                      {#each getLocationAssignedMembers(location).slice(0, 4) as assignedMember}
+                        <span>{getMemberInitials(assignedMember.id)}</span>
+                      {/each}
+                      {#if getLocationAssignedMembers(location).length > 4}
+                        <span>+{getLocationAssignedMembers(location).length - 4}</span>
+                      {/if}
+                    </div>
+                  {/if}
                 </div>
-                {#if canEditSettings}
+                {#if canEditLocations || canDeleteLocations}
                   <div class="location-actions">
-                    <button
-                      class="member-settings-btn"
-                      onclick={() => openEditLocationForm(location)}
-                      aria-label="Editar ubicación"
-                    >
-                      <Edit2 size={18} />
-                    </button>
-                    <button
-                      class="member-settings-btn"
-                      onclick={() => removeTeamLocation(location)}
-                      aria-label="Eliminar ubicación"
-                    >
-                      <Trash2 size={18} />
-                    </button>
+                    {#if canEditLocations}
+                      <button
+                        class="member-settings-btn"
+                        onclick={() => openEditLocationForm(location)}
+                        aria-label="Editar ubicación"
+                      >
+                        <Edit2 size={18} />
+                      </button>
+                    {/if}
+                    {#if canDeleteLocations}
+                      <button
+                        class="member-settings-btn"
+                        onclick={() => removeTeamLocation(location)}
+                        aria-label="Eliminar ubicación"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    {/if}
                   </div>
                 {/if}
               </article>
@@ -696,6 +788,7 @@
           </div>
         {/if}
       </section>
+      {/if}
 
       <section class="members-section">
         <div class="section-header">
@@ -714,13 +807,15 @@
           {#each memberList as member}
             <div class="member-item">
               <div class="member-avatar">
-                {#if member.avatar&& member.avatar.length>10}
+                {#if getMemberPhoto(member)}
                   <img
-                    src={member.avatar}
+                    src={getMemberPhoto(member)}
                     alt={member?.name || member?.email}
                     width="40px"
                     height="40px"
                   />
+                {:else if getMemberFallbackAvatar(member)}
+                  <span>{getMemberFallbackAvatar(member)}</span>
                 {:else}
                   <User size={24} color="#94a3b8" />
                 {/if}
@@ -933,10 +1028,41 @@
           </div>
         </div>
 
+        <div class="form-group">
+          <label for="team-location-budget">Presupuesto de la ubicación</label>
+          <div class="input-with-icon">
+            <DollarSign size={18} color="#1be885" />
+            <input
+              id="team-location-budget"
+              type="number"
+              min="0"
+              step="0.01"
+              bind:value={locationForm.budget}
+              placeholder="0.00"
+            />
+          </div>
+        </div>
+
         <button class="secondary-action-btn" onclick={useCurrentLocation} disabled={isLocating}>
           <Crosshair size={18} />
           <span>{isLocating ? "Obteniendo ubicación..." : "Usar mi ubicación actual"}</span>
         </button>
+
+        <div class="form-group">
+          <p class="member-picker-label">Miembros asignados</p>
+          <div class="location-member-grid">
+            {#each memberList as member}
+              <button
+                type="button"
+                class:active={locationForm.assignedMemberIds.includes(member.id)}
+                onclick={() => toggleLocationMember(member.id)}
+              >
+                <span>{getMemberInitials(member.id)}</span>
+                <strong>{member.name || member.email || "Usuario"}</strong>
+              </button>
+            {/each}
+          </div>
+        </div>
 
         {#if locationError}
           <p class="form-error">{locationError}</p>
@@ -1237,6 +1363,10 @@
     background: var(--bg-warning-subtle);
     color: var(--warning-color);
   }
+  .menu-icon.user-stats {
+    background: var(--bg-purple-subtle);
+    color: var(--purple-color);
+  }
   .menu-icon.inventory {
     background: var(--bg-info-subtle);
     color: var(--info-color);
@@ -1375,6 +1505,32 @@
     white-space: nowrap;
   }
 
+  .location-info .location-budget {
+    color: var(--success-color);
+    font-weight: 800;
+  }
+
+  .assigned-members {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 8px;
+  }
+
+  .assigned-members span,
+  .location-member-grid button span {
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    background: var(--bg-accent-subtle);
+    color: var(--accent-ink);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 800;
+  }
+
   .member-item {
     background: var(--bg-card);
     padding: 12px 16px;
@@ -1402,6 +1558,12 @@
     object-fit: cover;
   }
 
+  .member-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
   .member-info p {
     margin: 0;
     font-size: 15px;
@@ -1425,6 +1587,10 @@
   .member-settings-btn:hover {
     background: var(--bg-input);
     color: var(--accent-color);
+  }
+
+  .location-actions .member-settings-btn {
+    margin-left: 0;
   }
 
   .member-settings-form {
@@ -1471,6 +1637,13 @@
 
   .form-group label {
     display: block;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+  }
+
+  .member-picker-label {
     font-size: 14px;
     font-weight: 600;
     color: var(--text-primary);
@@ -1525,6 +1698,40 @@
   .secondary-action-btn:disabled {
     opacity: 0.7;
     cursor: not-allowed;
+  }
+
+  .location-member-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 8px;
+  }
+
+  .location-member-grid button {
+    min-height: 48px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .location-member-grid button.active {
+    border-color: var(--accent-strong);
+    background: var(--bg-accent-subtle);
+  }
+
+  .location-member-grid strong {
+    min-width: 0;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .form-error {

@@ -78,14 +78,14 @@
 
   // Resetear estados de carga cuando cambia el avatar en el store
   $effect(() => {
-    if ($userStore?.avatar) {
+    if ($userStore?.avatar || $userStore?.photoURL) {
       isLoading = true;
       hasError = false;
       optimisticAvatar = null;
     }
   });
 
-  const displayAvatar = $derived(optimisticAvatar || $userStore?.avatar);
+  const displayAvatar = $derived(optimisticAvatar || $userStore?.avatar || $userStore?.photoURL);
   const isImage = $derived(isImageUrl(displayAvatar));
 </script>
 

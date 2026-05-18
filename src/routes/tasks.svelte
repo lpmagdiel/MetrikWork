@@ -23,6 +23,8 @@
     updateTeamTask,
     deleteTeamTask,
     getUserProfile,
+    getProfileImage,
+    isProfileImage,
     hasTeamPermission,
   } from "../data/stores.js";
   import { navigateTo } from "../router.js";
@@ -174,13 +176,26 @@
     const parts = name.split(" ");
     return parts.length > 1 ? parts[0][0] + parts[1][0] : parts[0][0];
   }
+
+  function getTeamHomePath() {
+    return $selectedTeamId ? `/teams/${$selectedTeamId}` : "/teams";
+  }
+
+  function getMemberPhoto(member) {
+    return getProfileImage(member);
+  }
+
+  function getMemberFallbackAvatar(member) {
+    if (member?.avatar && !isProfileImage(member.avatar)) return member.avatar;
+    return getMemberInitials(member.id);
+  }
 </script>
 
 <div class="tasks-page">
   <Toast message={messageToast} type={typeToast} show={showToast} />
 
   <!-- Header -->
-   <TitleHeader title="Tareas" description={team?.name || "" + $teamTasksStore.length} action={() => navigateTo("/teams/" + $selectedTeamId)} icon={ChevronLeft} paddingHorizontal={true}/>
+   <TitleHeader title="Tareas" description={team?.name || "" + $teamTasksStore.length} action={() => navigateTo(getTeamHomePath())} icon={ChevronLeft} paddingHorizontal={true}/>
     {#if canCreateTasks}
       <CircleAddButton onClick={openAddTask} floating={true}/>
     {/if}
@@ -376,10 +391,10 @@
                 : ''}"
               onclick={() => toggleAssignedMember(member.id)}
             >
-            {#if member.avatar && member.avatar.length>10}
-            <img src={member.avatar} alt={member.name} class="m-avatar" width="32"/>
+            {#if getMemberPhoto(member)}
+            <img src={getMemberPhoto(member)} alt={member.name} class="m-avatar" width="32"/>
             {:else}
-            <div class="m-avatar">{member.avatar || "👤"}</div>
+            <div class="m-avatar">{getMemberFallbackAvatar(member)}</div>
             {/if}
               <span class="m-name">{member.name || member.email}</span>
               {#if taskForm.assignedTo.includes(member.id)}
@@ -883,6 +898,7 @@
     justify-content: center;
     font-size: 15px;
     flex-shrink: 0;
+    object-fit: cover;
   }
 
   .m-name {

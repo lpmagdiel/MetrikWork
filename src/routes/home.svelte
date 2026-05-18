@@ -57,6 +57,7 @@
   let isLoadingProducts = $state(false);
   let productSearchError = $state("");
   let productCatalogRequestId = 0;
+  let showStatsTeamPicker = $state(false);
 
   let filteredProducts = $derived.by(() => {
     const term = normalizeSearch(productSearchTerm);
@@ -261,6 +262,24 @@
     navigateTo(`/teams/${product.teamId}/inventory`);
   }
 
+  function openMyStats() {
+    const teams = $teamsStore || [];
+    if (teams.length === 0) {
+      navigateTo("/teams");
+      return;
+    }
+    if (teams.length === 1) {
+      navigateTo(`/teams/${teams[0].id}/my-stats`);
+      return;
+    }
+    showStatsTeamPicker = true;
+  }
+
+  function openTeamMyStats(team) {
+    showStatsTeamPicker = false;
+    navigateTo(`/teams/${team.id}/my-stats`);
+  }
+
   function getCurrentMonthRange() {
     const today = new Date();
     const year = today.getFullYear();
@@ -410,7 +429,13 @@
         </div>
         <span class="action-label">Equipos</span>
       </a>
-            <a href="/timer" class="action-btn">
+      <button type="button" class="action-btn" onclick={openMyStats}>
+        <div class="action-icon-box">
+          <TrendingUp size={28} />
+        </div>
+        <span class="action-label">Estadísticas</span>
+      </button>
+      <a href="/timer" class="action-btn">
         <div class="action-icon-box">
           <Timer size={28} />
         </div>
@@ -543,6 +568,31 @@
         {/each}
       </div>
     {/if}
+  </div>
+</SliceContainer>
+
+<SliceContainer bind:show={showStatsTeamPicker}>
+  <div class="team-picker-slice">
+    <div class="team-picker-header">
+      <span>Mis estadísticas</span>
+      <h2>Elige un equipo</h2>
+      <p>Verás tus jornadas, horas extra e ingresos estimados dentro del equipo seleccionado.</p>
+    </div>
+
+    <div class="team-picker-list">
+      {#each $teamsStore as team (team.id)}
+        <button type="button" class="team-picker-item" onclick={() => openTeamMyStats(team)}>
+          <span class="team-picker-icon">
+            <Users size={18} />
+          </span>
+          <span>
+            <strong>{team.name || team.team || "Equipo"}</strong>
+            <small>{team.members?.length || 0} miembros</small>
+          </span>
+          <ArrowRight size={18} />
+        </button>
+      {/each}
+    </div>
   </div>
 </SliceContainer>
 
@@ -988,19 +1038,31 @@
   /* Quick Actions Row */
   .quick-actions-row {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-start;
+    gap: 14px;
+    overflow-x: auto;
     padding: 0 8px;
     margin-top: 18px;
+    scrollbar-width: none;
+  }
+
+  .quick-actions-row::-webkit-scrollbar {
+    display: none;
   }
 
   .action-btn {
+    flex: 0 0 68px;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 8px;
+    padding: 0;
+    border: 0;
+    background: transparent;
     text-decoration: none;
     color: var(--text-primary);
     transition: transform 0.2s ease;
+    cursor: pointer;
   }
 
   .action-btn:active {
@@ -1023,6 +1085,99 @@
     font-size: 12px;
     font-weight: 500;
     color: var(--text-secondary);
+    text-align: center;
+    line-height: 1.15;
+  }
+
+  .team-picker-slice {
+    width: 100%;
+    padding: 0 20px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .team-picker-header {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .team-picker-header span {
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .team-picker-header h2 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 24px;
+    font-weight: 800;
+  }
+
+  .team-picker-header p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.4;
+  }
+
+  .team-picker-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .team-picker-item {
+    width: 100%;
+    min-height: 68px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-page);
+    color: var(--text-primary);
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .team-picker-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-purple-subtle);
+    color: var(--purple-color);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .team-picker-item span:nth-child(2) {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .team-picker-item strong,
+  .team-picker-item small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .team-picker-item strong {
+    font-size: 15px;
+    font-weight: 800;
+  }
+
+  .team-picker-item small {
+    color: var(--text-secondary);
+    font-size: 12px;
   }
 
   /* Secondary Stats Section */

@@ -32,6 +32,11 @@ service cloud.firestore {
              );
     }
 
+    function isStatsBudgetUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(["projectBudget", "projectBudgetCurrency", "updatedAt"]);
+    }
+
     function isPrivateChatParticipant(chatId) {
       return request.auth != null &&
              exists(/databases/$(database)/documents/privateChats/$(chatId)) &&
@@ -87,7 +92,11 @@ service cloud.firestore {
                       request.auth.uid == resource.data.admin ||
                       hasTeamPermission(teamId, "settings", "create") ||
                       hasTeamPermission(teamId, "settings", "edit") ||
-                      hasTeamPermission(teamId, "settings", "delete")
+                      hasTeamPermission(teamId, "settings", "delete") ||
+                      (
+                        hasTeamPermission(teamId, "stats", "edit") &&
+                        isStatsBudgetUpdate()
+                      )
                     );
 
       // Solo el administrador puede eliminar el equipo.
@@ -107,7 +116,8 @@ service cloud.firestore {
       }
 
       match /inventory/{productId} {
-        allow read: if hasTeamPermission(teamId, "inventory", "view");
+        allow read: if hasTeamPermission(teamId, "inventory", "view") ||
+                    hasTeamPermission(teamId, "stats", "view");
         allow create: if hasTeamPermission(teamId, "inventory", "create");
         allow update: if hasTeamPermission(teamId, "inventory", "edit");
         allow delete: if hasTeamPermission(teamId, "inventory", "delete");
@@ -115,11 +125,14 @@ service cloud.firestore {
 
       match /locations/{locationId} {
         allow read: if isTeamMember(teamId);
-        allow create: if hasTeamPermission(teamId, "settings", "create") ||
+        allow create: if hasTeamPermission(teamId, "locations", "create") ||
+                      hasTeamPermission(teamId, "settings", "create") ||
                       hasTeamPermission(teamId, "inventory", "create");
-        allow update: if hasTeamPermission(teamId, "settings", "edit") ||
+        allow update: if hasTeamPermission(teamId, "locations", "edit") ||
+                      hasTeamPermission(teamId, "settings", "edit") ||
                       hasTeamPermission(teamId, "inventory", "edit");
-        allow delete: if hasTeamPermission(teamId, "settings", "delete") ||
+        allow delete: if hasTeamPermission(teamId, "locations", "delete") ||
+                      hasTeamPermission(teamId, "settings", "delete") ||
                       hasTeamPermission(teamId, "inventory", "delete");
       }
 
@@ -174,6 +187,7 @@ service cloud.firestore {
       allow read: if request.auth != null &&
                   (
                     request.auth.uid == resource.data.userId ||
+                    hasTeamPermission(resource.data.teamId, "stats", "view") ||
                     hasTeamPermission(resource.data.teamId, "payments", "view")
                   );
 
@@ -200,7 +214,8 @@ service cloud.firestore {
 
     // --- PAGOS DEL EQUIPO (Team Payments) ---
     match /team_payments/{paymentId} {
-      allow read: if hasTeamPermission(resource.data.teamId, "payments", "view");
+      allow read: if hasTeamPermission(resource.data.teamId, "payments", "view") ||
+                   hasTeamPermission(resource.data.teamId, "stats", "view");
       allow create: if hasTeamPermission(request.resource.data.teamId, "payments", "create");
       allow update: if hasTeamPermission(resource.data.teamId, "payments", "edit");
       allow delete: if hasTeamPermission(resource.data.teamId, "payments", "delete");

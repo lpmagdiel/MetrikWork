@@ -334,6 +334,11 @@
       : "";
     return `${typeLabel} asignada para el ${formatDisplayDate(workDay.date)} en ${teamName}.${noteText}`;
   }
+
+  function goToTeamHome() {
+    const teamId = team?.id || $selectedTeamId;
+    navigateTo(teamId ? `/teams/${teamId}` : "/teams");
+  }
 </script>
 
 <div class="tasks-page">
@@ -341,7 +346,7 @@
 
   {#if team}
     <header>
-    <TitleHeader title="Planning" description={`${works.length} jornadas`} action={() => navigateTo("/teams/" + (team?.id || $selectedTeamId))} />
+    <TitleHeader title="Planning" description={`${works.length} jornadas`} action={goToTeamHome} />
       {#if isAdmin}
         <CircleAddButton onClick={() => openAssignment()} floating={true}/>
       {/if}

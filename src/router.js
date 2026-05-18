@@ -1,9 +1,22 @@
 import { writable } from 'svelte/store';
 
-export const currentPath = writable(window.location.pathname || '/');
+export const normalizePath = (path) => {
+    const rawPath = typeof path === 'string' && path.trim() ? path.trim() : '/';
+    const absolutePath = rawPath.startsWith('/') ? rawPath : '/' + rawPath;
+
+    try {
+        const url = new URL(absolutePath, window.location.origin);
+        const pathname = url.pathname.replace(/\/+$/, '') || '/';
+        return `${pathname}${url.search}${url.hash}`;
+    } catch (err) {
+        return absolutePath.replace(/\/+$/, '') || '/';
+    }
+};
+
+export const currentPath = writable(normalizePath(window.location.pathname + window.location.search + window.location.hash));
 
 export const navigateTo = (path) => {
-    const cleanPath = path.startsWith('/') ? path : '/' + path;
+    const cleanPath = normalizePath(path);
     currentPath.set(cleanPath);
 
     const currentUrl = window.location.pathname + window.location.search + window.location.hash;
@@ -13,7 +26,7 @@ export const navigateTo = (path) => {
 };
 
 window.addEventListener('popstate', () => {
-    currentPath.set(window.location.pathname || '/');
+    currentPath.set(normalizePath(window.location.pathname + window.location.search + window.location.hash));
 });
 
 // Interceptar clicks en enlaces para hacer navegación SPA sin recargar

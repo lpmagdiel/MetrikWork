@@ -1,7 +1,7 @@
 import { writable, get, derived } from 'svelte/store';
 import { db } from './firebase.js';
 import { doc, onSnapshot, collection, addDoc, query, where, updateDoc, getDoc, arrayUnion, getDocs, deleteField, deleteDoc } from 'firebase/firestore';
-import { userStore } from './auth.js';
+import { userStore, getProfileImage } from './auth.js';
 import { createNotification } from './notifications.js';
 import { createTeamPermissions, normalizeTeamPermissions } from './permissions.js';
 import { normalizeNonWorkingDays } from './workLimits.js';
@@ -89,10 +89,17 @@ export async function createTeam(teamName, paymentData = null) {
             team: teamName,
             admin: user.uid,
             members: [user.uid],
-            membersData: [{ id: user.uid, name: user.name || user.email }],
+            membersData: [{
+                id: user.uid,
+                name: user.name || user.email,
+                avatar: getProfileImage(user),
+                photoURL: getProfileImage(user)
+            }],
             memberPermissions: {
                 [user.uid]: createTeamPermissions(true)
             },
+            projectBudget: 0,
+            projectBudgetCurrency: 'MXN',
             createdAt: new Date().toISOString()
         };
 
@@ -143,7 +150,9 @@ export async function addMemberByEmail(teamId, email, permissions = {}) {
 
         const userDoc = querySnapshot.docs[0];
         const memberUid = userDoc.id;
-        const memberName = userDoc.data().name || email;
+        const memberProfile = userDoc.data();
+        const memberName = memberProfile.name || email;
+        const memberImage = getProfileImage(memberProfile);
 
         // 2. Add member to team
         const teamRef = doc(db, 'teams', teamId);
@@ -160,7 +169,12 @@ export async function addMemberByEmail(teamId, email, permissions = {}) {
 
         await updateDoc(teamRef, {
             members: arrayUnion(memberUid),
-            membersData: arrayUnion({ id: memberUid, name: memberName }),
+            membersData: arrayUnion({
+                id: memberUid,
+                name: memberName,
+                avatar: memberImage,
+                photoURL: memberImage
+            }),
             [`memberPermissions.${memberUid}`]: normalizeTeamPermissions(permissions)
         });
 
@@ -245,6 +259,14 @@ export async function updateTeamProfile(teamId, data) {
 
         if (data.nonWorkingDays !== undefined) {
             updateData.nonWorkingDays = normalizeNonWorkingDays(data.nonWorkingDays);
+        }
+
+        if (data.projectBudget !== undefined) {
+            updateData.projectBudget = Math.max(0, Number(data.projectBudget) || 0);
+        }
+
+        if (typeof data.projectBudgetCurrency === 'string') {
+            updateData.projectBudgetCurrency = data.projectBudgetCurrency.trim().toUpperCase() || 'MXN';
         }
 
         await updateDoc(doc(db, 'teams', teamId), updateData);

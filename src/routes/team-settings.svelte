@@ -14,8 +14,11 @@
   } from "lucide-svelte";
   import {
     selectedTeam,
+    selectedTeamId,
     userStore,
     getUserProfile,
+    getProfileImage,
+    isProfileImage,
     addMemberByEmail,
     updateMemberPermissions,
     updateTeamProfile,
@@ -41,6 +44,7 @@
   let canCreateSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "create"));
   let canEditSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "edit"));
   let canDeleteSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "delete"));
+  let teamId = $derived(team?.id || $selectedTeamId);
 
   const permissionModules = Object.entries(TEAM_PERMISSION_LABELS);
   const permissionActions = Object.entries(TEAM_PERMISSION_ACTION_LABELS);
@@ -98,6 +102,19 @@
     setTimeout(() => {
       showToast = false;
     }, 3000);
+  }
+
+  function goToTeamHome() {
+    navigateTo(teamId ? `/teams/${teamId}` : "/teams");
+  }
+
+  function getMemberPhoto(member) {
+    return getProfileImage(member);
+  }
+
+  function getMemberFallbackAvatar(member) {
+    if (member?.avatar && !isProfileImage(member.avatar)) return member.avatar;
+    return "";
   }
 
   function togglePermission(memberId, module, action) {
@@ -231,7 +248,7 @@
 <div class="team-settings-page">
   <Toast message={toastMessage} type={toastType} bind:show={showToast} />
   <header>
-  <TitleHeader title="Ajustes del equipo" description={team?.name || ""} action={() => navigateTo(`/teams/${team?.id || ""}`)} />
+  <TitleHeader title="Ajustes del equipo" description={team?.name || ""} action={goToTeamHome} />
   </header>
 
   {#if !team}
@@ -361,8 +378,10 @@
             <article class="member-item">
               <div class="member-header">
                 <div class="member-avatar">
-                  {#if member.avatar && member.avatar.length > 10}
-                    <img src={member.avatar} alt={member.name || member.email} />
+                  {#if getMemberPhoto(member)}
+                    <img src={getMemberPhoto(member)} alt={member.name || member.email} />
+                  {:else if getMemberFallbackAvatar(member)}
+                    <span>{getMemberFallbackAvatar(member)}</span>
                   {:else}
                     <Users size={20} />
                   {/if}

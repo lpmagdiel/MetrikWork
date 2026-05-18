@@ -577,10 +577,14 @@
       }).catch(console.error);
     }
   }
+
+  function goToTeamHome() {
+    navigateTo(teamId ? `/teams/${teamId}` : "/teams");
+  }
 </script>
 
 <div class="chat-page">
-  <TitleHeader title="Chat" description={chatTitle} action={()=>navigateTo(`/teams/${teamId}`)} paddingHorizontal={true}/>
+  <TitleHeader title="Chat" description={chatTitle} action={goToTeamHome} paddingHorizontal={true}/>
 
   <div class="chat-switcher">
     <div class="mode-tabs" aria-label="Tipo de chat">

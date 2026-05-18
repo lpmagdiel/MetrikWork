@@ -1,6 +1,6 @@
 <script>
     import { ChevronDown, ChevronLeft, DollarSign, Filter, CheckCircle, AlertCircle, Eye, History, Printer } from "lucide-svelte";
-    import { selectedTeam, userStore, hasTeamPermission } from "../data/stores.js";
+    import { selectedTeam, selectedTeamId, userStore, hasTeamPermission } from "../data/stores.js";
     import { getTeamPaymentsData, registerTeamPayment } from "../data/teamPayments.js";
     import { createNotification } from "../data/notifications.js";
     import { navigateTo } from "../router.js";
@@ -9,6 +9,7 @@
   import TitleHeader from "../components/TitleHeader.svelte";
 
     let team = $derived($selectedTeam);
+    let teamId = $derived(team?.id || $selectedTeamId);
     let canViewPayments = $derived(hasTeamPermission(team, $userStore?.uid, "payments", "view"));
     let canCreatePayments = $derived(hasTeamPermission(team, $userStore?.uid, "payments", "create"));
     let memberBalances = $state([]);
@@ -62,6 +63,10 @@
         typeToast = type;
         showToast = true;
         setTimeout(() => showToast = false, 3000);
+    }
+
+    function goToTeamHome() {
+        navigateTo(teamId ? `/teams/${teamId}` : "/teams");
     }
 
     function openPaymentModal(member) {
@@ -461,7 +466,7 @@
     <Toast message={messageToast} type={typeToast} show={showToast} />
     
     <header>
-        <TitleHeader title="Pagos del Equipo" description={team?.name || ""} action={() => navigateTo(`/teams/${team?.id}`)} />
+        <TitleHeader title="Pagos del Equipo" description={team?.name || ""} action={goToTeamHome} />
     </header>
 
     {#if !canViewPayments}

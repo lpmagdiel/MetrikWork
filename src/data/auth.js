@@ -9,6 +9,20 @@ export const settingsStore = writable(null);
 
 let settingsUnsubscribe;
 
+export function isProfileImage(value) {
+    if (!value || typeof value !== 'string') return false;
+    return /^(https?:|data:|blob:)/i.test(value.trim());
+}
+
+export function getProfileImage(profile) {
+    if (!profile) return '';
+    const avatar = typeof profile.avatar === 'string' ? profile.avatar.trim() : '';
+    const photoURL = typeof profile.photoURL === 'string' ? profile.photoURL.trim() : '';
+    if (isProfileImage(avatar)) return avatar;
+    if (isProfileImage(photoURL)) return photoURL;
+    return '';
+}
+
 export function subscribeToSettings(uid) {
     if (settingsUnsubscribe) settingsUnsubscribe();
     settingsStore.set(null);
@@ -40,6 +54,7 @@ export function initAuth(setupListeners) {
                 email: user.email,
                 emailNormalized: user.email?.trim().toLowerCase() || '',
                 name: user.displayName || '',
+                photoURL: user.photoURL || '',
                 lastLogin: new Date().toISOString()
             }, { merge: true });
 
@@ -63,6 +78,13 @@ export async function getUserProfile(uid) {
         const userDoc = await getDoc(doc(db, 'users', uid));
         if (userDoc.exists()) {
             const data = {...userDoc.data(), id: uid};
+            const image = getProfileImage(data);
+            if (image && !isProfileImage(data.avatar)) {
+                data.avatar = image;
+            }
+            if (image && !data.photoURL) {
+                data.photoURL = image;
+            }
             userProfileCache[uid] = data;
             return data;
         }

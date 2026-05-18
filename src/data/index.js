@@ -8,6 +8,7 @@ export * from './notifications.js';
 export * from './pushNotifications.js';
 export * from './chat.js';
 export * from './works.js';
+export * from './teamStats.js';
 export * from './workLimits.js';
 export * from './permissions.js';
 export { auth, db, googleProvider } from './firebase.js';
