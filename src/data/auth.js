@@ -38,6 +38,7 @@ export function initAuth(setupListeners) {
             // Save basic profile for others to see
             setDoc(doc(db, 'users', user.uid), {
                 email: user.email,
+                emailNormalized: user.email?.trim().toLowerCase() || '',
                 name: user.displayName || '',
                 lastLogin: new Date().toISOString()
             }, { merge: true });

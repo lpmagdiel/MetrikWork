@@ -70,6 +70,13 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     console.error('send-push-notification error:', error);
+    if (isLocalEnvironment() && isPushConfigurationError(error)) {
+      return sendJson(res, 200, {
+        sent: 0,
+        skipped: true,
+        reason: 'push_not_configured',
+      });
+    }
     return sendJson(res, 500, { error: error.message || 'Internal server error' });
   }
 }
@@ -105,13 +112,13 @@ function getServiceAccountConfig() {
 }
 
 function normalizePrivateKey(rawPrivateKey, base64PrivateKey) {
-  let privateKey = rawPrivateKey || '';
+  let privateKey = (rawPrivateKey || '').trim();
+  const base64Key = (base64PrivateKey || '').trim();
 
-  if (!privateKey && base64PrivateKey) {
-    privateKey = Buffer.from(base64PrivateKey, 'base64').toString('utf8');
+  if (!privateKey && base64Key) {
+    privateKey = Buffer.from(base64Key, 'base64').toString('utf8').trim();
   }
 
-  privateKey = privateKey.trim();
   if (!privateKey) return '';
 
   if (
@@ -126,7 +133,7 @@ function normalizePrivateKey(rawPrivateKey, base64PrivateKey) {
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n');
 
-  if (!privateKey.includes('\n') && privateKey.includes('-----BEGIN PRIVATE KEY-----')) {
+  if (privateKey.includes('-----BEGIN PRIVATE KEY-----') && !privateKey.includes('\n')) {
     privateKey = privateKey
       .replace('-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n')
       .replace('-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----')
@@ -134,14 +141,45 @@ function normalizePrivateKey(rawPrivateKey, base64PrivateKey) {
   }
 
   try {
-    crypto.createPrivateKey(privateKey);
+    return crypto.createPrivateKey(privateKey).export({
+      format: 'pem',
+      type: 'pkcs8',
+    });
   } catch {
-    throw new Error(
-      'FIREBASE_PRIVATE_KEY is not a valid PEM private key. Use escaped newlines (\\n) or FIREBASE_PRIVATE_KEY_BASE64.'
-    );
+    const compactKey = privateKey.replace(/\s/g, '');
+    if (/^[A-Za-z0-9+/]+={0,2}$/.test(compactKey)) {
+      try {
+        return crypto.createPrivateKey(wrapPemBody(compactKey)).export({
+          format: 'pem',
+          type: 'pkcs8',
+        });
+      } catch {
+        // It may be a DER-encoded PKCS8 key instead of a PEM body.
+      }
+
+      try {
+        return crypto.createPrivateKey({
+          key: Buffer.from(compactKey, 'base64'),
+          format: 'der',
+          type: 'pkcs8',
+        }).export({
+          format: 'pem',
+          type: 'pkcs8',
+        });
+      } catch {
+        // Surface the standard configuration hint below.
+      }
+    }
   }
 
-  return privateKey;
+  throw new Error(
+    'FIREBASE_PRIVATE_KEY is not a valid private key. Use the full service account private_key with escaped newlines (\\n), PEM/DER base64, or FIREBASE_PRIVATE_KEY_BASE64.'
+  );
+}
+
+function wrapPemBody(base64Body) {
+  const lines = base64Body.match(/.{1,64}/g) || [];
+  return `-----BEGIN PRIVATE KEY-----\n${lines.join('\n')}\n-----END PRIVATE KEY-----\n`;
 }
 
 async function getAccessToken() {
@@ -328,4 +366,15 @@ function getOrigin(req) {
   const host = req.headers['x-forwarded-host'] || req.headers.host;
   const proto = req.headers['x-forwarded-proto'] || 'https';
   return `${proto}://${host}`;
+}
+
+function isLocalEnvironment() {
+  return process.env.NODE_ENV !== 'production' && process.env.VERCEL_ENV !== 'production';
+}
+
+function isPushConfigurationError(error) {
+  const message = error?.message || '';
+  return message.includes('FIREBASE_CLIENT_EMAIL') ||
+    message.includes('FIREBASE_PRIVATE_KEY') ||
+    message.includes('FIREBASE_PROJECT_ID');
 }

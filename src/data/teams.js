@@ -125,9 +125,17 @@ export async function createTeam(teamName, paymentData = null) {
 export async function addMemberByEmail(teamId, email, permissions = {}) {
     try {
         // 1. Search for user by email
+        const normalizedEmail = email.trim().toLowerCase();
         const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('email', '==', email));
-        const querySnapshot = await getDocs(q);
+        let querySnapshot = await getDocs(query(usersRef, where('emailNormalized', '==', normalizedEmail)));
+
+        if (querySnapshot.empty) {
+            querySnapshot = await getDocs(query(usersRef, where('email', '==', normalizedEmail)));
+        }
+
+        if (querySnapshot.empty && email.trim() !== normalizedEmail) {
+            querySnapshot = await getDocs(query(usersRef, where('email', '==', email.trim())));
+        }
 
         if (querySnapshot.empty) {
             throw new Error("Usuario no encontrado");
@@ -141,11 +149,13 @@ export async function addMemberByEmail(teamId, email, permissions = {}) {
         const teamRef = doc(db, 'teams', teamId);
         
         const teamSnapshot = await getDoc(teamRef);
-        if (teamSnapshot.exists()) {
-            const members = teamSnapshot.data().members || [];
-            if (members.includes(memberUid)) {
-                throw new Error("El usuario ya es miembro de este equipo");
-            }
+        if (!teamSnapshot.exists()) {
+            throw new Error("Equipo no encontrado");
+        }
+
+        const members = teamSnapshot.data().members || [];
+        if (members.includes(memberUid)) {
+            throw new Error("El usuario ya es miembro de este equipo");
         }
 
         await updateDoc(teamRef, {
