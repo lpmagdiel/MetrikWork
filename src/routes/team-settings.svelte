@@ -2,11 +2,9 @@
   import {
     AlertCircle,
     Camera,
-    ChevronLeft,
     ChevronDown,
     Mail,
     Save,
-    Settings,
     Trash2,
     UserMinus,
     UserPlus,
@@ -34,7 +32,6 @@
   } from "../data/stores.js";
   import { navigateTo } from "../router.js";
   import { resizer, uploader } from "../data/fileHelper.js";
-  import Toast from "../components/Toast.svelte";
   import { confirmAlert, showErrorAlert, showSuccessAlert } from "../data/alerts.js";
   import TitleHeader from "../components/TitleHeader.svelte";
 
@@ -60,9 +57,6 @@
   let editingPermissions = $state({});
   let isSavingProfile = $state(false);
   let isAddingMember = $state(false);
-  let toastMessage = $state("");
-  let toastType = $state("success");
-  let showToast = $state(false);
   let showNewMemberPermissions = $state(false);
   let openPermissionMemberId = $state(null);
 
@@ -94,15 +88,6 @@
       active = false;
     };
   });
-
-  function showNotification(message, type = "success") {
-    toastMessage = message;
-    toastType = type;
-    showToast = true;
-    setTimeout(() => {
-      showToast = false;
-    }, 3000);
-  }
 
   function goToTeamHome() {
     navigateTo(teamId ? `/teams/${teamId}` : "/teams");
@@ -144,7 +129,7 @@
       };
       reader.readAsDataURL(file);
     } catch (error) {
-      showNotification("No se pudo cargar la imagen", "error");
+      await showErrorAlert("Error al cargar la imagen", "No se pudo cargar la imagen.");
     }
     event.target.value = "";
   }
@@ -186,9 +171,12 @@
       newMemberEmail = "";
       newMemberPermissions = createDefaultMemberPermissions();
       showNewMemberPermissions = false;
-      showNotification("Miembro agregado");
+      await showSuccessAlert("Miembro agregado", "El miembro se agregó al equipo correctamente.");
     } catch (error) {
-      showNotification(error.message || "Error al agregar miembro", "error");
+      await showErrorAlert(
+        "Error al agregar miembro",
+        error?.message || "No se pudo agregar el miembro al equipo.",
+      );
     } finally {
       isAddingMember = false;
     }
@@ -198,9 +186,9 @@
     if (!team?.id || !canEditSettings || memberId === team.admin) return;
     try {
       await updateMemberPermissions(team.id, memberId, editingPermissions[memberId]);
-      showNotification("Permisos actualizados");
+      await showSuccessAlert("Permisos actualizados", "Los permisos del miembro se guardaron correctamente.");
     } catch (error) {
-      showNotification("Error al guardar permisos", "error");
+      await showErrorAlert("Error al guardar permisos", "No se pudieron guardar los permisos.");
     }
   }
 
@@ -216,9 +204,12 @@
 
     try {
       await removeTeamMember(team.id, member.id);
-      showNotification("Miembro eliminado");
+      await showSuccessAlert("Miembro eliminado", "El miembro se quitó del equipo correctamente.");
     } catch (error) {
-      showNotification(error.message || "Error al quitar miembro", "error");
+      await showErrorAlert(
+        "Error al quitar miembro",
+        error?.message || "No se pudo quitar el miembro del equipo.",
+      );
     }
   }
 
@@ -236,7 +227,7 @@
       await deleteTeam(team.id);
       navigateTo("/teams");
     } catch (error) {
-      showNotification("Error al eliminar el equipo", "error");
+      await showErrorAlert("Error al eliminar el equipo", "No se pudo eliminar el equipo.");
     }
   }
 
@@ -246,7 +237,6 @@
 </script>
 
 <div class="team-settings-page">
-  <Toast message={toastMessage} type={toastType} bind:show={showToast} />
   <header>
   <TitleHeader title="Ajustes del equipo" description={team?.name || ""} action={goToTeamHome} />
   </header>
