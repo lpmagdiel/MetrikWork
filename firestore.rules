@@ -74,6 +74,22 @@ service cloud.firestore {
       }
     }
 
+    // --- PRESENCIA EN LA APP ---
+    match /presence/{userId} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null &&
+                            request.auth.uid == userId &&
+                            request.resource.data.uid == userId &&
+                            request.resource.data.keys().hasOnly([
+                              "uid",
+                              "isOnline",
+                              "lastActiveAt",
+                              "lastSeenAt",
+                              "updatedAt"
+                            ]);
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+
     // --- EQUIPOS ---
     match /teams/{teamId} {
       // Solo miembros pueden leer el equipo.

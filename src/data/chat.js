@@ -13,13 +13,15 @@ import {
     doc,
     updateDoc,
     setDoc,
-    deleteDoc
+    deleteDoc,
+    where
 } from 'firebase/firestore';
 import { createNotification } from './notifications.js';
 
 export const chatMessagesStore = writable([]);
 let chatUnsubscribe;
 let privateCallsUnsubscribe;
+let incomingPrivateCallsUnsubscribe;
 const CHAT_PAGE_SIZE = 30;
 
 function normalizeMessageDoc(doc) {
@@ -295,6 +297,90 @@ export function subscribeToPrivateCalls(chatId, userId, callback) {
     }, (error) => {
         console.error('Error in private calls listener:', error);
     });
+}
+
+export function subscribeToIncomingPrivateCalls(userId, callback) {
+    incomingPrivateCallsUnsubscribe?.();
+    incomingPrivateCallsUnsubscribe = null;
+
+    if (!userId) {
+        callback?.(null);
+        return () => {};
+    }
+
+    const callUnsubscribers = new Map();
+    const activeCallsByChat = new Map();
+
+    function emitLatestCall() {
+        const latestCall = Array.from(activeCallsByChat.values())
+            .flat()
+            .filter((call) => call.receiverId === userId && ['ringing', 'connecting', 'active'].includes(call.status))
+            .sort((a, b) => new Date(b.createdAt || b.updatedAt) - new Date(a.createdAt || a.updatedAt))[0] || null;
+        callback?.(latestCall);
+    }
+
+    function unsubscribeChatCalls(chatId) {
+        callUnsubscribers.get(chatId)?.();
+        callUnsubscribers.delete(chatId);
+        activeCallsByChat.delete(chatId);
+    }
+
+    const chatsQuery = query(
+        collection(db, 'privateChats'),
+        where('participants', 'array-contains', userId)
+    );
+
+    const chatsUnsubscribe = onSnapshot(chatsQuery, (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+            const chatId = change.doc.id;
+
+            if (change.type === 'removed') {
+                unsubscribeChatCalls(chatId);
+                emitLatestCall();
+                return;
+            }
+
+            if (callUnsubscribers.has(chatId)) return;
+
+            const callsQuery = query(
+                collection(db, 'privateChats', chatId, 'calls'),
+                where('participants', 'array-contains', userId)
+            );
+
+            const callsUnsubscribe = onSnapshot(callsQuery, (callsSnapshot) => {
+                const activeCalls = callsSnapshot.docs
+                    .map((callDoc) => ({
+                        id: callDoc.id,
+                        ...callDoc.data(),
+                        chatId: callDoc.data().chatId || chatId
+                    }))
+                    .filter((call) =>
+                        call.receiverId === userId &&
+                        ['ringing', 'connecting', 'active'].includes(call.status)
+                    );
+
+                activeCallsByChat.set(chatId, activeCalls);
+                emitLatestCall();
+            }, (error) => {
+                console.error('Error in incoming private calls listener:', error);
+            });
+
+            callUnsubscribers.set(chatId, callsUnsubscribe);
+        });
+    }, (error) => {
+        console.error('Error in private chats listener:', error);
+        callback?.(null);
+    });
+
+    incomingPrivateCallsUnsubscribe = () => {
+        chatsUnsubscribe();
+        callUnsubscribers.forEach((unsubscribe) => unsubscribe?.());
+        callUnsubscribers.clear();
+        activeCallsByChat.clear();
+        callback?.(null);
+    };
+
+    return incomingPrivateCallsUnsubscribe;
 }
 
 export async function updatePrivateCall(chatId, callId, data) {

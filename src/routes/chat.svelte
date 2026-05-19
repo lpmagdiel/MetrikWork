@@ -41,9 +41,12 @@
     teamsStore,
     locationsStore,
     getUserProfile,
+    userPresenceStore,
+    subscribeToUsersPresence,
+    isUserPresenceActive,
   } from "../data/stores.js";
   import { get } from "svelte/store";
-  import { navigateTo } from "../router.js";
+  import { currentPath, navigateTo } from "../router.js";
   import { uploader, resizer } from "../data/fileHelper.js";
   import SliceContainer from "../components/SliceContainer.svelte";
   import LocationBox from "../components/LocationBox.svelte";
@@ -77,6 +80,7 @@
   let isLoadingOlder = $state(false);
   let hasOlderMessages = $state(true);
   let shouldStickToBottom = $state(true);
+  let presenceNow = $state(Date.now());
   let activeCall = $state(null);
   let isCallOpen = $state(false);
   let callStatus = $state("idle");
@@ -110,9 +114,58 @@
   const rtcConfig = {
     iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
   };
+  let appliedRouteParamsKey = $state("");
+
+  let routeChatParams = $derived.by(() => {
+    try {
+      const url = new URL($currentPath, window.location.origin);
+      return {
+        mode: url.searchParams.get("mode") || "",
+        member: url.searchParams.get("member") || "",
+        call: url.searchParams.get("call") || "",
+      };
+    } catch {
+      return { mode: "", member: "", call: "" };
+    }
+  });
 
   $effect(() => {
-    if (chatMode === "private" && !selectedMemberId && teamMembers.length > 0) {
+    const interval = setInterval(() => {
+      presenceNow = Date.now();
+    }, 30000);
+
+    return () => clearInterval(interval);
+  });
+
+  $effect(() => {
+    subscribeToUsersPresence(teamMembers.map((member) => member.id));
+    return () => subscribeToUsersPresence([]);
+  });
+
+  $effect(() => {
+    const { mode, member, call } = routeChatParams;
+    if (mode !== "private" && !member && !call) return;
+
+    const routeKey = `${mode}:${member}:${call}`;
+    if (routeKey === appliedRouteParamsKey) return;
+    if (member && !teamMembers.some((teamMember) => teamMember.id === member)) return;
+
+    chatMode = "private";
+    if (member) selectedMemberId = member;
+    appliedRouteParamsKey = routeKey;
+  });
+
+  $effect(() => {
+    if (chatMode === "private" && teamMembers.length === 0) {
+      selectedMemberId = "";
+      return;
+    }
+
+    if (
+      chatMode === "private" &&
+      teamMembers.length > 0 &&
+      (!selectedMemberId || !teamMembers.some((member) => member.id === selectedMemberId))
+    ) {
       selectedMemberId = teamMembers[0].id;
     }
   });
@@ -405,6 +458,14 @@
     messageInput = "";
   }
 
+  function isMemberActive(memberId) {
+    return isUserPresenceActive($userPresenceStore[memberId], presenceNow);
+  }
+
+  function getMemberPresenceLabel(memberId) {
+    return isMemberActive(memberId) ? "Activo" : "Inactivo";
+  }
+
   async function prepareMedia() {
     localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
     remoteStream = new MediaStream();
@@ -608,15 +669,27 @@
 
     {#if chatMode === "private"}
       <div class="private-toolbar">
-        <select bind:value={selectedMemberId} aria-label="Seleccionar miembro">
+        <div class="private-member-list" aria-label="Seleccionar miembro">
           {#if teamMembers.length === 0}
-            <option value="">Sin miembros disponibles</option>
+            <div class="private-member-empty">Sin miembros disponibles</div>
           {:else}
             {#each teamMembers as member (member.id)}
-              <option value={member.id}>{member.name || member.email || "Miembro"}</option>
+              <button
+                type="button"
+                class:active={selectedMemberId === member.id}
+                onclick={() => (selectedMemberId = member.id)}
+                title={`${member.name || member.email || "Miembro"} - ${getMemberPresenceLabel(member.id)}`}
+              >
+                <span
+                  class="private-presence-dot"
+                  class:active={isMemberActive(member.id)}
+                  aria-label={getMemberPresenceLabel(member.id)}
+                ></span>
+                <span class="private-member-name">{member.name || member.email || "Miembro"}</span>
+              </button>
             {/each}
           {/if}
-        </select>
+        </div>
         <button
           type="button"
           class="call-btn"
@@ -1024,17 +1097,74 @@
     align-items: center;
   }
 
-  .private-toolbar select {
-    width: 100%;
+  .private-member-list {
+    min-width: 0;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .private-member-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .private-member-list button,
+  .private-member-empty {
     min-height: 44px;
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
+    border-radius: 999px;
     background: var(--bg-card);
     color: var(--text-primary);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     padding: 0 12px;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 800;
-    outline: none;
+    white-space: nowrap;
+  }
+
+  .private-member-list button {
+    max-width: 190px;
+    cursor: pointer;
+  }
+
+  .private-member-list button.active {
+    border-color: var(--accent-strong);
+    background: var(--bg-accent-subtle);
+    color: var(--accent-ink);
+  }
+
+  .private-member-empty {
+    width: 100%;
+    justify-content: center;
+    color: var(--text-secondary);
+  }
+
+  .private-member-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .private-presence-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #9ca3af;
+    box-shadow: 0 0 0 2px var(--bg-card);
+    flex: 0 0 10px;
+  }
+
+  .private-member-list button.active .private-presence-dot {
+    box-shadow: 0 0 0 2px var(--bg-accent-subtle);
+  }
+
+  .private-presence-dot.active {
+    background: #22c55e;
   }
 
   .call-btn {

@@ -7,6 +7,7 @@ export * from './locations.js';
 export * from './notifications.js';
 export * from './pushNotifications.js';
 export * from './chat.js';
+export * from './presence.js';
 export * from './works.js';
 export * from './teamStats.js';
 export * from './workLimits.js';

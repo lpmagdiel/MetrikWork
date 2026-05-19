@@ -63,6 +63,9 @@
     getNonWorkingDayMessage,
     getProfileImage,
     isProfileImage,
+    userPresenceStore,
+    subscribeToUsersPresence,
+    isUserPresenceActive,
   } from "../data/stores.js";
   import { navigateTo } from "../router.js";
   import SliceContainer from "../components/SliceContainer.svelte";
@@ -128,6 +131,7 @@
   let isSavingLocation = $state(false);
   let isLocating = $state(false);
   let locationError = $state("");
+  let presenceNow = $state(Date.now());
   let locationForm = $state({
     name: "",
     description: "",
@@ -181,6 +185,19 @@
       subscribeToTeamLocations(team.id);
     }
     return () => subscribeToTeamLocations(null);
+  });
+
+  $effect(() => {
+    const interval = setInterval(() => {
+      presenceNow = Date.now();
+    }, 30000);
+
+    return () => clearInterval(interval);
+  });
+
+  $effect(() => {
+    subscribeToUsersPresence(team?.members || []);
+    return () => subscribeToUsersPresence([]);
   });
 
   $effect(() => {
@@ -274,6 +291,14 @@
   function getMemberFallbackAvatar(member) {
     if (member?.avatar && !isProfileImage(member.avatar)) return member.avatar;
     return "";
+  }
+
+  function isMemberActive(memberId) {
+    return isUserPresenceActive($userPresenceStore[memberId], presenceNow);
+  }
+
+  function getMemberPresenceLabel(memberId) {
+    return isMemberActive(memberId) ? "Activo" : "Inactivo";
   }
 
   $effect(() => {
@@ -806,24 +831,35 @@
         <div class="members-list">
           {#each memberList as member}
             <div class="member-item">
-              <div class="member-avatar">
-                {#if getMemberPhoto(member)}
-                  <img
-                    src={getMemberPhoto(member)}
-                    alt={member?.name || member?.email}
-                    width="40px"
-                    height="40px"
-                  />
-                {:else if getMemberFallbackAvatar(member)}
-                  <span>{getMemberFallbackAvatar(member)}</span>
-                {:else}
-                  <User size={24} color="#94a3b8" />
-                {/if}
+              <div class="member-avatar-wrap">
+                <div class="member-avatar">
+                  {#if getMemberPhoto(member)}
+                    <img
+                      src={getMemberPhoto(member)}
+                      alt={member?.name || member?.email}
+                      width="40px"
+                      height="40px"
+                    />
+                  {:else if getMemberFallbackAvatar(member)}
+                    <span>{getMemberFallbackAvatar(member)}</span>
+                  {:else}
+                    <User size={24} color="#94a3b8" />
+                  {/if}
+                </div>
+                <span
+                  class="presence-dot"
+                  class:active={isMemberActive(member.id)}
+                  title={getMemberPresenceLabel(member.id)}
+                  aria-label={getMemberPresenceLabel(member.id)}
+                ></span>
               </div>
               <div class="member-info">
                 <p class="member-id">
                   {member?.name || member?.email || "Usuario"}
                 </p>
+                <small class:active={isMemberActive(member.id)}>
+                  {getMemberPresenceLabel(member.id)}
+                </small>
               </div>
               {#if canEditSettings}
                 <button
@@ -1543,9 +1579,16 @@
     transition: transform 0.2s ease;
   }
 
-  .member-avatar {
+  .member-avatar-wrap {
+    position: relative;
     width: 40px;
     height: 40px;
+    flex: 0 0 40px;
+  }
+
+  .member-avatar {
+    width: 100%;
+    height: 100%;
     background: var(--bg-accent-subtle);
     border-radius: 10px;
     display: flex;
@@ -1558,6 +1601,22 @@
     object-fit: cover;
   }
 
+  .presence-dot {
+    position: absolute;
+    right: -3px;
+    bottom: -3px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #9ca3af;
+    border: 2px solid var(--bg-card);
+    box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08);
+  }
+
+  .presence-dot.active {
+    background: #22c55e;
+  }
+
   .member-avatar img {
     width: 100%;
     height: 100%;
@@ -1568,6 +1627,18 @@
     margin: 0;
     font-size: 15px;
     font-weight: 500;
+  }
+
+  .member-info small {
+    display: block;
+    margin-top: 3px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .member-info small.active {
+    color: #15803d;
   }
 
   .member-settings-btn {
