@@ -48,6 +48,7 @@
 
   let memberList = $state([]);
   let teamName = $state("");
+  let teamCurrency = $state("MXN");
   let overtimeLimitHours = $state(0);
   let nonWorkingDays = $state([]);
   let photoPreview = $state("");
@@ -60,9 +61,24 @@
   let showNewMemberPermissions = $state(false);
   let openPermissionMemberId = $state(null);
 
+  const currencyOptions = [
+    { code: "MXN", label: "Peso mexicano" },
+    { code: "USD", label: "Dólar estadounidense" },
+    { code: "EUR", label: "Euro" },
+    { code: "COP", label: "Peso colombiano" },
+    { code: "ARS", label: "Peso argentino" },
+    { code: "CLP", label: "Peso chileno" },
+    { code: "PEN", label: "Sol peruano" },
+    { code: "DOP", label: "Peso dominicano" },
+    { code: "NIO", label: "Córdoba nicaragüense" },
+    { code: "BRL", label: "Real brasileño" },
+    { code: "GBP", label: "Libra esterlina" },
+  ];
+
   $effect(() => {
     if (team) {
       teamName = team.team || team.name || "";
+      teamCurrency = team.projectBudgetCurrency || "MXN";
       overtimeLimitHours = Number(team.overtimeLimitHours) || 0;
       nonWorkingDays = normalizeNonWorkingDays(team.nonWorkingDays);
       photoPreview = team.photoURL || "";
@@ -145,6 +161,7 @@
       await updateTeamProfile(team.id, {
         name: teamName,
         photoURL,
+        projectBudgetCurrency: teamCurrency,
         overtimeLimitHours,
         nonWorkingDays,
       });
@@ -270,6 +287,21 @@
             <label for="teamName">Nombre del equipo</label>
             <input id="teamName" bind:value={teamName} disabled={!canEditSettings} />
           </div>
+        </div>
+        <div class="profile-fields settings-field">
+          <label for="teamCurrency">Moneda del equipo</label>
+          <select
+            id="teamCurrency"
+            bind:value={teamCurrency}
+            disabled={!canEditSettings}
+          >
+            {#each currencyOptions as currency}
+              <option value={currency.code}>{currency.code} - {currency.label}</option>
+            {/each}
+          </select>
+          <p class="field-help">
+            Se usará para pagos, presupuestos, ubicaciones, inventario y estadísticas del equipo.
+          </p>
         </div>
         <div class="profile-fields settings-field">
           <label for="overtimeLimitHours">Límite de horas extra</label>
@@ -606,7 +638,8 @@
     color: var(--text-primary);
   }
 
-  input {
+  input,
+  select {
     width: 100%;
     box-sizing: border-box;
     border: 1px solid var(--border-color);

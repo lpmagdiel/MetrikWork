@@ -1,12 +1,12 @@
 <script>
   import { CircleDollarSign, Edit2, Hash, ImageOff, MapPin, TriangleAlert } from "lucide-svelte";
 
-  const { product, isEditable, onEdit, onReport } = $props();
+  const { product, currency = "MXN", isEditable, onEdit, onReport } = $props();
 
   function formatPrice(value) {
     return new Intl.NumberFormat("es-MX", {
       style: "currency",
-      currency: "MXN",
+      currency,
       maximumFractionDigits: 2,
     }).format(Number(value) || 0);
   }

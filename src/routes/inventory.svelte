@@ -356,8 +356,8 @@
   function formatCurrency(amount) {
     return new Intl.NumberFormat("es-MX", {
       style: "currency",
-      currency: "MXN",
-    }).format(amount);
+      currency: team?.projectBudgetCurrency || "MXN",
+    }).format(Number(amount) || 0);
   }
 </script>
 
@@ -429,6 +429,7 @@
         {#each filteredItems as item (item.id)}
           <Product
             product={{ ...item, locationName: getProductLocationName(item) }}
+            currency={team?.projectBudgetCurrency || "MXN"}
             isEditable={canEditInventory}
             onEdit={(product) => openModal(product)}
             onReport={(product) => openReportModal(product)}

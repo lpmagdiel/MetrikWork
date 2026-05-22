@@ -137,7 +137,10 @@
     }
 
     function formatMoney(amount) {
-        return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'USD' }).format(amount);
+        return new Intl.NumberFormat('es-ES', {
+            style: 'currency',
+            currency: team?.projectBudgetCurrency || 'MXN',
+        }).format(Number(amount) || 0);
     }
 
     function formatDate(value) {
