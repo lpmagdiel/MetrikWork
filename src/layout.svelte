@@ -60,6 +60,7 @@
   import TeamPayments from "./routes/team-payments.svelte";
   import TeamSettings from "./routes/team-settings.svelte";
   import TeamStats from "./routes/team-stats.svelte";
+  import TeamLocations from "./routes/team-locations.svelte";
   import UserStats from "./routes/user-stats.svelte";
   import Pay from "./routes/pay.svelte";
   import Timer from "./routes/Timer.svelte";
@@ -104,6 +105,7 @@
         else if (subpage === "stats") component = TeamStats;
         else if (subpage === "my-stats") component = UserStats;
         else if (subpage === "planning") component = Planning;
+        else if (subpage === "locations") component = TeamLocations;
         return { component, teamId };
       }
 
