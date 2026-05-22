@@ -11,11 +11,13 @@
   import LoadingSpinner from "../components/LoadingSpinner.svelte";
   import Toast from "../components/Toast.svelte";
   import TitleHeader from "../components/TitleHeader.svelte";
+  import { getUserTeamPayments } from "../data/teamPayments.js";
   import { navigateTo } from "../router.js";
   import { getUserTeamWorks, selectedTeam, selectedTeamId, userStore } from "../data/stores.js";
 
   let team = $derived($selectedTeam);
   let works = $state([]);
+  let payments = $state([]);
   let isLoading = $state(false);
   let period = $state("month");
   let startDate = $state(getMonthStart());
@@ -52,14 +54,16 @@
     userWorks.filter((work) => work.date && work.date >= range.start && work.date <= range.end),
   );
 
+  let filteredPayments = $derived.by(() =>
+    payments.filter((payment) => dateInRange(payment.date || payment.createdAt, range)),
+  );
+
   let stats = $derived.by(() => {
     let fullDays = 0;
     let halfDays = 0;
     let overtimeEntries = 0;
     let overtimeHours = 0;
     let notesCount = 0;
-    let paidCount = 0;
-    let unpaidCount = 0;
     const activeDates = new Set();
 
     filteredWorks.forEach((work) => {
@@ -70,14 +74,17 @@
         overtimeHours += Number(work.overtimeHours) || 0;
       }
       if (work.note) notesCount += 1;
-      if (work.paid) paidCount += 1;
-      else unpaidCount += 1;
       activeDates.add(work.date);
     });
 
     const totalWorkDays = fullDays + halfDays / 2;
     const estimatedEarnings =
       fullDays * dailyRate + halfDays * (dailyRate / 2) + overtimeHours * extraHourRate;
+    const totalPaid = filteredPayments.reduce(
+      (sum, payment) => sum + (Number(payment.amount) || 0),
+      0,
+    );
+    const pendingAmount = Math.max(estimatedEarnings - totalPaid, 0);
 
     return {
       fullDays,
@@ -85,12 +92,13 @@
       overtimeEntries,
       overtimeHours,
       notesCount,
-      paidCount,
-      unpaidCount,
       activeDates: activeDates.size,
       totalEntries: filteredWorks.length,
       totalWorkDays,
       estimatedEarnings,
+      totalPaid,
+      pendingAmount,
+      paymentCount: filteredPayments.length,
       averagePerActiveDay: activeDates.size ? estimatedEarnings / activeDates.size : 0,
     };
   });
@@ -123,7 +131,12 @@
   async function loadWorks() {
     isLoading = true;
     try {
-      works = await getUserTeamWorks(team.id, $userStore.uid);
+      const [loadedWorks, loadedPayments] = await Promise.all([
+        getUserTeamWorks(team.id, $userStore.uid),
+        getUserTeamPayments(team.id, $userStore.uid),
+      ]);
+      works = loadedWorks;
+      payments = loadedPayments;
     } catch (error) {
       console.error("Error loading user stats:", error);
       showNotification("Error al cargar estadísticas", "error");
@@ -164,7 +177,7 @@
 
   function formatDate(dateString) {
     if (!dateString) return "";
-    const [year, month, day] = dateString.split("-").map(Number);
+    const [year, month, day] = dateString.slice(0, 10).split("-").map(Number);
     return new Date(year, month - 1, day).toLocaleDateString("es-ES", {
       day: "2-digit",
       month: "short",
@@ -193,11 +206,20 @@
     return base + (Number(work.overtimeHours) || 0) * extraHourRate;
   }
 
+  function dateInRange(value, currentRange) {
+    const date = String(value || "").slice(0, 10);
+    return Boolean(date && date >= currentRange.start && date <= currentRange.end);
+  }
+
   function workTypeLabel(work) {
     if (work.type === "full-day") return "Jornada completa";
     if (work.type === "half-day") return "Media jornada";
     if (work.type === "overtime") return "Horas extra";
     return "Jornada";
+  }
+
+  function paymentTypeLabel(payment) {
+    return payment.type === "total" ? "Pago total recibido" : "Pago parcial recibido";
   }
 
   function goToTeamHome() {
@@ -220,8 +242,8 @@
     <main class="stats-content">
       <section class="summary-band">
         <div>
-          <p>Ingresos estimados</p>
-          <strong>{formatMoney(stats.estimatedEarnings)}</strong>
+          <p>Pendiente por cobrar</p>
+          <strong>{formatMoney(stats.pendingAmount)}</strong>
           <span>{formatDate(range.start)} - {formatDate(range.end)}</span>
         </div>
         <div class="summary-icon">
@@ -261,7 +283,7 @@
         <section class="metrics-grid">
           <article class="metric-card">
             <div class="metric-icon earnings"><DollarSign size={20} /></div>
-            <span>Ingresos</span>
+            <span>Generado</span>
             <strong>{formatMoney(stats.estimatedEarnings)}</strong>
             <small>{formatMoney(stats.averagePerActiveDay)} por día activo</small>
           </article>
@@ -282,9 +304,16 @@
 
           <article class="metric-card">
             <div class="metric-icon paid"><WalletCards size={20} /></div>
+            <span>Pagado</span>
+            <strong>{formatMoney(stats.totalPaid)}</strong>
+            <small>{stats.paymentCount} pagos registrados</small>
+          </article>
+
+          <article class="metric-card">
+            <div class="metric-icon pending"><WalletCards size={20} /></div>
             <span>Pendiente</span>
-            <strong>{stats.unpaidCount}</strong>
-            <small>{stats.paidCount} registros pagados</small>
+            <strong>{formatMoney(stats.pendingAmount)}</strong>
+            <small>después de pagos registrados</small>
           </article>
         </section>
 
@@ -351,6 +380,10 @@
               <span>registros</span>
             </div>
             <div>
+              <strong>{stats.paymentCount}</strong>
+              <span>pagos</span>
+            </div>
+            <div>
               <strong>{stats.activeDates}</strong>
               <span>días activos</span>
             </div>
@@ -359,6 +392,23 @@
               <span>con nota</span>
             </div>
           </div>
+
+          {#if filteredPayments.length > 0}
+            <div class="records-list payments-list">
+              {#each filteredPayments.slice(0, 5) as payment (payment.id)}
+                <article class="record-item payment-record">
+                  <div>
+                    <h3>{paymentTypeLabel(payment)}</h3>
+                    <p>{formatDate(payment.date || payment.createdAt)}</p>
+                    {#if payment.registeredByName}
+                      <small>Registrado por {payment.registeredByName}</small>
+                    {/if}
+                  </div>
+                  <strong>{formatMoney(payment.amount)}</strong>
+                </article>
+              {/each}
+            </div>
+          {/if}
 
           {#if filteredWorks.length > 0}
             <div class="records-list">
@@ -579,6 +629,11 @@
     color: var(--purple-color);
   }
 
+  .metric-icon.pending {
+    background: var(--bg-danger-subtle);
+    color: var(--danger-color);
+  }
+
   .panel-heading {
     display: flex;
     align-items: center;
@@ -699,6 +754,15 @@
     border: 1px solid var(--border-color);
     border-radius: 12px;
     padding: 12px;
+  }
+
+  .payments-list {
+    margin-bottom: 12px;
+  }
+
+  .payment-record {
+    border-color: color-mix(in srgb, var(--success-color) 28%, var(--border-color));
+    background: var(--bg-success-subtle);
   }
 
   .record-item h3 {

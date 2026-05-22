@@ -230,8 +230,12 @@ service cloud.firestore {
 
     // --- PAGOS DEL EQUIPO (Team Payments) ---
     match /team_payments/{paymentId} {
-      allow read: if hasTeamPermission(resource.data.teamId, "payments", "view") ||
-                   hasTeamPermission(resource.data.teamId, "stats", "view");
+      allow read: if request.auth != null &&
+                  (
+                    request.auth.uid == resource.data.userId ||
+                    hasTeamPermission(resource.data.teamId, "payments", "view") ||
+                    hasTeamPermission(resource.data.teamId, "stats", "view")
+                  );
       allow create: if hasTeamPermission(request.resource.data.teamId, "payments", "create");
       allow update: if hasTeamPermission(resource.data.teamId, "payments", "edit");
       allow delete: if hasTeamPermission(resource.data.teamId, "payments", "delete");

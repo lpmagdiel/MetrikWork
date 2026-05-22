@@ -101,3 +101,18 @@ export async function registerTeamPayment(teamId, userId, amount, type, register
         throw error;
     }
 }
+
+export async function getUserTeamPayments(teamId, userId) {
+    if (!teamId || !userId) return [];
+
+    const paymentsQuery = query(
+        collection(db, 'team_payments'),
+        where('teamId', '==', teamId),
+        where('userId', '==', userId)
+    );
+    const paymentsSnapshot = await getDocs(paymentsQuery);
+    const payments = [];
+    paymentsSnapshot.forEach(doc => payments.push({ id: doc.id, ...doc.data() }));
+
+    return payments.sort((a, b) => (b.date || b.createdAt || '').localeCompare(a.date || a.createdAt || ''));
+}

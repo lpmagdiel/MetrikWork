@@ -10,6 +10,7 @@ export * from './chat.js';
 export * from './presence.js';
 export * from './works.js';
 export * from './teamStats.js';
+export * from './teamPayments.js';
 export * from './workLimits.js';
 export * from './permissions.js';
 export { auth, db, googleProvider } from './firebase.js';
