@@ -657,31 +657,7 @@
     justify-content: space-between;
     align-items: center;
   }
-  .back-btn {
-    background: var(--bg-card);
-    border: none;
-    width: 44px;
-    height: 44px;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: var(--shadow-card);
-    cursor: pointer;
-    color: var(--text-primary);
-  }
-  .title-group {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
 
-  h1 {
-    font-size: 24px;
-    font-weight: 700;
-    margin: 0;
-    color: var(--text-primary);
-  }
 
 
   .inventory-resum-container {
@@ -779,61 +755,6 @@
 
   .inventory-type-card.active .type-meta {
     background: var(--bg-card);
-    color: var(--text-primary);
-  }
-
-  .fab {
-    position: fixed;
-    bottom: var(--floating-action-bottom);
-    right: 24px;
-    width: 60px;
-    height: 60px;
-    background: var(--accent-strong);
-    color: #ffffff;
-    border: none;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    z-index: 80;
-  }
-
-  .fab:active {
-    transform: scale(0.9);
-  }
-
-  .fab:disabled {
-    opacity: 0.65;
-    cursor: not-allowed;
-  }
-  .stat-card {
-    flex: 1;
-    min-width: 0;
-    background: var(--bg-card);
-    padding: 20px;
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-card);
-    border-left: 4px solid var(--accent-color);
-  }
-
-  .stat-card.warning {
-    border-left-color: var(--warning-color);
-  }
-
-  .stat-card h3 {
-    margin: 0 0 8px 0;
-    font-size: 14px;
-    color: var(--text-secondary);
-    font-weight: 500;
-  }
-
-  .stat-value {
-    margin: 0;
-    font-size: 22px;
-    font-weight: 700;
     color: var(--text-primary);
   }
 

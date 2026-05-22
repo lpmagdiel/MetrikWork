@@ -217,25 +217,7 @@
     padding: calc(var(--page-top-safe) + 14px) 18px var(--bottom-nav-clearance);
   }
 
-  header {
-    display: grid;
-    grid-template-columns: 40px 1fr 40px;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 18px;
-  }
 
-  .title-block {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-  }
-
-  h1 {
-    font-size: 22px;
-    line-height: 1.2;
-  }
 
   button {
     border: 0;
@@ -243,7 +225,6 @@
   }
 
   .icon-btn,
-  .add-btn,
   .delete-btn {
     display: flex;
     align-items: center;
@@ -256,10 +237,7 @@
     box-shadow: var(--shadow-card);
   }
 
-  .add-btn {
-    background: var(--accent-strong);
-    color: var(--bg-card);
-  }
+
 
   .locations-content {
     display: flex;

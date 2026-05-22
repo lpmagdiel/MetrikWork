@@ -608,7 +608,6 @@
     flex-shrink: 0;
   }
 
-  .back-btn,
   .icon-btn {
     background: var(--bg-card);
     border: none;
@@ -624,19 +623,6 @@
     flex-shrink: 0;
   }
 
-  .header-title {
-    flex: 1;
-    min-width: 0;
-  }
-
-  h1 {
-    margin: 0;
-    font-size: 22px;
-    font-weight: 800;
-    color: var(--text-primary);
-  }
-
-  .header-title span,
   .section-heading p,
   label span {
     color: var(--text-secondary);

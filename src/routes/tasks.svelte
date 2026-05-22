@@ -435,69 +435,7 @@
     padding-top: var(--page-top-safe);
   }
 
-  /* Header */
-  header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 24px 20px 16px;
-    flex-shrink: 0;
-  }
 
-  .back-btn {
-    background: var(--bg-card);
-    border: none;
-    width: 44px;
-    height: 44px;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: var(--shadow-card);
-    cursor: pointer;
-    color: var(--text-primary);
-    flex-shrink: 0;
-  }
-
-  .header-title {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  h1 {
-    margin: 0;
-    font-size: 22px;
-    font-weight: 800;
-    color: var(--text-primary);
-  }
-
-  .tasks-total {
-    background: var(--bg-purple-subtle);
-    color: var(--text-primary);
-    font-size: 12px;
-    font-weight: 700;
-    padding: 2px 8px;
-    border-radius: 100px;
-  }
-
-  /* Team badge */
-  .team-badge {
-    margin: 0 20px 16px;
-    display: inline-flex;
-    align-self: flex-start;
-    background: var(--bg-card);
-    border-radius: 100px;
-    padding: 4px 14px;
-    box-shadow: var(--shadow-card);
-  }
-
-  .team-badge span {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-secondary);
-  }
 
   /* Filter pills */
   .filter-scroll {

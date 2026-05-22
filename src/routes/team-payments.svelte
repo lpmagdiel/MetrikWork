@@ -792,37 +792,7 @@
         margin-bottom: 24px;
     }
 
-    .back-btn {
-        background: var(--bg-card);
-        border: 1px solid var(--border-color);
-        width: 44px;
-        height: 44px;
-        border-radius: var(--radius-sm);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        box-shadow: var(--shadow-card);
-        cursor: pointer;
-        color: var(--text-primary);
-        transition: all 0.2s ease;
-    }
-    
-    .back-btn:hover {
-        transform: translateY(-2px);
-        border-color: var(--accent-color);
-    }
 
-    .header-text h1 {
-        margin: 0;
-        font-size: 24px;
-        font-weight: 700;
-    }
-
-    .subtitle {
-        margin: 4px 0 0;
-        font-size: 14px;
-        color: var(--text-secondary);
-    }
 
     .content {
         flex: 1;
@@ -1401,9 +1371,7 @@
             margin-bottom: 16px;
         }
 
-        .header-text h1 {
-            font-size: 21px;
-        }
+
 
         .content {
             gap: 14px;

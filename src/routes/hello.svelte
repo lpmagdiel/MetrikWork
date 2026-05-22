@@ -351,23 +351,7 @@
     background: #ffffff;
   }
 
-  .login-option.google.google-disabled {
-    background: #e5e7eb;
-    border-color: rgba(0, 0, 0, 0.12);
-    opacity: 0.75;
-    cursor: pointer;
-  }
 
-  .login-option.google.google-disabled:hover {
-    transform: none;
-    box-shadow: none;
-    border-color: rgba(0, 0, 0, 0.12);
-  }
-
-  .login-option.google.google-disabled img {
-    filter: grayscale(1);
-    opacity: 0.65;
-  }
 
   .mail-form {
     display: grid;

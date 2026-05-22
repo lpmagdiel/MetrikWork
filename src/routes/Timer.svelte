@@ -658,22 +658,9 @@
     flex-shrink: 0;
   }
 
-  h1,
   h2,
   p {
     margin: 0;
-  }
-
-  h1 {
-    font-size: 22px;
-    font-weight: 800;
-  }
-
-  .header-title {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
   }
 
   .status-pill {

@@ -273,12 +273,6 @@
     margin-bottom: 24px;
   }
 
-  h1 {
-    margin: 0;
-    font-size: 32px;
-    font-weight: 700;
-    color: var(--text-primary);
-  }
 
   .content {
     display: flex;

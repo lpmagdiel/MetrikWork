@@ -405,19 +405,6 @@
     flex-shrink: 0;
   }
 
-  h1 {
-    margin: 0;
-    font-size: 28px;
-    font-weight: 700;
-  }
-
-  .header-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 16px;
-  }
-
   .search-bar {
     background: var(--bg-card);
     border-radius: 12px;
@@ -574,28 +561,7 @@
     font-weight: 500;
   }
 
-  .fab {
-    position: absolute;
-    bottom: var(--floating-action-bottom);
-    right: 24px;
-    width: 60px;
-    height: 60px;
-    background: linear-gradient(135deg, #333 0%, #000 100%);
-    border-radius: 50%;
-    color: white;
-    border: none;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    z-index: 10;
-    transition: transform 0.2s;
-  }
 
-  .fab:active {
-    transform: scale(0.9);
-  }
 
   .add-menu {
     padding: 20px;

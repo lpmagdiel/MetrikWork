@@ -1020,33 +1020,7 @@
     padding-top: var(--page-top-safe);
   }
 
-  header {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 24px 20px 16px;
-    z-index: 10;
-  }
-  .back-btn {
-    background: var(--bg-card);
-    border: none;
-    width: 44px;
-    height: 44px;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: var(--shadow-card);
-    cursor: pointer;
-    color: var(--text-primary);
-  }
 
-  h1 {
-    margin: 0;
-    font-size: 22px;
-    font-weight: 800;
-    color: var(--text-primary);
-  }
 
   .chat-switcher {
     display: grid;

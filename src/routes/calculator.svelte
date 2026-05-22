@@ -188,38 +188,6 @@
     margin-bottom: 4px;
   }
 
-  .title-group {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  h1 {
-    font-size: 22px;
-    font-weight: 800;
-    color: var(--text-primary);
-    margin: 0;
-  }
-
-  .reset-btn {
-    background: var(--bg-card);
-    border: none;
-    border-radius: 12px;
-    width: 44px;
-    height: 44px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-primary);
-    cursor: pointer;
-    box-shadow: var(--shadow-card);
-    transition: all 0.2s;
-  }
-
-  .reset-btn:hover {
-    color: var(--accent-ink);
-    background: var(--accent-color);
-  }
 
   /* Rate card */
   .rate-card {

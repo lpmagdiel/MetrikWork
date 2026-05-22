@@ -121,13 +121,7 @@
     margin-bottom: 24px;
   }
 
-  h1 {
-    margin-top: 0;
-    margin-bottom: 16px;
-    font-size: 28px;
-    font-weight: 700;
-    color: var(--text-primary);
-  }
+
 
   .search-container {
     position: relative;

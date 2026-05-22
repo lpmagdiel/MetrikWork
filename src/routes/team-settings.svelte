@@ -473,32 +473,10 @@
     margin-bottom: 22px;
   }
 
-  .back-btn {
-    width: 44px;
-    height: 44px;
-    border: none;
-    border-radius: var(--radius-sm);
-    background: var(--bg-card);
-    color: var(--text-primary);
-    box-shadow: var(--shadow-card);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
 
-  .header-title {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
 
-  h1, h2, h3, p {
+  h2, h3, p {
     margin: 0;
-  }
-
-  h1 {
-    font-size: 22px;
-    font-weight: 800;
   }
 
   h2 {

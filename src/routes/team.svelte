@@ -1244,32 +1244,6 @@
     margin-bottom: 24px;
   }
 
-  .back-btn {
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    width: 44px;
-    height: 44px;
-    border-radius: var(--radius-sm);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: var(--shadow-card);
-    cursor: pointer;
-    color: var(--text-primary);
-    transition: all 0.2s ease;
-  }
-
-  .back-btn:hover {
-    transform: translateY(-2px);
-    border-color: var(--accent-color);
-  }
-
-  h1 {
-    margin: 0;
-    font-size: 24px;
-    font-weight: 700;
-  }
-
   .content {
     flex: 1;
     overflow-y: auto;
@@ -1916,29 +1890,6 @@
   .save-settings-btn:disabled {
     opacity: 0.7;
     cursor: not-allowed;
-  }
-
-  .delete-team-btn {
-    width: 100%;
-    padding: 16px;
-    background: var(--bg-danger-subtle);
-    color: var(--danger-color);
-    border: 1px solid rgba(239, 68, 68, 0.2);
-    border-radius: var(--radius-sm);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    font-size: 16px;
-    font-weight: 600;
-    cursor: pointer;
-    margin-top: 16px;
-    transition: all 0.2s ease;
-  }
-
-  .delete-team-btn:hover {
-    background: var(--danger-color);
-    color: #ffffff;
   }
 
   .empty-state {
