@@ -77,6 +77,19 @@ function getMessagePreview(messageData) {
     return 'Nuevo mensaje';
 }
 
+function getPrivateChatUrl(teamId, memberId, callId = '') {
+    if (!teamId || !memberId) return teamId ? `/teams/${encodeURIComponent(teamId)}/chat` : '/teams';
+
+    const params = new URLSearchParams({
+        mode: 'private',
+        member: memberId
+    });
+
+    if (callId) params.set('call', callId);
+
+    return `/teams/${encodeURIComponent(teamId)}/chat?${params.toString()}`;
+}
+
 async function notifyTeamMembersAboutMessage(teamId, messageId, messageData) {
     try {
         const teamSnapshot = await getDoc(doc(db, 'teams', teamId));
@@ -235,10 +248,12 @@ export async function sendPrivateMessage(chatId, content, user, recipient, image
         });
 
         createNotification(recipient.id, user.name || 'Mensaje privado', getMessagePreview(messageData), {
-            url: teamId ? `/teams/${teamId}/chat` : '/teams',
+            url: getPrivateChatUrl(teamId, user.uid),
             type: 'private_chat_message',
             sourceId: docRef.id,
             chatId,
+            teamId,
+            memberId: user.uid,
             showInForeground: false
         }).catch((error) => {
             console.warn('Private chat notification failed:', error);
@@ -266,10 +281,13 @@ export async function createPrivateCall(chatId, teamId, caller, receiver) {
     });
 
     createNotification(receiver.id, 'Llamada entrante', `${caller.name || caller.email || 'Alguien'} te está llamando`, {
-        url: `/teams/${teamId}/chat`,
+        url: getPrivateChatUrl(teamId, caller.uid, callRef.id),
         type: 'private_call',
         sourceId: callRef.id,
         chatId,
+        teamId,
+        memberId: caller.uid,
+        callId: callRef.id,
         showInForeground: true
     }).catch((error) => {
         console.warn('Private call notification failed:', error);

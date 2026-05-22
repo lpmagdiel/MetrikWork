@@ -73,7 +73,7 @@ export function subscribeToNotifications(uid) {
 
 function getOptionalNotificationFields(options = {}) {
     const fields = {};
-    ['url', 'type', 'sourceId', 'teamId'].forEach((key) => {
+    ['url', 'type', 'sourceId', 'teamId', 'chatId', 'memberId', 'callId'].forEach((key) => {
         if (typeof options[key] === 'string' && options[key].trim()) {
             fields[key] = options[key].trim();
         }
