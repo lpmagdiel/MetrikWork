@@ -4,6 +4,7 @@
   import { onDestroy } from "svelte";
   import {
     BarChart3,
+    Crosshair,
     Image as ImageIcon,
     MapPinned,
     Mic,
@@ -48,6 +49,7 @@
   import { get } from "svelte/store";
   import { currentPath, navigateTo } from "../router.js";
   import { uploader, resizer } from "../data/fileHelper.js";
+  import { getCurrentGpsPosition } from "../data/geolocation.js";
   import SliceContainer from "../components/SliceContainer.svelte";
   import LocationBox from "../components/LocationBox.svelte";
   import { showErrorAlert } from "../data/alerts.js";
@@ -75,6 +77,8 @@
   let previewUrl = $state("");
   let isUploading = $state(false);
   let isSendingPoll = $state(false);
+  let isSendingLocation = $state(false);
+  let isGettingCurrentLocation = $state(false);
   let pollQuestion = $state("");
   let pollOptions = $state(["", ""]);
   let isLoadingOlder = $state(false);
@@ -286,7 +290,6 @@
   }
 
   function openLocationPicker() {
-    if (chatMode === "private") return;
     showAttachMenu = false;
     showLocationSlice = true;
   }
@@ -423,25 +426,73 @@
     }
   }
 
-  async function handleSendLocation(location) {
-    if (chatMode === "private") return;
+  function normalizeChatLocation(location) {
+    return {
+      id: location.id || "",
+      name: location.name || "Ubicación",
+      description: location.description || "",
+      gps: location.gps || null,
+    };
+  }
+
+  async function sendChatLocation(location) {
     if (!teamId || !$userStore || !location) return;
 
+    if (chatMode === "private") {
+      if (!selectedMember) return;
+      const chatId = privateChatId || await getOrCreatePrivateChat(teamId, $userStore, selectedMember);
+      privateChatId = chatId || "";
+      await sendPrivateMessage(chatId, "", $userStore, selectedMember, null, teamId, {
+        type: "SIMPLE_LOCATION",
+        location: normalizeChatLocation(location),
+      });
+      return;
+    }
+
+    await sendTeamMessage(teamId, "", $userStore, null, {
+      type: "SIMPLE_LOCATION",
+      location: normalizeChatLocation(location),
+    });
+  }
+
+  async function handleSendLocation(location) {
+    if (!teamId || !$userStore || !location) return;
+
+    isSendingLocation = true;
     try {
       shouldStickToBottom = true;
-      await sendTeamMessage(teamId, "", $userStore, null, {
-        type: "SIMPLE_LOCATION",
-        location: {
-          id: location.id,
-          name: location.name,
-          description: location.description || "",
-          gps: location.gps || null,
-        },
-      });
+      await sendChatLocation(location);
       showLocationSlice = false;
     } catch (error) {
       console.error("Error sending location", error);
       showErrorAlert("Error", "Error al enviar la ubicación");
+    } finally {
+      isSendingLocation = false;
+    }
+  }
+
+  async function handleSendCurrentLocation() {
+    if (!teamId || !$userStore || isSendingLocation) return;
+    if (chatMode === "private" && !selectedMember) return;
+
+    isSendingLocation = true;
+    isGettingCurrentLocation = true;
+    try {
+      const gps = await getCurrentGpsPosition();
+      shouldStickToBottom = true;
+      await sendChatLocation({
+        id: `current-${Date.now()}`,
+        name: "Mi ubicación actual",
+        description: "Ubicación compartida desde el dispositivo",
+        gps,
+      });
+      showLocationSlice = false;
+    } catch (error) {
+      console.error("Error sending current location", error);
+      showErrorAlert("Error", error.message || "No se pudo obtener tu ubicación actual");
+    } finally {
+      isGettingCurrentLocation = false;
+      isSendingLocation = false;
     }
   }
 
@@ -791,11 +842,9 @@
     <div class="attach-wrapper">
       {#if showAttachMenu}
         <div class="attach-menu">
-          {#if chatMode === "team"}
-            <button type="button" onclick={openLocationPicker} title="Enviar ubicación">
-              <MapPinned size={20} />
-            </button>
-          {/if}
+          <button type="button" onclick={openLocationPicker} title="Enviar ubicación">
+            <MapPinned size={20} />
+          </button>
           <button type="button" onclick={openFilePicker} title="Enviar imagen">
             <ImageIcon size={20} />
           </button>
@@ -985,6 +1034,16 @@
       <h2>Enviar ubicación</h2>
     </div>
 
+    <button
+      type="button"
+      class="current-location-btn"
+      onclick={handleSendCurrentLocation}
+      disabled={isSendingLocation || (chatMode === "private" && !selectedMember)}
+    >
+      <Crosshair size={18} />
+      <span>{isGettingCurrentLocation ? "Obteniendo ubicación..." : "Enviar mi ubicación actual"}</span>
+    </button>
+
     {#if $locationsStore.length === 0}
       <div class="location-empty">
         <p>No tienes ubicaciones guardadas.</p>
@@ -999,7 +1058,11 @@
               name={location.name}
               description={location.description || "Sin descripción"}
             />
-            <button class="send-location-btn" onclick={() => handleSendLocation(location)}>
+            <button
+              class="send-location-btn"
+              onclick={() => handleSendLocation(location)}
+              disabled={isSendingLocation}
+            >
               <Send size={16} />
               Enviar
             </button>
@@ -1481,6 +1544,28 @@
   .location-picker-header h2 {
     font-size: 20px;
     line-height: 1.2;
+  }
+
+  .current-location-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 44px;
+    width: 100%;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: var(--accent-strong);
+    color: var(--bg-card);
+    font-size: 14px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+
+  .current-location-btn:disabled,
+  .send-location-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 
   .location-picker-list {

@@ -227,18 +227,22 @@ export async function getOlderPrivateMessages(chatId, oldestMessage, pageSize = 
     return sortMessages(snapshot.docs.map(normalizeMessageDoc));
 }
 
-export async function sendPrivateMessage(chatId, content, user, recipient, imageUrl = null, teamId = '') {
+export async function sendPrivateMessage(chatId, content, user, recipient, imageUrl = null, teamId = '', extraData = {}) {
     if (!chatId || !user?.uid || !recipient?.id) return;
     try {
         const messageData = {
             text: content,
             imageUrl,
-            type: imageUrl ? 'IMAGE' : 'TEXT',
+            type: extraData.type || (imageUrl ? 'IMAGE' : 'TEXT'),
             senderId: user.uid,
             senderName: user.name || user.email,
             recipientId: recipient.id,
             createdAt: new Date().toISOString()
         };
+
+        if (extraData.location) {
+            messageData.location = extraData.location;
+        }
 
         const docRef = await addDoc(collection(db, 'privateChats', chatId, 'messages'), messageData);
         await updateDoc(doc(db, 'privateChats', chatId), {

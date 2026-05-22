@@ -8,7 +8,13 @@
         description = "No hay descripción"
     } = $props();
 
-    const googleMapsUrl = $derived(`https://www.google.com/maps/search/?api=1&query=${gps.lat},${gps.lon}`);
+    const hasCoordinates = $derived(
+        Number.isFinite(Number(gps?.lat)) && Number.isFinite(Number(gps?.lon ?? gps?.lng))
+    );
+    const googleMapsUrl = $derived.by(() => {
+        if (!hasCoordinates) return "";
+        return `https://www.google.com/maps/search/?api=1&query=${gps.lat},${gps.lon ?? gps.lng}`;
+    });
 </script>
 
 <style>
@@ -73,16 +79,18 @@
 <div class="location-box">
     <LocationMap {gps} label={name} />
     <div class="location-box-info">
-        <a
-            class="location-map-button"
-            href={googleMapsUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Abrir ubicación en Google Maps"
-            title="Abrir en Google Maps"
-        >
-            <MapPinned size={18} color="#ffffff"/>
-        </a>
+        {#if hasCoordinates}
+            <a
+                class="location-map-button"
+                href={googleMapsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Abrir ubicación en Google Maps"
+                title="Abrir en Google Maps"
+            >
+                <MapPinned size={18} color="#ffffff"/>
+            </a>
+        {/if}
         <h3>{name}</h3>
         <p>{description}</p>
     </div>
