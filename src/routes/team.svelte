@@ -45,6 +45,8 @@
     hasTeamPermission,
     TEAM_PERMISSION_LABELS,
     TEAM_PERMISSION_ACTION_LABELS,
+    TEAM_PERMISSION_ROLE_TEMPLATES,
+    createRoleTemplatePermissions,
     applyWorkdayOvertimeLimit,
     exceedsOvertimeLimit,
     getOvertimeLimitHours,
@@ -95,7 +97,9 @@
   let selectedMemberEmail = $state("");
   let newMemberEmail = $state("");
   let newMemberPermissions = $state(createDefaultMemberPermissions());
+  let selectedNewMemberRole = $state("");
   let memberPermissions = $state(createDefaultMemberPermissions());
+  let selectedMemberRole = $state("");
   let dailyRate = $state(0);
   let extraHourRate = $state(0);
   let isSaving = $state(false);
@@ -285,16 +289,32 @@
     dailyRate = settings.dailyRate || 0;
     extraHourRate = settings.extraHourRate || 0;
     memberPermissions = normalizeTeamPermissions(team.memberPermissions?.[memberId]);
+    selectedMemberRole = "";
     showMemberSettings = true;
   }
 
   function resetNewMemberForm() {
     newMemberEmail = "";
     newMemberPermissions = createDefaultMemberPermissions();
+    selectedNewMemberRole = "";
   }
 
-  function togglePermission(target, module, action) {
+  function applyRoleTemplate(roleId, target) {
+    const permissions = createRoleTemplatePermissions(roleId);
+    if (target === "new") {
+      newMemberPermissions = permissions;
+      selectedNewMemberRole = roleId;
+      return;
+    }
+
+    memberPermissions = permissions;
+    selectedMemberRole = roleId;
+  }
+
+  function togglePermission(target, module, action, scope = "") {
     target[module][action] = !target[module][action];
+    if (scope === "new") selectedNewMemberRole = "";
+    if (scope === "member") selectedMemberRole = "";
   }
 
   function showNotification(msg, type = "success") {
@@ -663,6 +683,27 @@
           </div>
         </div>
 
+        <div class="role-template-section">
+          <div class="role-template-heading">
+            <h4>Plantillas de rol</h4>
+            <p>Elige una plantilla para rellenar los permisos y ajusta cualquier permiso después.</p>
+          </div>
+          <div class="role-template-grid">
+            {#each TEAM_PERMISSION_ROLE_TEMPLATES as role}
+              <button
+                type="button"
+                class="role-template-btn"
+                class:active={selectedNewMemberRole === role.id}
+                onclick={() => applyRoleTemplate(role.id, "new")}
+                title={role.description}
+              >
+                <span>{role.label}</span>
+                <small>{role.description}</small>
+              </button>
+            {/each}
+          </div>
+        </div>
+
         <div class="permissions-editor">
           <h4>Permisos del miembro</h4>
           {#each permissionModules as [module, moduleLabel]}
@@ -675,7 +716,7 @@
                       type="checkbox"
                       checked={newMemberPermissions[module][action]}
                       onchange={() =>
-                        togglePermission(newMemberPermissions, module, action)}
+                        togglePermission(newMemberPermissions, module, action, "new")}
                     />
                     <span>{actionLabel}</span>
                   </label>
@@ -740,6 +781,27 @@
         </div>
 
         {#if selectedMemberId !== team.admin}
+          <div class="role-template-section">
+            <div class="role-template-heading">
+              <h4>Plantillas de rol</h4>
+              <p>Aplicar una plantilla reemplaza los permisos marcados en este formulario.</p>
+            </div>
+            <div class="role-template-grid">
+              {#each TEAM_PERMISSION_ROLE_TEMPLATES as role}
+                <button
+                  type="button"
+                  class="role-template-btn"
+                  class:active={selectedMemberRole === role.id}
+                  onclick={() => applyRoleTemplate(role.id, "member")}
+                  title={role.description}
+                >
+                  <span>{role.label}</span>
+                  <small>{role.description}</small>
+                </button>
+              {/each}
+            </div>
+          </div>
+
           <div class="permissions-editor">
             <h4>Permisos del miembro</h4>
             {#each permissionModules as [module, moduleLabel]}
@@ -752,7 +814,7 @@
                         type="checkbox"
                         checked={memberPermissions[module][action]}
                         onchange={() =>
-                          togglePermission(memberPermissions, module, action)}
+                          togglePermission(memberPermissions, module, action, "member")}
                       />
                       <span>{actionLabel}</span>
                     </label>
@@ -1271,6 +1333,71 @@
     font-size: 16px;
     font-weight: 500;
     color: var(--text-primary);
+  }
+
+  .role-template-section {
+    margin: 6px 0 22px;
+  }
+
+  .role-template-heading {
+    margin-bottom: 10px;
+  }
+
+  .role-template-heading h4 {
+    margin: 0 0 4px;
+    font-size: 14px;
+    font-weight: 800;
+    color: var(--text-primary);
+  }
+
+  .role-template-heading p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--text-secondary);
+  }
+
+  .role-template-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .role-template-btn {
+    min-height: 86px;
+    padding: 11px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    text-align: left;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+  }
+
+  .role-template-btn:hover {
+    border-color: var(--accent-color);
+    transform: translateY(-1px);
+  }
+
+  .role-template-btn.active {
+    border-color: var(--accent-color);
+    background: var(--bg-accent-subtle);
+  }
+
+  .role-template-btn span {
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--text-primary);
+  }
+
+  .role-template-btn small {
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--text-secondary);
   }
 
   .permissions-editor {

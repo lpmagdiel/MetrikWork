@@ -27,6 +27,8 @@
     hasTeamPermission,
     TEAM_PERMISSION_LABELS,
     TEAM_PERMISSION_ACTION_LABELS,
+    TEAM_PERMISSION_ROLE_TEMPLATES,
+    createRoleTemplatePermissions,
     WEEKDAY_OPTIONS,
     normalizeNonWorkingDays,
   } from "../data/stores.js";
@@ -56,7 +58,9 @@
   let pendingPhoto = $state("");
   let newMemberEmail = $state("");
   let newMemberPermissions = $state(createDefaultMemberPermissions());
+  let selectedNewMemberRole = $state("");
   let editingPermissions = $state({});
+  let selectedMemberRoles = $state({});
   let isSavingProfile = $state(false);
   let isAddingMember = $state(false);
   let showNewMemberPermissions = $state(false);
@@ -85,10 +89,13 @@
       photoPreview = team.photoURL || "";
       pendingPhoto = "";
       const nextEditingPermissions = {};
+      const nextSelectedMemberRoles = {};
       for (const memberId of team.members || []) {
         nextEditingPermissions[memberId] = normalizeTeamPermissions(team.memberPermissions?.[memberId]);
+        nextSelectedMemberRoles[memberId] = "";
       }
       editingPermissions = nextEditingPermissions;
+      selectedMemberRoles = nextSelectedMemberRoles;
     }
   });
 
@@ -121,10 +128,25 @@
 
   function togglePermission(memberId, module, action) {
     editingPermissions[memberId][module][action] = !editingPermissions[memberId][module][action];
+    selectedMemberRoles = { ...selectedMemberRoles, [memberId]: "" };
   }
 
   function toggleNewMemberPermission(module, action) {
     newMemberPermissions[module][action] = !newMemberPermissions[module][action];
+    selectedNewMemberRole = "";
+  }
+
+  function applyNewMemberRoleTemplate(roleId) {
+    newMemberPermissions = createRoleTemplatePermissions(roleId);
+    selectedNewMemberRole = roleId;
+  }
+
+  function applyMemberRoleTemplate(memberId, roleId) {
+    editingPermissions = {
+      ...editingPermissions,
+      [memberId]: createRoleTemplatePermissions(roleId),
+    };
+    selectedMemberRoles = { ...selectedMemberRoles, [memberId]: roleId };
   }
 
   function toggleNonWorkingDay(day) {
@@ -188,6 +210,7 @@
       await addMemberByEmail(team.id, newMemberEmail.trim(), newMemberPermissions);
       newMemberEmail = "";
       newMemberPermissions = createDefaultMemberPermissions();
+      selectedNewMemberRole = "";
       showNewMemberPermissions = false;
       await showSuccessAlert("Miembro agregado", "El miembro se agregó al equipo correctamente.");
     } catch (error) {
@@ -366,6 +389,27 @@
             </button>
             {#if showNewMemberPermissions}
               <div class="permissions-editor accordion-panel">
+                <div class="role-template-section">
+                  <div class="role-template-heading">
+                    <h4>Plantillas de rol</h4>
+                    <p>Rellena los permisos de una vez y ajusta cualquier checkbox después.</p>
+                  </div>
+                  <div class="role-template-grid">
+                    {#each TEAM_PERMISSION_ROLE_TEMPLATES as role}
+                      <button
+                        type="button"
+                        class="role-template-btn"
+                        class:active={selectedNewMemberRole === role.id}
+                        onclick={() => applyNewMemberRoleTemplate(role.id)}
+                        title={role.description}
+                      >
+                        <span>{role.label}</span>
+                        <small>{role.description}</small>
+                      </button>
+                    {/each}
+                  </div>
+                </div>
+
                 {#each permissionModules as [module, moduleLabel]}
                   <div class="permission-row">
                     <span>{moduleLabel}</span>
@@ -432,6 +476,29 @@
                   </button>
                   {#if openPermissionMemberId === member.id}
                     <div class="permissions-editor compact accordion-panel">
+                      {#if canEditSettings}
+                        <div class="role-template-section">
+                          <div class="role-template-heading">
+                            <h4>Plantillas de rol</h4>
+                            <p>Aplicar una plantilla reemplaza los permisos visibles antes de guardar.</p>
+                          </div>
+                          <div class="role-template-grid">
+                            {#each TEAM_PERMISSION_ROLE_TEMPLATES as role}
+                              <button
+                                type="button"
+                                class="role-template-btn"
+                                class:active={selectedMemberRoles[member.id] === role.id}
+                                onclick={() => applyMemberRoleTemplate(member.id, role.id)}
+                                title={role.description}
+                              >
+                                <span>{role.label}</span>
+                                <small>{role.description}</small>
+                              </button>
+                            {/each}
+                          </div>
+                        </div>
+                      {/if}
+
                       {#each permissionModules as [module, moduleLabel]}
                         <div class="permission-row">
                           <span>{moduleLabel}</span>
@@ -668,6 +735,70 @@
     background: transparent;
     margin: 0;
     padding-left: 0;
+  }
+
+  .role-template-section {
+    margin: 2px 0 10px;
+  }
+
+  .role-template-heading {
+    margin-bottom: 9px;
+  }
+
+  .role-template-heading h4 {
+    margin: 0 0 4px;
+    font-size: 14px;
+    font-weight: 800;
+    color: var(--text-primary);
+  }
+
+  .role-template-heading p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--text-secondary);
+  }
+
+  .role-template-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .role-template-btn {
+    min-height: 84px;
+    padding: 11px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+  }
+
+  .role-template-btn:hover {
+    border-color: var(--accent-color);
+    transform: translateY(-1px);
+  }
+
+  .role-template-btn.active {
+    border-color: var(--accent-color);
+    background: var(--bg-accent-subtle);
+  }
+
+  .role-template-btn span {
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--text-primary);
+  }
+
+  .role-template-btn small {
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--text-secondary);
   }
 
   .permissions-editor {
