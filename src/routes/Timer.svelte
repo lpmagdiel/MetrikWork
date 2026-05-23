@@ -460,7 +460,7 @@
     </div>
   </header>
 
-  <main class="timer-layout">
+  <div class="timer-layout">
     <section class="work-panel">
       <div class="section-heading">
         <BriefcaseBusiness size={20} />
@@ -609,7 +609,7 @@
         {/if}
       </div>
     </section>
-  </main>
+  </div>
 
   {#if lastEntry}
     <section class="last-entry">
