@@ -503,7 +503,7 @@
         <div class="image-picker">
           <div class="image-preview">
             {#if formData.imageUrl}
-              <img src={optimizeCloudinary(formData.imageUrl, 200)} alt="Vista previa del producto" loading="lazy" />
+              <img src={optimizeCloudinary(formData.imageUrl, 192, { height: 192, crop: "fill" })} alt="Vista previa del producto" loading="lazy" />
             {:else}
               <ImageIcon size={28} />
             {/if}

@@ -23,7 +23,12 @@
   // Optimiza la URL de Cloudinary para pedir el tamaño exacto y el formato más eficiente
   import { optimizeCloudinary } from "../helpers/image.js";
   function getOptimizedUrl(url, targetSize) {
-    return optimizeCloudinary(url, targetSize * 2);
+    const imageSize = targetSize * 2;
+    return optimizeCloudinary(url, imageSize, {
+      height: imageSize,
+      crop: "fill",
+      gravity: "auto",
+    });
   }
 
   // Helper to determine if the avatar is a URL/DataURI or an emoji/text

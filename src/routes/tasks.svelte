@@ -527,7 +527,7 @@
               onclick={() => toggleAssignedMember(member.id)}
             >
             {#if getMemberPhoto(member)}
-            <img src={optimizeCloudinary(getMemberPhoto(member), 64)} alt={member.name} class="m-avatar" width="32" loading="lazy"/>
+            <img src={optimizeCloudinary(getMemberPhoto(member), 64, { height: 64, crop: "fill" })} alt={member.name} class="m-avatar" width="32" loading="lazy"/>
             {:else}
             <div class="m-avatar">{getMemberFallbackAvatar(member)}</div>
             {/if}

@@ -467,7 +467,7 @@
       <div class="team-header-card">
         {#if team.photoURL}
         <div class="team-icon">
-            <img src={optimizeCloudinary(team.photoURL, 150)} alt={team.name} loading="lazy" />
+            <img src={optimizeCloudinary(team.photoURL, 144, { height: 144, crop: "fill" })} alt={team.name} loading="lazy" />
           </div>
         {:else}
           <div class="team-icon">
@@ -609,7 +609,7 @@
                 <div class="member-avatar">
                   {#if getMemberPhoto(member)}
                     <img
-                      src={optimizeCloudinary(getMemberPhoto(member), 80)}
+                      src={optimizeCloudinary(getMemberPhoto(member), 80, { height: 80, crop: "fill" })}
                       alt={member?.name || member?.email}
                       width="40px"
                       height="40px"

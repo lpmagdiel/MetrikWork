@@ -814,7 +814,7 @@
                 <span class="poll-total">{getPollVotes(msg.poll).length} votos</span>
               </div>
             {:else if msg.imageUrl}
-              <img src={optimizeCloudinary(msg.imageUrl, 400)} alt="Imagen" class="chat-image" loading="lazy" />
+              <img src={optimizeCloudinary(msg.imageUrl, 640, { crop: "limit" })} alt="Imagen" class="chat-image" loading="lazy" />
             {/if}
             {#if msg.text}
               <p>{msg.text}</p>
@@ -909,7 +909,7 @@
           <div class="remote-avatar-backdrop" class:visible={showRemoteAvatar}>
             <div class="remote-avatar-ring">
               {#if remoteAvatarUrl}
-                <img src={optimizeCloudinary(remoteAvatarUrl, 150)} alt={remoteDisplayName} loading="lazy" />
+                <img src={optimizeCloudinary(remoteAvatarUrl, 276, { height: 276, crop: "fill", gravity: "auto" })} alt={remoteDisplayName} loading="lazy" />
               {:else}
                 <span>{remoteDisplayName.slice(0, 1).toUpperCase()}</span>
               {/if}
