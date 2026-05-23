@@ -3,6 +3,7 @@
     CalendarDays,
     LayoutDashboard,
     SlidersHorizontal,
+    TimerReset,
     Users,
   } from "lucide-svelte";
   import { currentPath } from "../router.js";
@@ -25,6 +26,7 @@
   const items = [
     { href: "/", label: "Inicio", icon: LayoutDashboard },
     { href: "/teams", label: "Equipos", icon: Users },
+    { href: "/timer", label: "Timer", icon: TimerReset },
     { href: "/calendar", label: "Agenda", icon: CalendarDays },
     { href: "/settings", label: "Ajustes", icon: SlidersHorizontal },
   ];
