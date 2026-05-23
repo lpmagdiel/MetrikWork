@@ -607,15 +607,26 @@
                   {getMemberPresenceLabel(member.id)}
                 </small>
               </div>
-              {#if canEditSettings}
-                <button
-                  class="member-settings-btn"
-                  onclick={() => openMemberSettings(member.id, member.email)}
-                  aria-label="Ajustes de miembro"
-                >
-                  <Settings size={18} />
-                </button>
-              {/if}
+              <div class="member-actions">
+                {#if member.id !== $userStore?.uid}
+                  <button
+                    class="member-action-btn"
+                    onclick={() => navigateTo(`/teams/${team.id}/chat?mode=private&member=${member.id}`)}
+                    aria-label="Enviar mensaje directo"
+                  >
+                    <MessageSquare size={18} />
+                  </button>
+                {/if}
+                {#if canEditSettings}
+                  <button
+                    class="member-action-btn"
+                    onclick={() => openMemberSettings(member.id, member.email)}
+                    aria-label="Ajustes de miembro"
+                  >
+                    <Settings size={18} />
+                  </button>
+                {/if}
+              </div>
             </div>
           {/each}
         </div>
@@ -1153,8 +1164,14 @@
     color: #15803d;
   }
 
-  .member-settings-btn {
+  .member-actions {
     margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .member-action-btn {
     background: none;
     border: none;
     color: var(--text-secondary);
@@ -1167,7 +1184,7 @@
     transition: all 0.2s;
   }
 
-  .member-settings-btn:hover {
+  .member-action-btn:hover {
     background: var(--bg-input);
     color: var(--accent-color);
   }
