@@ -4,6 +4,7 @@
   import { navigateTo } from "../router.js";
   import { promptAlert, showErrorAlert } from "../data/alerts.js";
   import TitleHeader from "../components/TitleHeader.svelte";
+  import { optimizeCloudinary } from "../helpers/image.js";
 
   let searchQuery = $state("");
   let isCreating = $state(false);
@@ -72,7 +73,7 @@
         <div class="team-card" onclick={() => goToTeam(team)}>
         {#if team.photoURL}
           <div class="team-icon">
-            <img src={team.photoURL} alt={team.name || team.team} />
+            <img src={optimizeCloudinary(team.photoURL, 150)} alt={team.name || team.team} loading="lazy" />
           </div>
         {:else}
         <div class="team-icon">

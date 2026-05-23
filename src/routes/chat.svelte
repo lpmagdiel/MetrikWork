@@ -54,6 +54,7 @@
   import LocationBox from "../components/LocationBox.svelte";
   import { showErrorAlert } from "../data/alerts.js";
   import TitleHeader from "../components/TitleHeader.svelte";
+  import { optimizeCloudinary } from "../helpers/image.js";
 
   let messageInput = $state("");
   let messages = $derived($chatMessagesStore);
@@ -813,7 +814,7 @@
                 <span class="poll-total">{getPollVotes(msg.poll).length} votos</span>
               </div>
             {:else if msg.imageUrl}
-              <img src={msg.imageUrl} alt="Imagen" class="chat-image" />
+              <img src={optimizeCloudinary(msg.imageUrl, 400)} alt="Imagen" class="chat-image" loading="lazy" />
             {/if}
             {#if msg.text}
               <p>{msg.text}</p>
@@ -908,7 +909,7 @@
           <div class="remote-avatar-backdrop" class:visible={showRemoteAvatar}>
             <div class="remote-avatar-ring">
               {#if remoteAvatarUrl}
-                <img src={remoteAvatarUrl} alt={remoteDisplayName} />
+                <img src={optimizeCloudinary(remoteAvatarUrl, 150)} alt={remoteDisplayName} loading="lazy" />
               {:else}
                 <span>{remoteDisplayName.slice(0, 1).toUpperCase()}</span>
               {/if}

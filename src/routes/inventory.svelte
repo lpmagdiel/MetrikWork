@@ -42,6 +42,7 @@
   import { confirmAlert, showErrorAlert, showInfoAlert, showSuccessAlert } from "../data/alerts.js";
   import CircleAddButton from "../components/CircleAddButton.svelte";
   import TitleHeader from "../components/TitleHeader.svelte";
+  import { optimizeCloudinary } from "../helpers/image.js";
 
   const CLOUDINARY_PRESET_INVENTARY =
     import.meta.env.CLOUDINARY_PRESET_INVENTARY || "MetricWorkInventary";
@@ -502,7 +503,7 @@
         <div class="image-picker">
           <div class="image-preview">
             {#if formData.imageUrl}
-              <img src={formData.imageUrl} alt="Vista previa del producto" />
+              <img src={optimizeCloudinary(formData.imageUrl, 200)} alt="Vista previa del producto" loading="lazy" />
             {:else}
               <ImageIcon size={28} />
             {/if}

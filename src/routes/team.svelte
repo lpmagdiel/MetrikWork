@@ -64,6 +64,7 @@
   import AvatarCircle from "../components/AvatarCircle.svelte";
   import { showErrorAlert, showSuccessAlert } from "../data/alerts.js";
   import TitleHeader from "../components/TitleHeader.svelte";
+  import { optimizeCloudinary } from "../helpers/image.js";
 
   let team = $derived($selectedTeam);
   let isAdmin = $derived(team?.admin === $userStore?.uid);
@@ -438,7 +439,7 @@
       <div class="team-header-card">
         {#if team.photoURL}
         <div class="team-icon">
-            <img src={team.photoURL} alt={team.name} />
+            <img src={optimizeCloudinary(team.photoURL, 150)} alt={team.name} loading="lazy" />
           </div>
         {:else}
           <div class="team-icon">
@@ -580,10 +581,11 @@
                 <div class="member-avatar">
                   {#if getMemberPhoto(member)}
                     <img
-                      src={getMemberPhoto(member)}
+                      src={optimizeCloudinary(getMemberPhoto(member), 80)}
                       alt={member?.name || member?.email}
                       width="40px"
                       height="40px"
+                      loading="lazy"
                     />
                   {:else if getMemberFallbackAvatar(member)}
                     <span>{getMemberFallbackAvatar(member)}</span>

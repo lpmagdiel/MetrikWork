@@ -34,6 +34,7 @@
   import { resizer, uploader } from "../data/fileHelper.js";
   import { confirmAlert, showErrorAlert, showSuccessAlert } from "../data/alerts.js";
   import TitleHeader from "../components/TitleHeader.svelte";
+  import { optimizeCloudinary } from "../helpers/image.js";
 
   let team = $derived($selectedTeam);
   let isAdmin = $derived(team?.admin === $userStore?.uid);
@@ -272,7 +273,7 @@
         <div class="profile-row">
           <div class="team-photo">
             {#if photoPreview}
-              <img src={photoPreview} alt={teamName} />
+              <img src={optimizeCloudinary(photoPreview, 150)} alt={teamName} loading="lazy" />
             {:else}
               <Users size={34} />
             {/if}
@@ -401,7 +402,7 @@
               <div class="member-header">
                 <div class="member-avatar">
                   {#if getMemberPhoto(member)}
-                    <img src={getMemberPhoto(member)} alt={member.name || member.email} />
+                    <img src={optimizeCloudinary(getMemberPhoto(member), 80)} alt={member.name || member.email} loading="lazy" />
                   {:else if getMemberFallbackAvatar(member)}
                     <span>{getMemberFallbackAvatar(member)}</span>
                   {:else}

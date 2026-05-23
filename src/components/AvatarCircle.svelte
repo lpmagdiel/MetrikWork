@@ -21,14 +21,9 @@
   let optimisticAvatar = $state(null);
 
   // Optimiza la URL de Cloudinary para pedir el tamaño exacto y el formato más eficiente
+  import { optimizeCloudinary } from "../helpers/image.js";
   function getOptimizedUrl(url, targetSize) {
-    if (!url || !url.includes("cloudinary.com")) return url;
-    if (url.includes("/upload/")) {
-      const parts = url.split("/upload/");
-      const transform = `f_auto,q_auto,w_${targetSize * 2},h_${targetSize * 2},c_fill,g_face`;
-      return `${parts[0]}/upload/${transform}/${parts[1]}`;
-    }
-    return url;
+    return optimizeCloudinary(url, targetSize * 2);
   }
 
   // Helper to determine if the avatar is a URL/DataURI or an emoji/text
@@ -107,6 +102,7 @@
         alt={$userStore?.name || "Usuario"}
         class="img-avatar"
         class:loading={isLoading}
+        loading="lazy"
         onload={() => (isLoading = false)}
         onerror={() => {
           isLoading = false;

@@ -33,6 +33,7 @@
     import AvatarCircle from "../components/AvatarCircle.svelte";
     import CircleAddButton from "../components/CircleAddButton.svelte";
   import TitleHeader from "../components/TitleHeader.svelte";
+  import { optimizeCloudinary } from "../helpers/image.js";
 
   let team = $derived($selectedTeam);
   let canViewTasks = $derived(hasTeamPermission(team, $userStore?.uid, "tasks", "view"));
@@ -392,7 +393,7 @@
               onclick={() => toggleAssignedMember(member.id)}
             >
             {#if getMemberPhoto(member)}
-            <img src={getMemberPhoto(member)} alt={member.name} class="m-avatar" width="32"/>
+            <img src={optimizeCloudinary(getMemberPhoto(member), 64)} alt={member.name} class="m-avatar" width="32" loading="lazy"/>
             {:else}
             <div class="m-avatar">{getMemberFallbackAvatar(member)}</div>
             {/if}

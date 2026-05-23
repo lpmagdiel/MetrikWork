@@ -1,5 +1,6 @@
 <script>
   import { CircleDollarSign, Edit2, Hash, ImageOff, MapPin, TriangleAlert } from "lucide-svelte";
+  import { optimizeCloudinary } from "../helpers/image.js";
 
   const { product, currency = "MXN", isEditable, onEdit, onReport } = $props();
 
@@ -216,7 +217,7 @@
 <div class="product">
   <div class="product-thumb">
     {#if product.imageUrl}
-      <img src={product.imageUrl} alt={product.name} />
+      <img src={optimizeCloudinary(product.imageUrl, 200)} alt={product.name} loading="lazy" />
     {:else}
       <div class="product-thumb placeholder">
         <ImageOff size={44} />
