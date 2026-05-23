@@ -244,10 +244,38 @@ export default defineConfig(({ mode }) => {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,webp}'],
           runtimeCaching: [
             {
-              urlPattern: ({ request }) => request.destination === 'image',
+              urlPattern: ({ url, request }) => (
+                request.destination === 'image' &&
+                (
+                  url.hostname === 'res.cloudinary.com' ||
+                  url.hostname.endsWith('.cloudinary.com') ||
+                  url.hostname === 'lh3.googleusercontent.com' ||
+                  url.hostname.endsWith('.googleusercontent.com')
+                )
+              ),
+              handler: 'StaleWhileRevalidate',
+              options: {
+                cacheName: 'metricwork-remote-images',
+                cacheableResponse: {
+                  statuses: [0, 200]
+                },
+                expiration: {
+                  maxEntries: 120,
+                  maxAgeSeconds: 60 * 60 * 24 * 14
+                }
+              }
+            },
+            {
+              urlPattern: ({ url, request }) => (
+                request.destination === 'image' &&
+                url.origin === self.location.origin
+              ),
               handler: 'CacheFirst',
               options: {
-                cacheName: 'metricwork-images',
+                cacheName: 'metricwork-local-images',
+                cacheableResponse: {
+                  statuses: [200]
+                },
                 expiration: {
                   maxEntries: 80,
                   maxAgeSeconds: 60 * 60 * 24 * 30

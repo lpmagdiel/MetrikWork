@@ -73,7 +73,7 @@
         <div class="team-card" onclick={() => goToTeam(team)}>
         {#if team.photoURL}
           <div class="team-icon">
-            <img src={optimizeCloudinary(team.photoURL, 112, { height: 112, crop: "fill" })} alt={team.name || team.team} loading="lazy" />
+            <img src={optimizeCloudinary(team.photoURL, 112, { height: 112, crop: "fill" })} alt={team.name || team.team} width="56" height="56" loading="eager" decoding="async" />
           </div>
         {:else}
         <div class="team-icon">

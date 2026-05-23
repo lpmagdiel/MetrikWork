@@ -107,7 +107,10 @@
         alt={$userStore?.name || "Usuario"}
         class="img-avatar"
         class:loading={isLoading}
-        loading="lazy"
+        width={size}
+        height={size}
+        loading="eager"
+        decoding="async"
         onload={() => (isLoading = false)}
         onerror={() => {
           isLoading = false;

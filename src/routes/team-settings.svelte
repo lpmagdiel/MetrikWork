@@ -320,7 +320,7 @@
         <div class="profile-row">
           <div class="team-photo">
             {#if photoPreview}
-              <img src={optimizeCloudinary(photoPreview, 152, { height: 152, crop: "fill" })} alt={teamName} loading="lazy" />
+              <img src={optimizeCloudinary(photoPreview, 152, { height: 152, crop: "fill" })} alt={teamName} width="76" height="76" loading="eager" decoding="async" />
             {:else}
               <Users size={34} />
             {/if}
@@ -506,7 +506,7 @@
               <div class="member-header">
                 <div class="member-avatar">
                   {#if getMemberPhoto(member)}
-                    <img src={optimizeCloudinary(getMemberPhoto(member), 84, { height: 84, crop: "fill" })} alt={member.name || member.email} loading="lazy" />
+                    <img src={optimizeCloudinary(getMemberPhoto(member), 84, { height: 84, crop: "fill" })} alt={member.name || member.email} width="42" height="42" loading="eager" decoding="async" />
                   {:else if getMemberFallbackAvatar(member)}
                     <span>{getMemberFallbackAvatar(member)}</span>
                   {:else}

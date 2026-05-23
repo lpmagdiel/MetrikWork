@@ -217,7 +217,7 @@
 <div class="product">
   <div class="product-thumb">
     {#if product.imageUrl}
-      <img src={optimizeCloudinary(product.imageUrl, 240, { height: 240, crop: "fill" })} alt={product.name} loading="lazy" />
+      <img src={optimizeCloudinary(product.imageUrl, 240, { height: 240, crop: "fill" })} alt={product.name} width="104" height="104" loading="eager" decoding="async" />
     {:else}
       <div class="product-thumb placeholder">
         <ImageOff size={44} />

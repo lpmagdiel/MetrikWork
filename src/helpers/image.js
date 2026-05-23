@@ -41,6 +41,17 @@ const isTransformationSegment = (segment) => (
         ))
 );
 
+const isIosStandalone = () => {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+
+    const isIos = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isStandalone = window.navigator.standalone === true ||
+        window.matchMedia?.('(display-mode: standalone)').matches;
+
+    return isIos && isStandalone;
+};
+
 export function optimizeCloudinary(url, width = 150, options = {}) {
     if (!url || typeof url !== 'string') return url;
 
@@ -66,13 +77,14 @@ export function optimizeCloudinary(url, width = 150, options = {}) {
     const targetWidth = normalizeSize(width);
     const targetHeight = normalizeSize(options.height);
     const crop = options.crop || (targetHeight ? 'fill' : 'limit');
+    const format = options.format || (isIosStandalone() ? 'jpg' : 'auto');
     const transformations = [
         targetWidth ? `w_${targetWidth}` : null,
         targetHeight ? `h_${targetHeight}` : null,
         `c_${crop}`,
         options.gravity ? `g_${options.gravity}` : null,
         'q_auto',
-        'f_auto',
+        `f_${format}`,
     ].filter(Boolean);
 
     return `${baseUrl}${transformations.join(',')}/${imagePath}`;
