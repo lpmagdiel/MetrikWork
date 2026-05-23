@@ -4,6 +4,7 @@
   import {
     userStore,
     authReady,
+    selectedTeam,
     selectedTeamId,
     settingsStore,
   } from "./data/stores.js";
@@ -21,6 +22,14 @@
   let showConnectionToast = $state(false);
   let connectionToastType = $state("info");
   let connectionToastMessage = $state("");
+
+  const teamThemeVars = [
+    "--team-primary",
+    "--accent-color",
+    "--accent-strong",
+    "--accent-ink",
+    "--bg-accent-subtle",
+  ];
 
   onMount(() => {
     let connectionCheckId = 0;
@@ -237,6 +246,42 @@
       document.documentElement.classList.remove("dark");
     }
   });
+
+  $effect(() => {
+    const root = document.documentElement;
+    const primaryColor = normalizeHexColor($selectedTeam?.themePrimaryColor);
+
+    teamThemeVars.forEach((name) => root.style.removeProperty(name));
+    if (!primaryColor) return;
+
+    root.style.setProperty("--team-primary", primaryColor);
+    root.style.setProperty("--accent-color", primaryColor);
+    root.style.setProperty("--accent-strong", primaryColor);
+    root.style.setProperty("--accent-ink", getReadableInk(primaryColor));
+    root.style.setProperty(
+      "--bg-accent-subtle",
+      `color-mix(in srgb, ${primaryColor} 18%, var(--bg-card))`,
+    );
+  });
+
+  function normalizeHexColor(value) {
+    const color = String(value || "").trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(color)) return color;
+    if (/^#[0-9a-fA-F]{3}$/.test(color)) {
+      return `#${color[1]}${color[1]}${color[2]}${color[2]}${color[3]}${color[3]}`;
+    }
+    return "";
+  }
+
+  function getReadableInk(hexColor) {
+    const hex = normalizeHexColor(hexColor).slice(1);
+    if (!hex) return "#000000";
+    const red = parseInt(hex.slice(0, 2), 16);
+    const green = parseInt(hex.slice(2, 4), 16);
+    const blue = parseInt(hex.slice(4, 6), 16);
+    const luminance = (red * 299 + green * 587 + blue * 114) / 1000;
+    return luminance > 145 ? "#000000" : "#ffffff";
+  }
 </script>
 
 <main>

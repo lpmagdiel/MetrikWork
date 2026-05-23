@@ -253,6 +253,11 @@ export async function updateTeamProfile(teamId, data) {
             updateData.photoURL = data.photoURL;
         }
 
+        if (typeof data.themePrimaryColor === 'string') {
+            const color = data.themePrimaryColor.trim();
+            updateData.themePrimaryColor = /^#[0-9a-fA-F]{6}$/.test(color) ? color : '';
+        }
+
         if (data.overtimeLimitHours !== undefined) {
             updateData.overtimeLimitHours = Math.max(0, Number(data.overtimeLimitHours) || 0);
         }

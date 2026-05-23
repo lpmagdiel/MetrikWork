@@ -717,23 +717,23 @@
   }
 
   .status-pill.warning {
-    background: var(--bg-warning-subtle);
-    color: var(--warning-color);
+    background: var(--status-pending-bg);
+    color: var(--status-pending-color);
   }
 
   .status-pill.info {
-    background: var(--bg-info-subtle);
-    color: var(--info-color);
+    background: var(--status-progress-bg);
+    color: var(--status-progress-color);
   }
 
   .status-pill.success {
-    background: var(--bg-success-subtle);
-    color: var(--success-color);
+    background: var(--status-completed-bg);
+    color: var(--status-completed-color);
   }
 
   .status-pill.muted {
-    background: var(--bg-input);
-    color: var(--text-secondary);
+    background: var(--status-unassigned-bg);
+    color: var(--status-unassigned-color);
   }
 
   .note-swipe-wrapper {

@@ -130,10 +130,10 @@
   });
 
   const statusConfig = {
-    unassigned: { label: "Sin Asignar", color: "#9e9e9e", bg: "#f5f5f5" },
-    pending: { label: "Pendiente", color: "#ff9800", bg: "#fff3e0" },
-    "in-progress": { label: "En Proceso", color: "#2196f3", bg: "#e3f2fd" },
-    completed: { label: "Completado", color: "#4caf50", bg: "#e8f5e9" },
+    unassigned: { label: "Sin Asignar", color: "var(--status-unassigned-color)", bg: "var(--status-unassigned-bg)" },
+    pending: { label: "Pendiente", color: "var(--status-pending-color)", bg: "var(--status-pending-bg)" },
+    "in-progress": { label: "En Proceso", color: "var(--status-progress-color)", bg: "var(--status-progress-bg)" },
+    completed: { label: "Completado", color: "var(--status-completed-color)", bg: "var(--status-completed-bg)" },
   };
 
   let filteredTasks = $derived(

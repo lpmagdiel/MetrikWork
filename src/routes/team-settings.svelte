@@ -4,6 +4,7 @@
     Camera,
     ChevronDown,
     Mail,
+    Palette,
     Save,
     Trash2,
     UserMinus,
@@ -54,6 +55,7 @@
   let teamCurrency = $state("MXN");
   let overtimeLimitHours = $state(0);
   let nonWorkingDays = $state([]);
+  let themePrimaryColor = $state("#a7f3d0");
   let photoPreview = $state("");
   let pendingPhoto = $state("");
   let newMemberEmail = $state("");
@@ -80,12 +82,22 @@
     { code: "GBP", label: "Libra esterlina" },
   ];
 
+  const themeColorPresets = [
+    "#a7f3d0",
+    "#60a5fa",
+    "#f59e0b",
+    "#ef4444",
+    "#8b5cf6",
+    "#14b8a6",
+  ];
+
   $effect(() => {
     if (team) {
       teamName = team.team || team.name || "";
       teamCurrency = team.projectBudgetCurrency || "MXN";
       overtimeLimitHours = Number(team.overtimeLimitHours) || 0;
       nonWorkingDays = normalizeNonWorkingDays(team.nonWorkingDays);
+      themePrimaryColor = normalizeThemeColor(team.themePrimaryColor) || "#a7f3d0";
       photoPreview = team.photoURL || "";
       pendingPhoto = "";
       const nextEditingPermissions = {};
@@ -187,6 +199,7 @@
         projectBudgetCurrency: teamCurrency,
         overtimeLimitHours,
         nonWorkingDays,
+        themePrimaryColor,
       });
       pendingPhoto = "";
       await showSuccessAlert(
@@ -275,6 +288,17 @@
   function toggleMemberPermissions(memberId) {
     openPermissionMemberId = openPermissionMemberId === memberId ? null : memberId;
   }
+
+  function normalizeThemeColor(value) {
+    const color = String(value || "").trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(color)) return color;
+    return "";
+  }
+
+  function selectThemeColor(color) {
+    if (!canEditSettings) return;
+    themePrimaryColor = normalizeThemeColor(color) || "#a7f3d0";
+  }
 </script>
 
 <div class="team-settings-page">
@@ -325,6 +349,42 @@
           </select>
           <p class="field-help">
             Se usará para pagos, presupuestos, ubicaciones, inventario y estadísticas del equipo.
+          </p>
+        </div>
+        <div class="profile-fields settings-field">
+          <label for="themePrimaryColor">Color primario del equipo</label>
+          <div class="theme-color-control">
+            <div class="input-with-icon color-input">
+              <Palette size={18} />
+              <input
+                id="themePrimaryColor"
+                type="color"
+                bind:value={themePrimaryColor}
+                disabled={!canEditSettings}
+                aria-label="Color primario del equipo"
+              />
+              <input
+                type="text"
+                bind:value={themePrimaryColor}
+                disabled={!canEditSettings}
+                aria-label="Código hexadecimal del color primario"
+              />
+            </div>
+            <div class="theme-presets" aria-label="Colores sugeridos">
+              {#each themeColorPresets as color}
+                <button
+                  type="button"
+                  class:active={themePrimaryColor.toLowerCase() === color}
+                  style={`--preset-color: ${color};`}
+                  onclick={() => selectThemeColor(color)}
+                  disabled={!canEditSettings}
+                  aria-label={`Usar color ${color}`}
+                ></button>
+              {/each}
+            </div>
+          </div>
+          <p class="field-help">
+            Personaliza botones, acentos y estados destacados de este equipo.
           </p>
         </div>
         <div class="profile-fields settings-field">
@@ -665,6 +725,50 @@
   .field-label {
     display: block;
     margin-bottom: 8px;
+  }
+
+  .theme-color-control {
+    display: grid;
+    gap: 10px;
+  }
+
+  .input-with-icon.color-input {
+    margin-bottom: 0;
+  }
+
+  .color-input input[type="color"] {
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .color-input input[type="text"] {
+    text-transform: uppercase;
+    font-weight: 800;
+  }
+
+  .theme-presets {
+    display: grid;
+    grid-template-columns: repeat(6, 34px);
+    gap: 8px;
+  }
+
+  .theme-presets button {
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    border: 2px solid var(--border-color);
+    background: var(--preset-color);
+    cursor: pointer;
+  }
+
+  .theme-presets button.active {
+    border-color: var(--text-primary);
+    box-shadow: 0 0 0 3px var(--bg-accent-subtle);
   }
 
   .weekday-grid {

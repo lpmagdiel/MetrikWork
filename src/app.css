@@ -2,6 +2,7 @@
   --page-top-safe: env(safe-area-inset-top, 0px);
   --translucend-ligth:rgba(255, 255, 255, 0.5);
   --translucend-dark:rgba(0, 0, 0, 0.5);
+  --brand-primary-default: #a7f3d0;
   --bg-page: #f9f9f9;
   --bg-card: #ffffff;
   --bg-card-raised: #ffffff;
@@ -25,6 +26,14 @@
   --warning-color: #d97706;
   --danger-color: #dc2626;
   --purple-color: #7e22ce;
+  --status-unassigned-color: var(--text-secondary);
+  --status-unassigned-bg: var(--bg-input);
+  --status-pending-color: var(--warning-color);
+  --status-pending-bg: var(--bg-warning-subtle);
+  --status-progress-color: var(--info-color);
+  --status-progress-bg: var(--bg-info-subtle);
+  --status-completed-color: var(--success-color);
+  --status-completed-bg: var(--bg-success-subtle);
   --nav-bg: #ffffff;
   --shadow-button: 0 4px 14px rgba(0, 0, 0, 0.2);
   --shadow-soft: 0 8px 30px rgba(0, 0, 0, 0.04);
@@ -59,6 +68,14 @@
   --accent-color: #a7f3d0;
   --accent-strong: #ffffff;
   --accent-ink: #000000;
+  --status-unassigned-color: var(--text-secondary);
+  --status-unassigned-bg: var(--bg-input);
+  --status-pending-color: var(--warning-color);
+  --status-pending-bg: var(--bg-warning-subtle);
+  --status-progress-color: var(--info-color);
+  --status-progress-bg: var(--bg-info-subtle);
+  --status-completed-color: var(--success-color);
+  --status-completed-bg: var(--bg-success-subtle);
   --nav-bg: #000000;
   --shadow-button: 0 4px 14px rgba(255, 255, 255, 0.08);
   --shadow-soft: 0 8px 30px rgba(0, 0, 0, 0.5);

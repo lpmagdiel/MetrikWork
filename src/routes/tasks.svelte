@@ -101,10 +101,10 @@
   });
 
   const statusConfig = {
-    unassigned: { label: "Sin Asignar", color: "var(--text-secondary)", bg: "var(--bg-input)" },
-    pending: { label: "Pendiente", color: "var(--warning-color)", bg: "var(--bg-warning-subtle)" },
-    "in-progress": { label: "En Proceso", color: "var(--info-color)", bg: "var(--bg-info-subtle)" },
-    completed: { label: "Completado", color: "var(--success-color)", bg: "var(--bg-success-subtle)" },
+    unassigned: { label: "Sin Asignar", color: "var(--status-unassigned-color)", bg: "var(--status-unassigned-bg)" },
+    pending: { label: "Pendiente", color: "var(--status-pending-color)", bg: "var(--status-pending-bg)" },
+    "in-progress": { label: "En Proceso", color: "var(--status-progress-color)", bg: "var(--status-progress-bg)" },
+    completed: { label: "Completado", color: "var(--status-completed-color)", bg: "var(--status-completed-bg)" },
   };
 
   let totalLoadedTasks = $derived($teamTasksStore.length);
