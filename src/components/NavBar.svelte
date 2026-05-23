@@ -23,30 +23,65 @@
     return path.startsWith(iconPath);
   };
 
-  const items = [
-    { href: "/", label: "Inicio", icon: LayoutDashboard },
-    { href: "/teams", label: "Equipos", icon: Users },
-    { href: "/timer", label: "Timer", icon: TimerReset },
-    { href: "/calendar", label: "Agenda", icon: CalendarDays },
-    { href: "/settings", label: "Ajustes", icon: SlidersHorizontal },
-  ];
 </script>
 
 <nav class="navbar">
   <ul>
-    {#each items as item}
-      <li>
-        <a
-          href={item.href}
-          class:active={isActive(item.href)}
-          aria-label={item.label}
-          aria-current={isActive(item.href) ? "page" : undefined}
-        >
-          <svelte:component this={item.icon} size={21} strokeWidth={2.3} />
-          <span>{item.label}</span>
-        </a>
-      </li>
-    {/each}
+    <li>
+      <a
+        href="/"
+        class:active={isActive("/")}
+        aria-label="Inicio"
+        aria-current={isActive("/") ? "page" : undefined}
+      >
+        <LayoutDashboard size={21} strokeWidth={2.3} />
+        <span>Inicio</span>
+      </a>
+    </li>
+    <li>
+      <a
+        href="/teams"
+        class:active={isActive("/teams")}
+        aria-label="Equipos"
+        aria-current={isActive("/teams") ? "page" : undefined}
+      >
+        <Users size={21} strokeWidth={2.3} />
+        <span>Equipos</span>
+      </a>
+    </li>
+    <li>
+      <a
+        href="/timer"
+        class:active={isActive("/timer")}
+        aria-label="Timer"
+        aria-current={isActive("/timer") ? "page" : undefined}
+      >
+        <TimerReset size={21} strokeWidth={2.3} />
+        <span>Timer</span>
+      </a>
+    </li>
+    <li>
+      <a
+        href="/calendar"
+        class:active={isActive("/calendar")}
+        aria-label="Agenda"
+        aria-current={isActive("/calendar") ? "page" : undefined}
+      >
+        <CalendarDays size={21} strokeWidth={2.3} />
+        <span>Agenda</span>
+      </a>
+    </li>
+    <li>
+      <a
+        href="/settings"
+        class:active={isActive("/settings")}
+        aria-label="Ajustes"
+        aria-current={isActive("/settings") ? "page" : undefined}
+      >
+        <SlidersHorizontal size={21} strokeWidth={2.3} />
+        <span>Ajustes</span>
+      </a>
+    </li>
   </ul>
 </nav>
 

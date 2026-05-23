@@ -147,7 +147,9 @@
       <LoadingSpinner show={true} overlay={false} />
     {:then routeModule}
       {@const RouteComponent = routeModule.default}
-      <RouteComponent />
+      {#key cleanPath}
+        <RouteComponent />
+      {/key}
     {:catch error}
       <section class="route-error">
         <h1>No se pudo cargar esta vista</h1>

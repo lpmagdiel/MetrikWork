@@ -1,4 +1,6 @@
 <script>
+  import { flip } from "svelte/animate";
+  import { dndzone } from "svelte-dnd-action";
   import {
     ChevronLeft,
     Plus,
@@ -43,6 +45,13 @@
   let canEditTasks = $derived(hasTeamPermission(team, $userStore?.uid, "tasks", "edit"));
   let canDeleteTasks = $derived(hasTeamPermission(team, $userStore?.uid, "tasks", "delete"));
   const taskPageSize = 20;
+  const flipDurationMs = 180;
+  const kanbanStatuses = [
+    { key: "unassigned", label: "Sin asignar", helper: "Tareas sin dueño" },
+    { key: "pending", label: "Pendiente", helper: "Por hacer" },
+    { key: "in-progress", label: "En proceso", helper: "Trabajo activo" },
+    { key: "completed", label: "Completado", helper: "Listas" },
+  ];
 
   // Members list for assignee display
   let memberList = $state([]);
@@ -64,19 +73,20 @@
   });
 
   // UI state
-  let taskFilter = $state("pending"); // pending, in-progress, completed, unassigned, all
   let showAddTask = $state(false);
   let editingTaskId = $state(null);
   let isSavingTask = $state(false);
   let messageToast = $state("");
   let typeToast = $state("");
   let showToast = $state(false);
+  let isDraggingTask = $state(false);
+  let boardTasksByStatus = $state(createEmptyBoard());
 
   $effect(() => {
     if (team?.id && canViewTasks) {
       return subscribeToTeamTasks(team.id, {
         pageSize: taskPageSize,
-        status: taskFilter,
+        status: "all",
       });
     }
     return subscribeToTeamTasks(null);
@@ -97,7 +107,32 @@
     completed: { label: "Completado", color: "var(--success-color)", bg: "var(--bg-success-subtle)" },
   };
 
-  let filteredTasks = $derived($teamTasksStore);
+  let totalLoadedTasks = $derived($teamTasksStore.length);
+
+  $effect(() => {
+    if (!isDraggingTask) {
+      boardTasksByStatus = groupTasksByStatus($teamTasksStore);
+    }
+  });
+
+  function createEmptyBoard() {
+    return kanbanStatuses.reduce((board, column) => {
+      board[column.key] = [];
+      return board;
+    }, {});
+  }
+
+  function getTaskStatus(task) {
+    return statusConfig[task?.status] ? task.status : "unassigned";
+  }
+
+  function groupTasksByStatus(tasks) {
+    const board = createEmptyBoard();
+    tasks.forEach((task) => {
+      board[getTaskStatus(task)].push(task);
+    });
+    return board;
+  }
 
   function handleTaskListScroll(event) {
     const container = event.currentTarget;
@@ -106,6 +141,41 @@
 
     if (distanceFromBottom < 180) {
       handleLoadMoreTasks();
+    }
+  }
+
+  function updateColumnItems(status, items) {
+    boardTasksByStatus = {
+      ...boardTasksByStatus,
+      [status]: items.map((task) => ({ ...task, status })),
+    };
+  }
+
+  function handleDndConsider(status, event) {
+    if (!canEditTasks) return;
+    isDraggingTask = true;
+    updateColumnItems(status, event.detail.items);
+  }
+
+  async function handleDndFinalize(status, event) {
+    if (!canEditTasks || !team?.id) return;
+
+    updateColumnItems(status, event.detail.items);
+    isDraggingTask = false;
+
+    const movedTaskId = event.detail.info?.id;
+    const movedTask = event.detail.items.find((task) => task.id === movedTaskId);
+    const originalTask = $teamTasksStore.find((task) => task.id === movedTaskId);
+
+    if (!movedTask || !originalTask || getTaskStatus(originalTask) === status) return;
+
+    try {
+      await updateTeamTask(team.id, movedTaskId, { status });
+    } catch (error) {
+      boardTasksByStatus = groupTasksByStatus($teamTasksStore);
+      messageToast = "Error al mover la tarea";
+      typeToast = "error";
+      showToast = true;
     }
   }
 
@@ -225,8 +295,7 @@
 <div class="tasks-page">
   <Toast message={messageToast} type={typeToast} show={showToast} />
 
-  <!-- Header -->
-   <TitleHeader title="Tareas" description={team?.name || "" + $teamTasksStore.length} action={() => navigateTo(getTeamHomePath())} icon={ChevronLeft} paddingHorizontal={true}/>
+  <TitleHeader title="Tareas" description={team?.name || ""} action={() => navigateTo(getTeamHomePath())} icon={ChevronLeft} paddingHorizontal={true}/>
     {#if canCreateTasks}
       <CircleAddButton onClick={openAddTask} floating={true}/>
     {/if}
@@ -237,32 +306,11 @@
       <p>No tienes permiso para ver las tareas de este equipo.</p>
     </div>
   {:else}
-    <!-- Filter pills -->
-    <div class="filter-scroll">
-      {#each Object.entries( {pending: "Pendiente", "in-progress": "En Proceso", completed: "Completado", all: "Todas", unassigned: "Sin Asignar"}, ) as [key, label]}
-        <button
-          class="filter-pill {taskFilter === key ? 'active' : ''}"
-          style={taskFilter === key && key !== "all"
-            ? `background:${statusConfig[key]?.color ?? "var(--accent-strong)"};`
-            : ""}
-          onclick={() => (taskFilter = key)}
-        >
-          {label}
-        </button>
-      {/each}
-    </div>
-
-    <!-- Task list -->
-    <div class="task-list" onscroll={handleTaskListScroll}>
-    {#if filteredTasks.length === 0}
-      <div class="empty-state">
+    {#if totalLoadedTasks === 0}
+      <div class="empty-state board-empty">
         <ClipboardList size={56} color="var(--text-muted)" />
-        <p>
-          {taskFilter !== "all"
-            ? "No hay tareas en esta categoría"
-            : "Aún no hay tareas"}
-        </p>
-        {#if taskFilter === "all" && canCreateTasks}
+        <p>Aún no hay tareas</p>
+        {#if canCreateTasks}
           <button class="empty-cta" onclick={openAddTask}>
             <Plus size={16} />
             Crear primera tarea
@@ -270,97 +318,133 @@
         {/if}
       </div>
     {:else}
-      {#each filteredTasks as task (task.id)}
-        {@const cfg = statusConfig[task.status] ?? statusConfig.unassigned}
-        <div class="task-card" style="border-left-color:{cfg.color}">
-          <!-- Top row: status + date + actions -->
-          <div class="card-top">
-            <div class="card-meta">
-              <span
-                class="status-badge"
-                style="background:{cfg.bg}; color:{cfg.color}"
-              >
-                {cfg.label}
-              </span>
-              {#if task.dueDate}
-                <span class="due-date">
-                  <CalendarDays size={12} />
-                  {formatDate(task.dueDate)}
-                </span>
-              {/if}
-            </div>
-            <div class="card-actions">
-              {#if canEditTasks}
-                <button
-                  class="action-btn"
-                  onclick={() => openEditTask(task)}
-                  aria-label="Editar"
-                >
-                  <Edit2 size={15} />
-                </button>
-              {/if}
-              {#if canDeleteTasks}
-                <button
-                  class="action-btn danger"
-                  onclick={() => handleDeleteTask(task.id)}
-                  aria-label="Eliminar"
-                >
-                  <Trash2 size={15} />
-                </button>
-              {/if}
-            </div>
-          </div>
-
-          <!-- Title + description -->
-          <h3 class="task-title">{task.title}</h3>
-          {#if task.description}
-            <p class="task-desc">{task.description}</p>
-          {/if}
-
-          <!-- Assigned members -->
-          {#if task.assignedTo?.length > 0}
-            <div class="assignees-row">
-              <UserCheck size={13} color="var(--text-secondary)" />
-              <div class="avatar-stack">
-                {#each task.assignedTo.slice(0, 5) as uid}
-                  <div class="avatar" title={getMemberName(uid)}>
-                    {getMemberInitials(uid)}
-                  </div>
-                {/each}
-                {#if task.assignedTo.length > 5}
-                  <div class="avatar more">+{task.assignedTo.length - 5}</div>
-                {/if}
+      <div class="kanban-board">
+        {#each kanbanStatuses as column}
+          {@const cfg = statusConfig[column.key] ?? statusConfig.unassigned}
+          {@const columnTasks = boardTasksByStatus[column.key] || []}
+          <section class="kanban-column" style="--column-color:{cfg.color}; --column-bg:{cfg.bg};">
+            <div class="kanban-column-header">
+              <div>
+                <h2>{column.label}</h2>
+                <span>{column.helper}</span>
               </div>
-              <span class="assignees-label">
-                {task.assignedTo.length === 1
-                  ? getMemberName(task.assignedTo[0])
-                  : `${task.assignedTo.length} asignados`}
-              </span>
+              <strong>{columnTasks.length}</strong>
             </div>
-          {/if}
 
-          <!-- Created date -->
-          {#if task.createdAt}
-            <p class="created-at">Creada {formatDate(task.createdAt)}</p>
-          {/if}
-        </div>
-      {/each}
-      {#if $teamTasksPaginationStore.isLoadingMore}
-        <div class="pagination-status">
-          <Loader size={18} />
-          <span>Cargando tareas...</span>
-        </div>
-      {:else if $teamTasksPaginationStore.hasMore}
-        <button class="load-more-btn" onclick={handleLoadMoreTasks}>
-          Cargar más
-        </button>
-      {:else if filteredTasks.length >= $teamTasksPaginationStore.pageSize}
-        <div class="pagination-status end">
-          <span>No hay más tareas</span>
-        </div>
-      {/if}
+            <div
+              class="kanban-column-list"
+              aria-label={column.label}
+              data-empty-label="Arrastra una tarea aquí"
+              use:dndzone={{
+                items: columnTasks,
+                flipDurationMs,
+                type: "team-tasks",
+                dragDisabled: !canEditTasks,
+                dropFromOthersDisabled: !canEditTasks,
+                delayTouchStart: true,
+              }}
+              onconsider={(event) => handleDndConsider(column.key, event)}
+              onfinalize={(event) => handleDndFinalize(column.key, event)}
+              onscroll={handleTaskListScroll}
+            >
+              {#each columnTasks as task (task.id)}
+                <div
+                  class="task-card"
+                  class:readonly={!canEditTasks}
+                  style="border-left-color:{cfg.color}"
+                  aria-label={task.title}
+                  animate:flip={{ duration: flipDurationMs }}
+                >
+                  <div class="card-top">
+                    <div class="card-meta">
+                      <span
+                        class="status-badge"
+                        style="background:{cfg.bg}; color:{cfg.color}"
+                      >
+                        {cfg.label}
+                      </span>
+                      {#if task.dueDate}
+                        <span class="due-date">
+                          <CalendarDays size={12} />
+                          {formatDate(task.dueDate)}
+                        </span>
+                      {/if}
+                    </div>
+                    <div class="card-actions">
+                      {#if canEditTasks}
+                        <button
+                          class="action-btn"
+                          onclick={() => openEditTask(task)}
+                          aria-label="Editar"
+                        >
+                          <Edit2 size={15} />
+                        </button>
+                      {/if}
+                      {#if canDeleteTasks}
+                        <button
+                          class="action-btn danger"
+                          onclick={() => handleDeleteTask(task.id)}
+                          aria-label="Eliminar"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      {/if}
+                    </div>
+                  </div>
+
+                  <h3 class="task-title">{task.title}</h3>
+                  {#if task.description}
+                    <p class="task-desc">{task.description}</p>
+                  {/if}
+
+                  {#if task.assignedTo?.length > 0}
+                    <div class="assignees-row">
+                      <UserCheck size={13} color="var(--text-secondary)" />
+                      <div class="avatar-stack">
+                        {#each task.assignedTo.slice(0, 5) as uid}
+                          <div class="avatar" title={getMemberName(uid)}>
+                            {getMemberInitials(uid)}
+                          </div>
+                        {/each}
+                        {#if task.assignedTo.length > 5}
+                          <div class="avatar more">+{task.assignedTo.length - 5}</div>
+                        {/if}
+                      </div>
+                      <span class="assignees-label">
+                        {task.assignedTo.length === 1
+                          ? getMemberName(task.assignedTo[0])
+                          : `${task.assignedTo.length} asignados`}
+                      </span>
+                    </div>
+                  {/if}
+
+                  {#if task.createdAt}
+                    <p class="created-at">Creada {formatDate(task.createdAt)}</p>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          </section>
+        {/each}
+      </div>
+
+      <div class="pagination-bar">
+        {#if $teamTasksPaginationStore.isLoadingMore}
+          <div class="pagination-status">
+            <Loader size={18} />
+            <span>Cargando tareas...</span>
+          </div>
+        {:else if $teamTasksPaginationStore.hasMore}
+          <button class="load-more-btn" onclick={handleLoadMoreTasks}>
+            Cargar más
+          </button>
+        {:else if totalLoadedTasks >= $teamTasksPaginationStore.pageSize}
+          <div class="pagination-status end">
+            <span>No hay más tareas</span>
+          </div>
+        {/if}
+      </div>
     {/if}
-    </div>
   {/if}
 </div>
 
@@ -477,62 +561,121 @@
 
 
 
-  /* Filter pills */
-  .filter-scroll {
-    display: flex;
-    gap: 8px;
-    overflow-x: auto;
-    padding: 0 20px 16px;
-    scrollbar-width: none;
-    flex-shrink: 0;
-  }
-
-  .filter-scroll::-webkit-scrollbar {
-    display: none;
-  }
-
-  .filter-pill {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    padding: 8px 14px;
-    border-radius: 100px;
-    border: none;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    background: var(--bg-input);
-    color: var(--text-secondary);
-    transition: all 0.2s;
-  }
-
-  .filter-pill.active {
-    color: var(--bg-card);
-    background: var(--accent-strong);
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.15);
-  }
-
-  /* Task list */
-  .task-list {
+  .kanban-board {
     flex: 1;
-    overflow-y: auto;
-    padding: 0 20px var(--bottom-nav-clearance);
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(280px, 1fr);
+    gap: 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 20px 12px;
+    scrollbar-width: thin;
+  }
+
+  .kanban-column {
+    min-width: 0;
+    height: 100%;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    border-top: 4px solid var(--column-color);
+    border-radius: 8px;
+    background: var(--bg-card);
+    box-shadow: var(--shadow-card);
+  }
+
+  .kanban-column-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     gap: 12px;
+    padding: 14px 14px 12px;
+    background: var(--column-bg);
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .kanban-column-header h2 {
+    margin: 0 0 2px;
+    font-size: 15px;
+    line-height: 1.2;
+    color: var(--text-primary);
+  }
+
+  .kanban-column-header span {
+    display: block;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .kanban-column-header strong {
+    min-width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: var(--bg-card);
+    color: var(--text-primary);
+    font-size: 13px;
+  }
+
+  .kanban-column-list {
+    flex: 1;
+    min-height: 180px;
+    overflow-y: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    scrollbar-width: thin;
+  }
+
+  .kanban-column-list:empty::after {
+    content: attr(data-empty-label);
+    min-height: 96px;
+    border: 1px dashed var(--border-color);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    color: var(--text-muted);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  .pagination-bar {
+    flex-shrink: 0;
+    min-height: 50px;
+    display: flex;
+    justify-content: center;
+    padding: 4px 20px var(--bottom-nav-clearance);
   }
 
   /* Task card */
   .task-card {
     background: var(--bg-card);
-    border-radius: 18px;
+    border-radius: 8px;
     padding: 16px 16px 14px;
     border-left: 5px solid var(--border-color);
+    border-top: 1px solid var(--border-color);
+    border-right: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
     box-shadow: var(--shadow-card);
+    cursor: grab;
     transition:
       transform 0.15s,
       box-shadow 0.15s;
+  }
+
+  .task-card:active {
+    cursor: grabbing;
+  }
+
+  .task-card.readonly {
+    cursor: default;
   }
 
   .task-card:hover {
