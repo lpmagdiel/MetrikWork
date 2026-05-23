@@ -140,7 +140,7 @@ export function subscribeToUsersPresence(userIds = []) {
         userPresenceStore.set(nextPresence);
     }
 
-    presenceUnsubscribers = chunkIds(ids).map((chunk, index) => {
+    const localUnsubscribers = chunkIds(ids).map((chunk, index) => {
         const presenceQuery = query(
             collection(db, 'presence'),
             where(documentId(), 'in', chunk)
@@ -160,11 +160,14 @@ export function subscribeToUsersPresence(userIds = []) {
             console.error('Error in presence listener:', error);
         });
     });
+    presenceUnsubscribers = localUnsubscribers;
 
     return () => {
-        presenceUnsubscribers.forEach((unsubscribe) => unsubscribe?.());
-        presenceUnsubscribers = [];
-        userPresenceStore.set({});
+        localUnsubscribers.forEach((unsubscribe) => unsubscribe?.());
+        if (presenceUnsubscribers === localUnsubscribers) {
+            presenceUnsubscribers = [];
+            userPresenceStore.set({});
+        }
     };
 }
 

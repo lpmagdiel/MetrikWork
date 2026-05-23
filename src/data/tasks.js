@@ -11,12 +11,13 @@ let teamTasksUnsubscribe;
 
 export function subscribeToTasks(uid) {
     if (tasksUnsubscribe) tasksUnsubscribe();
+    tasksUnsubscribe = null;
     if (!uid) {
         tasksStore.set([]);
-        return;
+        return () => {};
     }
     const tasksQuery = query(collection(db, 'tasks'), where('assignedTo', 'array-contains', uid));
-    tasksUnsubscribe = onSnapshot(tasksQuery, (snapshot) => {
+    const unsubscribe = onSnapshot(tasksQuery, (snapshot) => {
         const tasks = [];
         snapshot.forEach((doc) => {
             tasks.push({ id: doc.id, ...doc.data() });
@@ -25,16 +26,26 @@ export function subscribeToTasks(uid) {
     }, (error) => {
         console.error("Error in tasks listener:", error);
     });
+    tasksUnsubscribe = unsubscribe;
+
+    return () => {
+        unsubscribe();
+        if (tasksUnsubscribe === unsubscribe) {
+            tasksUnsubscribe = null;
+            tasksStore.set([]);
+        }
+    };
 }
 
 export function subscribeToTeamTasks(teamId) {
     if (teamTasksUnsubscribe) teamTasksUnsubscribe();
+    teamTasksUnsubscribe = null;
     if (!teamId) {
         teamTasksStore.set([]);
-        return;
+        return () => {};
     }
     const tasksCollection = collection(db, 'teams', teamId, 'tasks');
-    teamTasksUnsubscribe = onSnapshot(tasksCollection, (snapshot) => {
+    const unsubscribe = onSnapshot(tasksCollection, (snapshot) => {
         const tasks = [];
         snapshot.forEach((doc) => {
             tasks.push({ id: doc.id, ...doc.data() });
@@ -45,6 +56,15 @@ export function subscribeToTeamTasks(teamId) {
     }, (error) => {
         console.error("Error in team tasks listener:", error);
     });
+    teamTasksUnsubscribe = unsubscribe;
+
+    return () => {
+        unsubscribe();
+        if (teamTasksUnsubscribe === unsubscribe) {
+            teamTasksUnsubscribe = null;
+            teamTasksStore.set([]);
+        }
+    };
 }
 
 export async function getAssignedTasksFromTeams(teams = [], uid) {

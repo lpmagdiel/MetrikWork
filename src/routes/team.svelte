@@ -139,9 +139,9 @@
 
   $effect(() => {
     if (team?.id && canViewTasks) {
-      subscribeToTeamTasks(team.id);
+      return subscribeToTeamTasks(team.id);
     }
-    return () => subscribeToTeamTasks(null);
+    return subscribeToTeamTasks(null);
   });
 
   $effect(() => {
@@ -153,8 +153,7 @@
   });
 
   $effect(() => {
-    subscribeToUsersPresence(team?.members || []);
-    return () => subscribeToUsersPresence([]);
+    return subscribeToUsersPresence(team?.members || []);
   });
 
   $effect(() => {

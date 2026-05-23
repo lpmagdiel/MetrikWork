@@ -142,8 +142,7 @@
   });
 
   $effect(() => {
-    subscribeToUsersPresence(teamMembers.map((member) => member.id));
-    return () => subscribeToUsersPresence([]);
+    return subscribeToUsersPresence(teamMembers.map((member) => member.id));
   });
 
   $effect(() => {

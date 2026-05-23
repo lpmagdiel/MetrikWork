@@ -60,8 +60,8 @@
   });
 
   $effect(() => {
-    if (team?.id && canViewTasks) subscribeToTeamTasks(team.id);
-    return () => subscribeToTeamTasks(null);
+    if (team?.id && canViewTasks) return subscribeToTeamTasks(team.id);
+    return subscribeToTeamTasks(null);
   });
 
   // UI state
