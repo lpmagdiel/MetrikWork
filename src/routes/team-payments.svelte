@@ -1,5 +1,5 @@
 <script>
-    import { ChevronDown, ChevronLeft, DollarSign, Filter, CheckCircle, AlertCircle, Eye, History, Printer } from "lucide-svelte";
+    import { ChevronDown, ChevronLeft, DollarSign, Filter, CheckCircle, AlertCircle, Eye, History, Printer, Download } from "lucide-svelte";
     import { selectedTeam, selectedTeamId, userStore, hasTeamPermission } from "../data/stores.js";
     import { getTeamPaymentsData, registerTeamPayment } from "../data/teamPayments.js";
     import { createNotification } from "../data/notifications.js";
@@ -7,6 +7,7 @@
     import Toast from "../components/Toast.svelte";
     import SliceContainer from "../components/SliceContainer.svelte";
   import TitleHeader from "../components/TitleHeader.svelte";
+    import { downloadExcelReport, openPrintableReport } from "../helpers/reportExport.js";
 
     let team = $derived($selectedTeam);
     let teamId = $derived(team?.id || $selectedTeamId);
@@ -336,6 +337,9 @@
             max-width: 920px;
             margin: 0 auto 16px;
             text-align: right;
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
         }
         button {
             border: 0;
@@ -344,6 +348,10 @@
             padding: 10px 16px;
             font-weight: 700;
             cursor: pointer;
+        }
+        button.secondary {
+            background: #e5e7eb;
+            color: #172033;
         }
         @media print {
             body { padding: 0; background: #ffffff; }
@@ -355,6 +363,7 @@
 <body>
     <div class="actions">
         <button onclick="window.print()">Guardar / imprimir PDF</button>
+        <button class="secondary" onclick="window.close()">Cerrar</button>
     </div>
     <main class="page">
         <header>
@@ -463,6 +472,105 @@
         targetWindow.document.close();
         targetWindow.focus();
     }
+
+    function createPaymentsReport() {
+        const teamName = team?.name || team?.team || "Equipo";
+        const statusLabel =
+            filterStatus === "paid"
+                ? "Pagados"
+                : filterStatus === "unpaid"
+                    ? "No pagados"
+                    : "Todos";
+        const totals = filteredMembers.reduce(
+            (acc, member) => {
+                acc.earned += Number(member.totalEarned) || 0;
+                acc.paid += Number(member.totalPaid) || 0;
+                acc.balance += Number(member.balance) || 0;
+                acc.workDays += Number(member.totalWorkDays) || 0;
+                acc.overtime += Number(member.totalOvertimeHours) || 0;
+                return acc;
+            },
+            { earned: 0, paid: 0, balance: 0, workDays: 0, overtime: 0 },
+        );
+
+        return {
+            title: "Reporte de pagos y tiempo",
+            subtitle: `MetricWork - ${teamName}`,
+            meta: [
+                { label: "Equipo", value: teamName },
+                { label: "Filtro", value: statusLabel },
+                { label: "Integrantes", value: filteredMembers.length },
+                { label: "Moneda", value: team?.projectBudgetCurrency || "MXN" },
+                { label: "Generado por", value: $userStore?.name || $userStore?.email || "Usuario" },
+            ],
+            sections: [
+                {
+                    title: "Resumen",
+                    headers: ["Indicador", "Valor"],
+                    rows: [
+                        ["Total ganado", formatMoney(totals.earned)],
+                        ["Total pagado", formatMoney(totals.paid)],
+                        ["Saldo pendiente", formatMoney(totals.balance)],
+                        ["Dias trabajados", totals.workDays],
+                        ["Horas extra", `${totals.overtime}h`],
+                    ],
+                },
+                {
+                    title: "Balance por integrante",
+                    headers: ["Integrante", "Dias", "Horas extra", "Tarifa diaria", "Hora extra", "Total ganado", "Pagado", "Saldo", "Estado"],
+                    rows: filteredMembers.map((member) => [
+                        member?.name || member?.email || "Usuario",
+                        member.totalWorkDays,
+                        `${member.totalOvertimeHours}h`,
+                        formatMoney(member.dailyRate),
+                        formatMoney(member.extraHourRate),
+                        formatMoney(member.totalEarned),
+                        formatMoney(member.totalPaid),
+                        formatMoney(member.balance),
+                        member.balance > 0.01 ? "Pendiente" : "Al dia",
+                    ]),
+                },
+                {
+                    title: "Detalle de jornadas",
+                    headers: ["Integrante", "Fecha", "Tipo", "Dias", "Horas extra", "Nota / tarea", "Importe"],
+                    rows: filteredMembers.flatMap((member) =>
+                        (member.works || []).map((work) => [
+                            member?.name || member?.email || "Usuario",
+                            formatDate(work.date),
+                            getWorkTypeLabel(work),
+                            getWorkUnits(work),
+                            `${Number(work.overtimeHours) || 0}h`,
+                            work.taskTitle || work.note || "",
+                            formatMoney(getWorkAmount(work, member)),
+                        ]),
+                    ),
+                },
+                {
+                    title: "Detalle de pagos",
+                    headers: ["Integrante", "Fecha", "Tipo", "Registrado por", "Monto"],
+                    rows: filteredMembers.flatMap((member) =>
+                        (member.payments || []).map((payment) => [
+                            member?.name || member?.email || "Usuario",
+                            formatDateTime(payment.date),
+                            payment.type === "total" ? "Pago total" : "Pago parcial",
+                            payment.registeredByName || "-",
+                            formatMoney(payment.amount),
+                        ]),
+                    ),
+                },
+            ],
+        };
+    }
+
+    function handleExportPaymentsPdf() {
+        const opened = openPrintableReport(createPaymentsReport());
+        if (!opened) showNotification("El navegador bloqueo la ventana del reporte", "error");
+    }
+
+    function handleExportPaymentsExcel() {
+        const teamName = team?.name || team?.team || "equipo";
+        downloadExcelReport(createPaymentsReport(), `reporte-pagos-${teamName}`);
+    }
 </script>
 
 <div class="payments-container">
@@ -501,6 +609,17 @@
                         <span class="stat-label">Total a Pagar</span>
                         <span class="stat-value danger">{formatMoney(memberBalances.reduce((acc, m) => acc + (m.balance > 0 ? m.balance : 0), 0))}</span>
                     </div>
+                </div>
+
+                <div class="export-actions">
+                    <button type="button" onclick={handleExportPaymentsPdf}>
+                        <Download size={17} />
+                        <span>Exportar PDF</span>
+                    </button>
+                    <button type="button" onclick={handleExportPaymentsExcel}>
+                        <Download size={17} />
+                        <span>Exportar Excel</span>
+                    </button>
                 </div>
             </div>
 
@@ -848,6 +967,35 @@
     .summary-stats {
         display: flex;
         gap: 24px;
+    }
+
+    .export-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .export-actions button {
+        min-height: 40px;
+        border: 1px solid var(--border-color);
+        background: var(--bg-input);
+        color: var(--text-primary);
+        border-radius: var(--radius-sm);
+        padding: 0 13px;
+        font-weight: 800;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+    }
+
+    .export-actions button:hover {
+        background: var(--bg-accent-subtle);
+        color: var(--accent-ink);
+        border-color: var(--accent-color);
     }
 
     .stat {
@@ -1401,9 +1549,15 @@
         }
 
         .summary-stats,
+        .export-actions,
         .stat {
             width: 100%;
             align-items: flex-start;
+        }
+
+        .export-actions {
+            display: grid;
+            grid-template-columns: 1fr;
         }
 
         .stat-value {

@@ -3,6 +3,7 @@
     AlertCircle,
     BarChart3,
     Clock,
+    Download,
     DollarSign,
     Filter,
     MapPin,
@@ -16,6 +17,7 @@
   import Toast from "../components/Toast.svelte";
   import TitleHeader from "../components/TitleHeader.svelte";
   import { navigateTo } from "../router.js";
+  import { downloadExcelReport, openPrintableReport } from "../helpers/reportExport.js";
   import {
     getTeamAdvancedStatsData,
     hasTeamPermission,
@@ -475,6 +477,14 @@
     return 0;
   }
 
+  function getWorkTypeLabel(work) {
+    if (work.type === "full-day") return "Dia completo";
+    if (work.type === "half-day") return "Medio dia";
+    if (work.type === "variable") return "Jornada variable";
+    if (work.type === "overtime") return "Horas extra";
+    return "Jornada";
+  }
+
   function getWorkLaborCost(work) {
     const settings = team?.memberSettings?.[work.userId] || {};
     const dailyRate = Number(settings.dailyRate) || 0;
@@ -597,6 +607,129 @@
     const teamId = team?.id || $selectedTeamId;
     navigateTo(teamId ? `/teams/${teamId}` : "/teams");
   }
+
+  function createStatsReport() {
+    const teamName = team?.name || team?.team || "Equipo";
+    const locationLabel =
+      selectedLocationId === "all" ? "Todas" : getLocationName(selectedLocationId) || "Sin ubicacion";
+    const memberLabel =
+      selectedMemberId === "all" ? "Todos" : getMemberName(selectedMemberId);
+    const periodLabel = periodLabels[period] || "Periodo";
+    const title = `Reporte financiero y de tiempo`;
+    const subtitle = `MetricWork - ${teamName}`;
+
+    return {
+      title,
+      subtitle,
+      meta: [
+        { label: "Equipo", value: teamName },
+        { label: "Periodo", value: `${periodLabel}: ${formatDate(range.start)} - ${formatDate(range.end)}` },
+        { label: "Ubicacion", value: locationLabel },
+        { label: "Miembro", value: memberLabel },
+        { label: "Moneda", value: budgetCurrency || "MXN" },
+        { label: "Generado por", value: $userStore?.name || $userStore?.email || "Usuario" },
+      ],
+      sections: [
+        {
+          title: "Resumen ejecutivo",
+          headers: ["Indicador", "Valor"],
+          rows: [
+            ["Presupuesto base", formatMoney(summary.budgetBase)],
+            ["Usado del presupuesto", formatMoney(summary.spentAgainstBudget)],
+            ["Presupuesto restante", formatMoney(summary.budgetRemaining)],
+            ["Uso del presupuesto", `${formatNumber(summary.budgetUsage, 0)}%`],
+            ["Coste de jornadas", formatMoney(summary.laborCost)],
+            ["Pagos realizados", formatMoney(summary.paymentsCost)],
+            ["Nomina pendiente estimada", formatMoney(summary.pendingPayroll)],
+            ["Consumibles del periodo", formatMoney(summary.consumableCost)],
+            ["Jornadas equivalentes", formatNumber(summary.totalWorkDays)],
+            ["Horas extra", `${formatNumber(summary.overtimeHours)}h`],
+            ["Miembros activos", summary.activeMembers],
+            ["Ubicaciones activas", summary.activeLocations],
+          ],
+        },
+        {
+          title: "Coste por miembro",
+          headers: ["Miembro", "Ubicacion", "Dias", "Horas extra", "Generado", "Pagado", "Balance"],
+          rows: memberSummaries.map((member) => [
+            getMemberName(member.id),
+            member.locationName || "Sin ubicacion",
+            formatNumber(member.workDays),
+            `${formatNumber(member.overtimeHours)}h`,
+            formatMoney(member.earned),
+            formatMoney(member.paid),
+            formatMoney(member.balance),
+          ]),
+        },
+        {
+          title: "Coste por ubicacion",
+          headers: ["Ubicacion", "Miembros", "Dias", "Jornadas", "Pagos", "Consumibles", "Total", "Presupuesto", "Restante"],
+          rows: locationSummaries.map((location) => [
+            location.name,
+            location.membersCount,
+            formatNumber(location.workDays),
+            formatMoney(location.labor),
+            formatMoney(location.paid),
+            formatMoney(location.products),
+            formatMoney(location.total),
+            formatMoney(location.budget),
+            formatMoney(location.remaining),
+          ]),
+        },
+        {
+          title: "Tendencia",
+          headers: ["Periodo", "Jornadas", "Pagos", "Consumibles", "Total"],
+          rows: trend.map((item) => [
+            item.label,
+            formatMoney(item.labor),
+            formatMoney(item.payments),
+            formatMoney(item.consumables),
+            formatMoney(item.total),
+          ]),
+        },
+        {
+          title: "Categorias de consumibles",
+          headers: ["Categoria", "Articulos", "Valor"],
+          rows: categoryTotals.map((item) => [item.label, item.count, formatMoney(item.value)]),
+        },
+        {
+          title: "Detalle de jornadas",
+          headers: ["Fecha", "Miembro", "Ubicacion", "Tipo", "Dias", "Horas extra", "Coste"],
+          rows: filteredWorks.map((work) => [
+            formatDate(getDateKey(work.date)),
+            getMemberName(work.userId),
+            getLocationName(getWorkLocationId(work)) || "Sin ubicacion",
+            getWorkTypeLabel(work),
+            formatNumber(getWorkUnits(work)),
+            `${formatNumber(work.overtimeHours || 0)}h`,
+            formatMoney(getWorkLaborCost(work)),
+          ]),
+        },
+        {
+          title: "Detalle de pagos",
+          headers: ["Fecha", "Miembro", "Ubicacion", "Tipo", "Monto"],
+          rows: filteredPayments.map((payment) => [
+            formatDate(getDateKey(payment.date || payment.createdAt)),
+            getMemberName(payment.userId),
+            getLocationName(getPaymentLocationId(payment)) || "Sin ubicacion",
+            payment.type === "total" ? "Pago total" : "Pago parcial",
+            formatMoney(payment.amount),
+          ]),
+        },
+      ],
+    };
+  }
+
+  function handleExportStatsPdf() {
+    const opened = openPrintableReport(createStatsReport());
+    if (!opened) showNotification("El navegador bloqueo la ventana del reporte", "error");
+  }
+
+  function handleExportStatsExcel() {
+    const teamName = team?.name || team?.team || "equipo";
+    const filename = `reporte-${teamName}-${range.start}-${range.end}`;
+    downloadExcelReport(createStatsReport(), filename);
+  }
 </script>
 
 <div class="stats-page">
@@ -674,6 +807,17 @@
               </label>
             </div>
           {/if}
+
+          <div class="export-actions">
+            <button type="button" onclick={handleExportStatsPdf} disabled={isLoading}>
+              <Download size={17} />
+              <span>Exportar PDF</span>
+            </button>
+            <button type="button" onclick={handleExportStatsExcel} disabled={isLoading}>
+              <Download size={17} />
+              <span>Exportar Excel</span>
+            </button>
+          </div>
 
           {#if canEditStats}
             <details class="budget-details">
@@ -1078,6 +1222,7 @@
   }
 
   .period-tabs button,
+  .export-actions button,
   .budget-form button {
     border: none;
     border-radius: 999px;
@@ -1095,6 +1240,27 @@
   .budget-form button {
     background: var(--text-primary);
     color: var(--bg-card);
+  }
+
+  .export-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .export-actions button {
+    border-radius: 12px;
+    min-height: 42px;
+    justify-content: center;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-primary);
+  }
+
+  .export-actions button:hover:not(:disabled) {
+    background: var(--bg-accent-subtle);
+    color: var(--accent-ink);
   }
 
   .filter-row,
@@ -1498,6 +1664,7 @@
     .metrics-grid,
     .filter-row,
     .date-filters,
+    .export-actions,
     .budget-form,
     .indicator-grid {
       grid-template-columns: 1fr;
