@@ -115,7 +115,7 @@
   let remoteAvatarUrl = $derived(remoteProfile?.avatar || remoteProfile?.photoURL || selectedMember?.avatar || selectedMember?.photoURL || "");
   let remoteVideoEnabled = $derived(activeCall?.media?.[remoteUserId]?.videoEnabled !== false);
   let showRemoteAvatar = $derived(!remoteHasVideo || !remoteVideoEnabled);
-  const pageSize = 30;
+  const pageSize = 20;
   const rtcConfig = {
     iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
   };

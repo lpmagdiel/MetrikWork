@@ -1,13 +1,86 @@
-import { writable } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 import { db } from './firebase.js';
-import { onSnapshot, collection, addDoc, query, where, deleteDoc, updateDoc, doc, getDoc, getDocs } from 'firebase/firestore';
+import {
+    onSnapshot,
+    collection,
+    addDoc,
+    query,
+    where,
+    deleteDoc,
+    updateDoc,
+    doc,
+    getDocs,
+    orderBy,
+    limit,
+    startAfter
+} from 'firebase/firestore';
 import { createNotification } from './notifications.js';
 
+export const TEAM_TASKS_PAGE_SIZE = 20;
 export const tasksStore = writable([]);
 export const teamTasksStore = writable([]);
+export const teamTasksPaginationStore = writable({
+    isLoadingMore: false,
+    hasMore: true,
+    pageSize: TEAM_TASKS_PAGE_SIZE
+});
 
 let tasksUnsubscribe;
 let teamTasksUnsubscribe;
+let teamTasksQueryState = {
+    teamId: '',
+    status: 'all',
+    pageSize: TEAM_TASKS_PAGE_SIZE,
+    nextCursor: null,
+    olderTasks: [],
+    hasMore: true
+};
+
+function normalizeTaskDoc(taskDoc) {
+    return { id: taskDoc.id, ...taskDoc.data(), _snapshot: taskDoc };
+}
+
+function getTaskTime(task) {
+    const value = task?.createdAt || task?.updatedAt || '';
+    const time = new Date(value).getTime();
+    return Number.isNaN(time) ? 0 : time;
+}
+
+function sortTeamTasks(tasks) {
+    return tasks.sort((a, b) => getTaskTime(b) - getTaskTime(a));
+}
+
+function mergeTeamTasks(firstPageTasks = [], olderTasks = []) {
+    const tasksById = new Map();
+    [...olderTasks, ...firstPageTasks].forEach((task) => {
+        tasksById.set(task.id, task);
+    });
+    return sortTeamTasks(Array.from(tasksById.values()));
+}
+
+function getTeamTasksConstraints(status = 'all', pageSize = TEAM_TASKS_PAGE_SIZE, cursor = null) {
+    const constraints = [];
+    if (status && status !== 'all') {
+        constraints.push(where('status', '==', status));
+    }
+    constraints.push(orderBy('createdAt', 'desc'));
+    if (cursor) {
+        constraints.push(startAfter(cursor));
+    }
+    constraints.push(limit(pageSize));
+    return constraints;
+}
+
+function resetTeamTasksPagination(pageSize = TEAM_TASKS_PAGE_SIZE) {
+    teamTasksQueryState.nextCursor = null;
+    teamTasksQueryState.olderTasks = [];
+    teamTasksQueryState.hasMore = true;
+    teamTasksPaginationStore.set({
+        isLoadingMore: false,
+        hasMore: true,
+        pageSize
+    });
+}
 
 export function subscribeToTasks(uid) {
     if (tasksUnsubscribe) tasksUnsubscribe();
@@ -37,24 +110,50 @@ export function subscribeToTasks(uid) {
     };
 }
 
-export function subscribeToTeamTasks(teamId) {
+export function subscribeToTeamTasks(teamId, options = {}) {
     if (teamTasksUnsubscribe) teamTasksUnsubscribe();
     teamTasksUnsubscribe = null;
+    const pageSize = options.pageSize || TEAM_TASKS_PAGE_SIZE;
+    const status = options.status || 'all';
+    resetTeamTasksPagination(pageSize);
+
     if (!teamId) {
         teamTasksStore.set([]);
         return () => {};
     }
-    const tasksCollection = collection(db, 'teams', teamId, 'tasks');
-    const unsubscribe = onSnapshot(tasksCollection, (snapshot) => {
-        const tasks = [];
-        snapshot.forEach((doc) => {
-            tasks.push({ id: doc.id, ...doc.data() });
+
+    teamTasksQueryState = {
+        teamId,
+        status,
+        pageSize,
+        nextCursor: null,
+        olderTasks: [],
+        hasMore: true
+    };
+
+    const tasksQuery = query(
+        collection(db, 'teams', teamId, 'tasks'),
+        ...getTeamTasksConstraints(status, pageSize)
+    );
+    const unsubscribe = onSnapshot(tasksQuery, (snapshot) => {
+        const firstPageTasks = snapshot.docs.map(normalizeTaskDoc);
+        if (teamTasksQueryState.olderTasks.length === 0) {
+            teamTasksQueryState.nextCursor = snapshot.docs[snapshot.docs.length - 1] || null;
+            teamTasksQueryState.hasMore = snapshot.docs.length === pageSize;
+        }
+        teamTasksStore.set(mergeTeamTasks(firstPageTasks, teamTasksQueryState.olderTasks));
+        teamTasksPaginationStore.set({
+            isLoadingMore: false,
+            hasMore: teamTasksQueryState.hasMore,
+            pageSize
         });
-        // @ts-ignore
-        tasks.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-        teamTasksStore.set(tasks);
     }, (error) => {
         console.error("Error in team tasks listener:", error);
+        teamTasksPaginationStore.set({
+            isLoadingMore: false,
+            hasMore: false,
+            pageSize
+        });
     });
     teamTasksUnsubscribe = unsubscribe;
 
@@ -63,8 +162,50 @@ export function subscribeToTeamTasks(teamId) {
         if (teamTasksUnsubscribe === unsubscribe) {
             teamTasksUnsubscribe = null;
             teamTasksStore.set([]);
+            resetTeamTasksPagination(pageSize);
         }
     };
+}
+
+export async function loadMoreTeamTasks() {
+    const { teamId, status, pageSize, nextCursor } = teamTasksQueryState;
+    if (!teamId || !nextCursor) return [];
+
+    const paginationState = get(teamTasksPaginationStore);
+
+    if (paginationState.isLoadingMore || !paginationState.hasMore) return [];
+
+    teamTasksPaginationStore.set({
+        ...paginationState,
+        isLoadingMore: true
+    });
+
+    try {
+        const tasksQuery = query(
+            collection(db, 'teams', teamId, 'tasks'),
+            ...getTeamTasksConstraints(status, pageSize, nextCursor)
+        );
+        const snapshot = await getDocs(tasksQuery);
+        const olderTasks = snapshot.docs.map(normalizeTaskDoc);
+        teamTasksQueryState.nextCursor = snapshot.docs[snapshot.docs.length - 1] || null;
+        teamTasksQueryState.olderTasks = mergeTeamTasks(teamTasksQueryState.olderTasks, olderTasks);
+        teamTasksQueryState.hasMore = snapshot.docs.length === pageSize;
+        teamTasksStore.update((currentTasks) => mergeTeamTasks(currentTasks, olderTasks));
+        teamTasksPaginationStore.set({
+            isLoadingMore: false,
+            hasMore: teamTasksQueryState.hasMore,
+            pageSize
+        });
+        return olderTasks;
+    } catch (error) {
+        console.error('Error loading more team tasks:', error);
+        teamTasksPaginationStore.set({
+            isLoadingMore: false,
+            hasMore: false,
+            pageSize
+        });
+        throw error;
+    }
 }
 
 export async function getAssignedTasksFromTeams(teams = [], uid) {

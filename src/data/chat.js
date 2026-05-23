@@ -22,7 +22,7 @@ export const chatMessagesStore = writable([]);
 let chatUnsubscribe;
 let privateCallsUnsubscribe;
 let incomingPrivateCallsUnsubscribe;
-const CHAT_PAGE_SIZE = 30;
+const CHAT_PAGE_SIZE = 20;
 
 function normalizeMessageDoc(doc) {
     return { id: doc.id, ...doc.data(), _snapshot: doc };

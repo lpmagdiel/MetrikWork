@@ -18,7 +18,9 @@
     selectedTeamId,
     userStore,
     teamTasksStore,
+    teamTasksPaginationStore,
     subscribeToTeamTasks,
+    loadMoreTeamTasks,
     addTeamTask,
     updateTeamTask,
     deleteTeamTask,
@@ -40,6 +42,7 @@
   let canCreateTasks = $derived(hasTeamPermission(team, $userStore?.uid, "tasks", "create"));
   let canEditTasks = $derived(hasTeamPermission(team, $userStore?.uid, "tasks", "edit"));
   let canDeleteTasks = $derived(hasTeamPermission(team, $userStore?.uid, "tasks", "delete"));
+  const taskPageSize = 20;
 
   // Members list for assignee display
   let memberList = $state([]);
@@ -60,11 +63,6 @@
     };
   });
 
-  $effect(() => {
-    if (team?.id && canViewTasks) return subscribeToTeamTasks(team.id);
-    return subscribeToTeamTasks(null);
-  });
-
   // UI state
   let taskFilter = $state("pending"); // pending, in-progress, completed, unassigned, all
   let showAddTask = $state(false);
@@ -73,6 +71,16 @@
   let messageToast = $state("");
   let typeToast = $state("");
   let showToast = $state(false);
+
+  $effect(() => {
+    if (team?.id && canViewTasks) {
+      return subscribeToTeamTasks(team.id, {
+        pageSize: taskPageSize,
+        status: taskFilter,
+      });
+    }
+    return subscribeToTeamTasks(null);
+  });
 
   let taskForm = $state({
     title: "",
@@ -89,11 +97,33 @@
     completed: { label: "Completado", color: "var(--success-color)", bg: "var(--bg-success-subtle)" },
   };
 
-  let filteredTasks = $derived(
-    taskFilter === "all"
-      ? $teamTasksStore
-      : $teamTasksStore.filter((t) => t.status === taskFilter),
-  );
+  let filteredTasks = $derived($teamTasksStore);
+
+  function handleTaskListScroll(event) {
+    const container = event.currentTarget;
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+
+    if (distanceFromBottom < 180) {
+      handleLoadMoreTasks();
+    }
+  }
+
+  async function handleLoadMoreTasks() {
+    if (
+      !canViewTasks ||
+      $teamTasksPaginationStore.isLoadingMore ||
+      !$teamTasksPaginationStore.hasMore
+    ) return;
+
+    try {
+      await loadMoreTeamTasks();
+    } catch (error) {
+      messageToast = "Error al cargar más tareas";
+      typeToast = "error";
+      showToast = true;
+    }
+  }
 
   function openAddTask() {
     editingTaskId = null;
@@ -218,17 +248,12 @@
           onclick={() => (taskFilter = key)}
         >
           {label}
-          {#if key !== "all"}
-            <span class="pill-count">
-              {$teamTasksStore.filter((t) => t.status === key).length}
-            </span>
-          {/if}
         </button>
       {/each}
     </div>
 
     <!-- Task list -->
-    <div class="task-list">
+    <div class="task-list" onscroll={handleTaskListScroll}>
     {#if filteredTasks.length === 0}
       <div class="empty-state">
         <ClipboardList size={56} color="var(--text-muted)" />
@@ -320,6 +345,20 @@
           {/if}
         </div>
       {/each}
+      {#if $teamTasksPaginationStore.isLoadingMore}
+        <div class="pagination-status">
+          <Loader size={18} />
+          <span>Cargando tareas...</span>
+        </div>
+      {:else if $teamTasksPaginationStore.hasMore}
+        <button class="load-more-btn" onclick={handleLoadMoreTasks}>
+          Cargar más
+        </button>
+      {:else if filteredTasks.length >= $teamTasksPaginationStore.pageSize}
+        <div class="pagination-status end">
+          <span>No hay más tareas</span>
+        </div>
+      {/if}
     {/if}
     </div>
   {/if}
@@ -474,21 +513,6 @@
     box-shadow: 0 3px 10px rgba(0, 0, 0, 0.15);
   }
 
-  .pill-count {
-    background: var(--bg-accent-subtle);
-    color: var(--text-primary);
-    border-radius: 100px;
-    padding: 0 5px;
-    font-size: 11px;
-    min-width: 16px;
-    text-align: center;
-  }
-
-  .filter-pill:not(.active) .pill-count {
-    background: var(--bg-input);
-    color: var(--text-secondary);
-  }
-
   /* Task list */
   .task-list {
     flex: 1;
@@ -514,6 +538,44 @@
   .task-card:hover {
     transform: translateY(-1px);
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.09);
+  }
+
+  .pagination-status,
+  .load-more-btn {
+    align-self: center;
+    min-height: 40px;
+    padding: 10px 16px;
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .pagination-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-secondary);
+  }
+
+  .pagination-status :global(svg) {
+    animation: spin 1s linear infinite;
+  }
+
+  .pagination-status.end :global(svg) {
+    animation: none;
+  }
+
+  .load-more-btn {
+    border: 1px solid var(--border-color);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    cursor: pointer;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .card-top {
