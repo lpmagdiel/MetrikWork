@@ -12,11 +12,20 @@ import {
     getDocs,
     orderBy,
     limit,
+    setDoc,
     startAfter
 } from 'firebase/firestore';
 import { createNotification } from './notifications.js';
+import {
+    enqueueOfflineOperation,
+    isBrowserOffline,
+    isOfflineError,
+    scheduleOfflineSync
+} from './offlineQueue.js';
 
 export const TEAM_TASKS_PAGE_SIZE = 20;
+const ADD_TEAM_TASK_OPERATION = 'addTeamTask';
+const UPDATE_TEAM_TASK_OPERATION = 'updateTeamTask';
 export const tasksStore = writable([]);
 export const teamTasksStore = writable([]);
 export const teamTasksPaginationStore = writable({
@@ -56,6 +65,34 @@ function mergeTeamTasks(firstPageTasks = [], olderTasks = []) {
         tasksById.set(task.id, task);
     });
     return sortTeamTasks(Array.from(tasksById.values()));
+}
+
+function createClientTaskId() {
+    return `task-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function buildTeamTaskDoc(taskData, user) {
+    return {
+        title: taskData.title,
+        description: taskData.description || '',
+        status: taskData.status || 'unassigned',
+        assignedTo: taskData.assignedTo || [],
+        dueDate: taskData.dueDate || null,
+        createdAt: taskData.createdAt || new Date().toISOString(),
+        createdBy: user.uid,
+    };
+}
+
+function upsertOptimisticTeamTask(task) {
+    teamTasksStore.update((currentTasks) => mergeTeamTasks([task], currentTasks));
+}
+
+function updateOptimisticTeamTask(taskId, data) {
+    teamTasksStore.update((currentTasks) => currentTasks.map((task) => (
+        task.id === taskId
+            ? { ...task, ...data, updatedAt: data.updatedAt || new Date().toISOString(), _offlinePending: true }
+            : task
+    )));
 }
 
 function getTeamTasksConstraints(status = 'all', pageSize = TEAM_TASKS_PAGE_SIZE, cursor = null) {
@@ -231,39 +268,104 @@ export async function getAssignedTasksFromTeams(teams = [], uid) {
         .sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''));
 }
 
+export async function executeAddTeamTask({ teamId, taskData, user, teamName = 'el equipo', taskId = null }) {
+    if (!user || !teamId) return;
+    const newTask = buildTeamTaskDoc(taskData, user);
+    let docRef = null;
+
+    if (taskId) {
+        docRef = doc(db, 'teams', teamId, 'tasks', taskId);
+        await setDoc(docRef, newTask, { merge: true });
+    } else {
+        docRef = await addDoc(collection(db, 'teams', teamId, 'tasks'), newTask);
+    }
+
+    if (newTask.assignedTo.length > 0) {
+        const creatorName = user.name || user.email;
+        const notifPromises = newTask.assignedTo.map(uid =>
+            createNotification(uid, '📋 Nueva tarea asignada', `"${newTask.title}" fue asignada a ti en ${teamName} por ${creatorName}.`)
+        );
+        await Promise.all(notifPromises);
+    }
+    return docRef.id;
+}
+
+async function enqueueAddTeamTask(teamId, taskData, user, teamName) {
+    const taskId = taskData.id || taskData.clientTaskId || createClientTaskId();
+    const queuedTaskData = {
+        ...taskData,
+        createdAt: taskData.createdAt || new Date().toISOString(),
+        clientTaskId: taskId
+    };
+    const newTask = {
+        id: taskId,
+        ...buildTeamTaskDoc(queuedTaskData, user),
+        _offlinePending: true
+    };
+
+    await enqueueOfflineOperation(
+        ADD_TEAM_TASK_OPERATION,
+        { teamId, taskData: queuedTaskData, user, teamName, taskId },
+        { id: taskId, label: `Tarea: ${queuedTaskData.title || ''}`.trim() }
+    );
+    upsertOptimisticTeamTask(newTask);
+    scheduleOfflineSync();
+    return { queued: true, id: taskId };
+}
+
 export async function addTeamTask(teamId, taskData, user, teamName = 'el equipo') {
     if (!user || !teamId) return;
+    if (isBrowserOffline()) {
+        return enqueueAddTeamTask(teamId, taskData, user, teamName);
+    }
+
     try {
-        const newTask = {
-            title: taskData.title,
-            description: taskData.description || '',
-            status: taskData.status || 'unassigned',
-            assignedTo: taskData.assignedTo || [],
-            dueDate: taskData.dueDate || null,
-            createdAt: new Date().toISOString(),
-            createdBy: user.uid,
-        };
-        const docRef = await addDoc(collection(db, 'teams', teamId, 'tasks'), newTask);
-        if (newTask.assignedTo.length > 0) {
-            const creatorName = user.name || user.email;
-            const notifPromises = newTask.assignedTo.map(uid =>
-                createNotification(uid, '📋 Nueva tarea asignada', `"${newTask.title}" fue asignada a ti en ${teamName} por ${creatorName}.`)
-            );
-            await Promise.all(notifPromises);
-        }
-        return docRef.id;
+        const id = await executeAddTeamTask({ teamId, taskData, user, teamName });
+        return { queued: false, id };
     } catch (error) {
+        if (isOfflineError(error)) {
+            return enqueueAddTeamTask(teamId, taskData, user, teamName);
+        }
         console.error('Error adding team task:', error);
         throw error;
     }
 }
 
+export async function executeUpdateTeamTask({ teamId, taskId, data }) {
+    if (!teamId || !taskId) return;
+    const taskRef = doc(db, 'teams', teamId, 'tasks', taskId);
+    await updateDoc(taskRef, { ...data, updatedAt: data.updatedAt || new Date().toISOString() });
+}
+
+async function enqueueUpdateTeamTask(teamId, taskId, data) {
+    const updatedAt = data.updatedAt || new Date().toISOString();
+    const queuedData = { ...data, updatedAt };
+    await enqueueOfflineOperation(
+        UPDATE_TEAM_TASK_OPERATION,
+        { teamId, taskId, data: queuedData },
+        {
+            id: `update-${teamId}-${taskId}-${Date.now()}`,
+            label: 'Actualizar tarea'
+        }
+    );
+    updateOptimisticTeamTask(taskId, queuedData);
+    scheduleOfflineSync();
+    return { queued: true, id: taskId };
+}
+
 export async function updateTeamTask(teamId, taskId, data) {
     if (!teamId || !taskId) return;
+    if (isBrowserOffline()) {
+        return enqueueUpdateTeamTask(teamId, taskId, data);
+    }
+
     try {
-        const taskRef = doc(db, 'teams', teamId, 'tasks', taskId);
-        await updateDoc(taskRef, { ...data, updatedAt: new Date().toISOString() });
+        await executeUpdateTeamTask({ teamId, taskId, data });
+        return { queued: false, id: taskId };
     } catch (error) {
+        if (isOfflineError(error)) {
+            return enqueueUpdateTeamTask(teamId, taskId, data);
+        }
         console.error('Error updating team task:', error);
         throw error;
     }

@@ -14,7 +14,8 @@ import {
   subscribeToNotifications,
   subscribeToNotes,
   subscribeToLocations,
-  subscribeToSettings
+  subscribeToSettings,
+  startOfflineActionsSync
 } from './data/index.js';
 
 let incomingCallUnsubscribe = null;
@@ -46,6 +47,7 @@ initAuth((uid) => {
   incomingCallUnsubscribe = null;
 
   if (uid) {
+    startOfflineActionsSync();
     startUserPresence(uid);
     incomingCallUnsubscribe = subscribeToIncomingPrivateCalls(uid, bringIncomingCallToFront);
   } else {

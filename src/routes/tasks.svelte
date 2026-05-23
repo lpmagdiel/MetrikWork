@@ -170,7 +170,12 @@
     if (!movedTask || !originalTask || getTaskStatus(originalTask) === status) return;
 
     try {
-      await updateTeamTask(team.id, movedTaskId, { status });
+      const result = await updateTeamTask(team.id, movedTaskId, { status });
+      if (result?.queued) {
+        messageToast = "Cambio guardado sin conexión";
+        typeToast = "success";
+        showToast = true;
+      }
     } catch (error) {
       boardTasksByStatus = groupTasksByStatus($teamTasksStore);
       messageToast = "Error al mover la tarea";
@@ -230,12 +235,18 @@
           ? new Date(taskForm.dueDate).toISOString()
           : null,
       };
+      let result;
       if (editingTaskId) {
-        await updateTeamTask(team.id, editingTaskId, data);
+        result = await updateTeamTask(team.id, editingTaskId, data);
       } else {
-        await addTeamTask(team.id, data, $userStore, team.name);
+        result = await addTeamTask(team.id, data, $userStore, team.name);
       }
       showAddTask = false;
+      if (result?.queued) {
+        messageToast = "Guardado sin conexión. Se sincronizará automáticamente.";
+        typeToast = "success";
+        showToast = true;
+      }
     } catch (e) {
       messageToast = "Error al guardar la tarea";
       typeToast = "error";

@@ -197,12 +197,16 @@
           ? new Date(taskForm.dueDate).toISOString()
           : null,
       };
+      let result;
       if (editingTaskId) {
-        await updateTeamTask(team.id, editingTaskId, data);
+        result = await updateTeamTask(team.id, editingTaskId, data);
       } else {
-        await addTeamTask(team.id, data, $userStore, team.name);
+        result = await addTeamTask(team.id, data, $userStore, team.name);
       }
       showAddTask = false;
+      if (result?.queued) {
+        showNotification("Guardado sin conexión. Se sincronizará automáticamente.");
+      }
     } catch (e) {
       messageToast = "Error al guardar la tarea";
       typeToast = "error";
@@ -363,7 +367,7 @@
       }
 
       const limitedWorkDay = applyWorkdayOvertimeLimit(workDayToRegister, team);
-      await registerWorkday(
+      const result = await registerWorkday(
         team.id,
         $userStore.uid,
         $userStore.name || $userStore.email,
@@ -372,10 +376,14 @@
       showWorkdayForm = false;
       hasWorkdayToday = true;
       await showSuccessAlert(
-        limitedWorkDay.type === "overtime"
+        result?.queued
+          ? "Guardado sin conexión"
+          : limitedWorkDay.type === "overtime"
           ? "Horas extra registradas"
           : "Jornada registrada",
-        limitedWorkDay.type === "overtime"
+        result?.queued
+          ? "La jornada quedó en el dispositivo y se sincronizará al volver la conexión."
+          : limitedWorkDay.type === "overtime"
           ? "Las horas extra se guardaron correctamente."
           : "La jornada se guardó correctamente.",
       );

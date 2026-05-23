@@ -393,7 +393,7 @@
         selectedTeam,
       );
 
-      await registerWorkday(
+      const result = await registerWorkday(
         selectedTeam.id,
         $userStore.uid,
         $userStore.name || $userStore.email,
@@ -418,8 +418,12 @@
       now = Date.now();
       clearActiveTimer();
       await showSuccessAlert(
-        timerMode === "overtime" ? "Horas extra registradas" : "Jornada registrada",
-        pomodoroEnabled
+        result?.queued
+          ? "Guardado sin conexión"
+          : timerMode === "overtime" ? "Horas extra registradas" : "Jornada registrada",
+        result?.queued
+          ? "El registro quedó en el dispositivo y se sincronizará al volver la conexión."
+          : pomodoroEnabled
           ? "Tiempo de enfoque registrado correctamente."
           : overtimeLimitHours > 0 && totalHours > overtimeLimitHours && timerMode === "variable"
           ? `Jornada registrada con el máximo permitido: ${overtimeLimitHours}h.`

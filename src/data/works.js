@@ -1,6 +1,28 @@
 import { db } from './firebase.js';
-import { collection, addDoc, query, where, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import {
+    enqueueOfflineOperation,
+    getQueuedOperationsByType,
+    isBrowserOffline,
+    isOfflineError,
+    scheduleOfflineSync
+} from './offlineQueue.js';
 import { applyWorkdayOvertimeLimit, assertWorkingDay } from './workLimits.js';
+
+const REGISTER_WORKDAY_OPERATION = 'registerWorkday';
+const WORKDAY_OPTIONAL_FIELDS = [
+    'taskTitle',
+    'note',
+    'startedAt',
+    'endedAt',
+    'durationSeconds',
+    'durationHours',
+    'variableHours',
+    'timerMode',
+    'pomodoroEnabled',
+    'completedPomodoros',
+    'clientOperationId'
+];
 
 export function getTodayDateString() {
     const now = new Date();
@@ -12,64 +34,123 @@ export function getTodayDateString() {
 
 export async function hasWorkdayForDate(teamId, userId, date = getTodayDateString()) {
     if (!teamId || !userId) return false;
+    const hasQueuedWorkday = await hasQueuedRegularWorkdayForDate(teamId, userId, date);
     const worksQuery = query(
         collection(db, 'works'),
         where('teamId', '==', teamId),
         where('userId', '==', userId),
         where('date', '==', date)
     );
-    const snapshot = await getDocs(worksQuery);
-    return snapshot.docs.some((doc) => {
-        const type = doc.data().type;
-        return type === 'full-day' || type === 'half-day';
+    try {
+        const snapshot = await getDocs(worksQuery);
+        return hasQueuedWorkday || snapshot.docs.some((doc) => {
+            const type = doc.data().type;
+            return type === 'full-day' || type === 'half-day';
+        });
+    } catch (error) {
+        if (isOfflineError(error)) return hasQueuedWorkday;
+        throw error;
+    }
+}
+
+function rememberLocalWorkday(workDate) {
+    try {
+        const existingStats = JSON.parse(localStorage.getItem('userStats')) || { workDays: [] };
+        if (!existingStats.workDays.includes(workDate)) {
+            existingStats.workDays.push(workDate);
+        }
+        localStorage.setItem('userStats', JSON.stringify(existingStats));
+    } catch (e) {
+        console.log('Error saving to localStorage:', e);
+    }
+}
+
+function buildWorkdayDoc(teamId, userId, userName, workDay, teamData = null) {
+    if (!workDay) throw new Error("workDay is missing");
+    const workDate = workDay.date || getTodayDateString();
+    if (teamData) assertWorkingDay(teamData, workDate);
+    const limitedWorkDay = teamData ? applyWorkdayOvertimeLimit(workDay, teamData) : workDay;
+    const newWork = {
+        teamId,
+        userId,
+        userName,
+        type: (limitedWorkDay && limitedWorkDay.type) ? limitedWorkDay.type : 'full-day',
+        overtimeHours: (limitedWorkDay && limitedWorkDay.overtimeHours) ? Number(limitedWorkDay.overtimeHours) : 0,
+        date: workDate,
+        createdAt: new Date().toISOString(),
+        paid: false
+    };
+
+    WORKDAY_OPTIONAL_FIELDS.forEach((field) => {
+        if (limitedWorkDay[field] !== undefined && limitedWorkDay[field] !== null) {
+            newWork[field] = limitedWorkDay[field];
+        }
     });
+
+    return newWork;
+}
+
+async function hasQueuedRegularWorkdayForDate(teamId, userId, date) {
+    const queuedWorkdays = await getQueuedOperationsByType(REGISTER_WORKDAY_OPERATION);
+    return queuedWorkdays.some((operation) => {
+        const payload = operation.payload || {};
+        const workDay = payload.workDay || {};
+        const type = workDay.type || 'full-day';
+        return payload.teamId === teamId &&
+            payload.userId === userId &&
+            (workDay.date || getTodayDateString()) === date &&
+            (type === 'full-day' || type === 'half-day');
+    });
+}
+
+async function enqueueRegisterWorkday(teamId, userId, userName, workDay) {
+    const clientOperationId = workDay.clientOperationId || `workday-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const queuedWorkDay = { ...workDay, clientOperationId };
+    const workDate = queuedWorkDay.date || getTodayDateString();
+    const operation = await enqueueOfflineOperation(
+        REGISTER_WORKDAY_OPERATION,
+        { teamId, userId, userName, workDay: queuedWorkDay },
+        {
+            id: clientOperationId,
+            label: queuedWorkDay.type === 'overtime' ? 'Horas extra' : 'Jornada'
+        }
+    );
+    rememberLocalWorkday(workDate);
+    scheduleOfflineSync();
+    return { queued: true, id: operation.id };
+}
+
+export async function executeRegisterWorkday({ teamId, userId, userName, workDay }, operation = null) {
+    if (!workDay) throw new Error("workDay is missing");
+    const teamSnapshot = await getDoc(doc(db, 'teams', teamId));
+    const teamData = teamSnapshot.data();
+    const newWork = buildWorkdayDoc(teamId, userId, userName, workDay, teamData);
+    const deterministicId = workDay.clientOperationId || operation?.id;
+
+    if (deterministicId) {
+        await setDoc(doc(db, 'works', deterministicId), newWork, { merge: true });
+        rememberLocalWorkday(newWork.date);
+        return deterministicId;
+    }
+
+    const docRef = await addDoc(collection(db, 'works'), newWork);
+    rememberLocalWorkday(newWork.date);
+    return docRef.id;
 }
 
 export async function registerWorkday(teamId, userId, userName, workDay) {
     if (!workDay) throw new Error("workDay is missing");
+    if (isBrowserOffline()) {
+        return enqueueRegisterWorkday(teamId, userId, userName, workDay);
+    }
+
     try {
-        const teamSnapshot = await getDoc(doc(db, 'teams', teamId));
-        const teamData = teamSnapshot.data();
-        const workDate = workDay.date || getTodayDateString();
-        assertWorkingDay(teamData, workDate);
-        const limitedWorkDay = applyWorkdayOvertimeLimit(workDay, teamData);
-        const newWork = {
-            teamId,
-            userId,
-            userName,
-            type: (limitedWorkDay && limitedWorkDay.type) ? limitedWorkDay.type : 'full-day',
-            overtimeHours: (limitedWorkDay && limitedWorkDay.overtimeHours) ? Number(limitedWorkDay.overtimeHours) : 0,
-            date: workDate,
-            createdAt: new Date().toISOString(),
-            paid: false
-        };
-        const optionalFields = [
-            'taskTitle',
-            'note',
-            'startedAt',
-            'endedAt',
-            'durationSeconds',
-            'durationHours',
-            'variableHours',
-            'timerMode'
-        ];
-        optionalFields.forEach((field) => {
-            if (limitedWorkDay[field] !== undefined && limitedWorkDay[field] !== null) {
-                newWork[field] = limitedWorkDay[field];
-            }
-        });
-        await addDoc(collection(db, 'works'), newWork);
-        try {
-            const existingStats = JSON.parse(localStorage.getItem('userStats')) || { workDays: [] };
-            const today = newWork.date;
-            if (!existingStats.workDays.includes(today)) {
-                existingStats.workDays.push(today);
-            }
-            localStorage.setItem('userStats', JSON.stringify(existingStats));
-        } catch (e) {
-            console.log('Error saving to localStorage:', e);
-        }
+        const id = await executeRegisterWorkday({ teamId, userId, userName, workDay });
+        return { queued: false, id };
     } catch (error) {
+        if (isOfflineError(error)) {
+            return enqueueRegisterWorkday(teamId, userId, userName, workDay);
+        }
         console.error("Error registering workday:", error);
         throw error;
     }

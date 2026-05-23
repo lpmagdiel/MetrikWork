@@ -13,4 +13,6 @@ export * from './teamStats.js';
 export * from './teamPayments.js';
 export * from './workLimits.js';
 export * from './permissions.js';
+export * from './offlineQueue.js';
+export * from './offlineActions.js';
 export { auth, db, googleProvider } from './firebase.js';

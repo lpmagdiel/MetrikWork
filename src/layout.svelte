@@ -1,4 +1,5 @@
 <script>
+  import { onMount } from "svelte";
   import { currentPath, navigateTo } from "./router.js";
   import {
     userStore,
@@ -8,6 +9,7 @@
   } from "./data/stores.js";
   import NavBar from "./components/NavBar.svelte";
   import LoadingSpinner from "./components/LoadingSpinner.svelte";
+  import Toast from "./components/Toast.svelte";
   import UpdateFeaturesModal from "./components/UpdateFeaturesModal.svelte";
   import { updateData } from "./data/updateFeatures.js";
   // Modal de novedades
@@ -15,6 +17,104 @@
 
   let cleanPath = $derived($currentPath.split("?")[0]);
   let hasCheckedUpdate = false;
+  let isOnline = $state(true);
+  let showConnectionToast = $state(false);
+  let connectionToastType = $state("info");
+  let connectionToastMessage = $state("");
+
+  onMount(() => {
+    let connectionCheckId = 0;
+    let showToastTimeout = null;
+
+    function showConnectionStatusToast(type, message) {
+      window.clearTimeout(showToastTimeout);
+      connectionToastType = type;
+      connectionToastMessage = message;
+      showConnectionToast = false;
+
+      showToastTimeout = window.setTimeout(() => {
+        showConnectionToast = true;
+      }, 0);
+    }
+
+    function updateConnectionState(nextOnline, notify = false) {
+      const wasOnline = isOnline;
+      isOnline = nextOnline;
+
+      if (!notify || wasOnline === nextOnline) return;
+
+      if (nextOnline) {
+        showConnectionStatusToast(
+          "success",
+          "Conexión restablecida. Sincronizando cambios pendientes.",
+        );
+      } else {
+        showConnectionStatusToast(
+          "warning",
+          "Sin conexión. Puedes seguir usando las funciones disponibles.",
+        );
+      }
+    }
+
+    async function confirmConnectionState() {
+      if (typeof window === "undefined") return;
+
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 2500);
+
+      try {
+        await fetch(`/__metricwork_connectivity_check__?t=${Date.now()}`, {
+          method: "HEAD",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        return true;
+      } catch {
+        return typeof navigator === "undefined" ? true : navigator.onLine !== false;
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+    }
+
+    const setOnline = () => {
+      connectionCheckId += 1;
+      updateConnectionState(true, true);
+    };
+
+    const setOffline = async () => {
+      const checkId = ++connectionCheckId;
+      const stillOnline = await confirmConnectionState();
+      if (checkId !== connectionCheckId) return;
+      updateConnectionState(stillOnline, true);
+    };
+
+    const syncConnectionFromNavigator = () => {
+      if (typeof navigator === "undefined") return;
+      if (navigator.onLine === false) {
+        setOffline();
+      } else if (!isOnline) {
+        setOnline();
+      }
+    };
+
+    const browserReportsOnline =
+      typeof navigator === "undefined" ? true : navigator.onLine !== false;
+    isOnline = true;
+    if (!browserReportsOnline) setOffline();
+
+    window.addEventListener("online", setOnline);
+    window.addEventListener("offline", setOffline);
+    window.addEventListener("focus", syncConnectionFromNavigator);
+    document.addEventListener("visibilitychange", syncConnectionFromNavigator);
+
+    return () => {
+      window.clearTimeout(showToastTimeout);
+      window.removeEventListener("online", setOnline);
+      window.removeEventListener("offline", setOffline);
+      window.removeEventListener("focus", syncConnectionFromNavigator);
+      document.removeEventListener("visibilitychange", syncConnectionFromNavigator);
+    };
+  });
 
   $effect(() => {
     // Solo mostrar si el usuario está autenticado y no está en login/hello/tour
@@ -158,6 +258,12 @@
     {/await}
   {/if}
   <UpdateFeaturesModal open={showUpdateModal} onClose={closeUpdateModal} />
+  <Toast
+    message={connectionToastMessage}
+    type={connectionToastType}
+    duration={3500}
+    bind:show={showConnectionToast}
+  />
 </main>
 
 {#if showNav}
@@ -200,4 +306,5 @@
     margin: 0;
     color: var(--text-secondary);
   }
+
 </style>
