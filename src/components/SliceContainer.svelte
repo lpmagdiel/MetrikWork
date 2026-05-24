@@ -25,7 +25,7 @@
     registeredOpen = show;
   };
 
-  $: syncOpenState();
+  $: show, syncOpenState();
 
   onDestroy(() => {
     if (!registeredOpen) return;
