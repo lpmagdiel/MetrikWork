@@ -180,6 +180,46 @@
     locations: () => import("./routes/team-locations.svelte"),
   };
 
+  const routeReloadStorageKey = "metricwork:route-reload-url";
+  const dynamicImportErrorPattern =
+    /dynamically imported module|failed to fetch dynamically imported module|importing a module script failed|loading chunk|unable to preload css|module script/i;
+
+  function getErrorMessage(error) {
+    if (!error) return "";
+    if (typeof error === "string") return error;
+    return [error.message, error.name, error.stack].filter(Boolean).join("\n");
+  }
+
+  function isDynamicImportError(error) {
+    return dynamicImportErrorPattern.test(getErrorMessage(error));
+  }
+
+  function reloadOnceForFreshRoute() {
+    if (typeof window === "undefined") return false;
+
+    const currentUrl = window.location.href;
+    try {
+      if (sessionStorage.getItem(routeReloadStorageKey) === currentUrl) return false;
+      sessionStorage.setItem(routeReloadStorageKey, currentUrl);
+    } catch {
+      // If storage is blocked, reloading is still the least surprising recovery.
+    }
+
+    window.location.reload();
+    return true;
+  }
+
+  async function loadRouteModule(loader) {
+    try {
+      return await loader();
+    } catch (error) {
+      if (isDynamicImportError(error)) {
+        reloadOnceForFreshRoute();
+      }
+      throw error;
+    }
+  }
+
   let routeInfo = $derived.by(() => {
     // 1. Handle nested team routes: /teams/:teamId/:subpage
     if (cleanPath.startsWith("/teams/")) {
@@ -203,7 +243,7 @@
     return { loader: routeLoaders[cleanPath] || routeLoaders["/"], teamId: null };
   });
 
-  let routeModulePromise = $derived(routeInfo.loader());
+  let routeModulePromise = $derived(loadRouteModule(routeInfo.loader));
 
   let canRender = $derived(
     $authReady &&
@@ -300,6 +340,9 @@
       <section class="route-error">
         <h1>No se pudo cargar esta vista</h1>
         <p>{error?.message || "Inténtalo de nuevo en unos segundos."}</p>
+        <button type="button" onclick={() => window.location.reload()}>
+          Recargar app
+        </button>
       </section>
     {/await}
   {/if}
@@ -351,6 +394,18 @@
   .route-error p {
     margin: 0;
     color: var(--text-secondary);
+  }
+
+  .route-error button {
+    justify-self: center;
+    border: 0;
+    border-radius: 8px;
+    padding: 0.8rem 1rem;
+    background: var(--accent-color, #e3654e);
+    color: var(--accent-ink, #ffffff);
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
   }
 
 </style>

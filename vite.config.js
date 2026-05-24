@@ -240,6 +240,7 @@ export default defineConfig(({ mode }) => {
           ]
         },
         workbox: {
+          cleanupOutdatedCaches: true,
           navigateFallback: '/index.html',
           globPatterns: ['**/*.{js,css,html,ico,png,svg,webp}'],
           runtimeCaching: [

@@ -18,6 +18,51 @@ import {
   startOfflineActionsSync
 } from './data/index.js';
 
+const CHUNK_RELOAD_URL_KEY = 'metricwork:chunk-reload-url';
+const CHUNK_LOAD_ERROR_PATTERN =
+  /dynamically imported module|failed to fetch dynamically imported module|importing a module script failed|loading chunk|unable to preload css|module script/i;
+
+function getErrorMessage(error) {
+  if (!error) return '';
+  if (typeof error === 'string') return error;
+  return [error.message, error.name, error.stack].filter(Boolean).join('\n');
+}
+
+function reloadForFreshAssets() {
+  const currentUrl = window.location.href;
+
+  try {
+    if (sessionStorage.getItem(CHUNK_RELOAD_URL_KEY) === currentUrl) return false;
+    sessionStorage.setItem(CHUNK_RELOAD_URL_KEY, currentUrl);
+  } catch {
+    // If sessionStorage is unavailable, a single hard reload is still the best recovery path.
+  }
+
+  window.location.reload();
+  return true;
+}
+
+window.setTimeout(() => {
+  try {
+    if (sessionStorage.getItem(CHUNK_RELOAD_URL_KEY) === window.location.href) {
+      sessionStorage.removeItem(CHUNK_RELOAD_URL_KEY);
+    }
+  } catch {
+    // Ignore storage failures.
+  }
+}, 10000);
+
+window.addEventListener('vite:preloadError', (event) => {
+  event.preventDefault();
+  reloadForFreshAssets();
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  if (!CHUNK_LOAD_ERROR_PATTERN.test(getErrorMessage(event.reason))) return;
+  event.preventDefault();
+  reloadForFreshAssets();
+});
+
 let incomingCallUnsubscribe = null;
 const foregroundedCallIds = new Set();
 
