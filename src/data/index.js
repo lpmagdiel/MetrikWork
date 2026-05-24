@@ -5,6 +5,7 @@ export * from './inventory.js';
 export * from './notes.js';
 export * from './locations.js';
 export * from './notifications.js';
+export * from './requests.js';
 export * from './pushNotifications.js';
 export * from './chat.js';
 export * from './presence.js';

@@ -1,7 +1,7 @@
 <script>
   import { onMount, tick } from "svelte";
   import {
-    CalendarDays,
+    ClipboardList,
     LayoutDashboard,
     SlidersHorizontal,
     TimerReset,
@@ -13,7 +13,7 @@
     { href: "/", label: "Inicio", icon: LayoutDashboard },
     { href: "/teams", label: "Equipos", icon: Users },
     { href: "/timer", label: "Timer", icon: TimerReset },
-    { href: "/calendar", label: "Agenda", icon: CalendarDays },
+    { href: "/requests", label: "Solicitudes", icon: ClipboardList },
     { href: "/settings", label: "Ajustes", icon: SlidersHorizontal },
   ];
 

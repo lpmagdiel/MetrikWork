@@ -153,6 +153,7 @@
     "/hello": () => import("./routes/hello.svelte"),
     "/settings": () => import("./routes/settings.svelte"),
     "/calendar": () => import("./routes/calendar.svelte"),
+    "/requests": () => import("./routes/requests.svelte"),
     "/notifications": () => import("./routes/notifications.svelte"),
     "/inventory": () => import("./routes/inventory.svelte"),
     "/calculator": () => import("./routes/calculator.svelte"),

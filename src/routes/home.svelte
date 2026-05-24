@@ -12,18 +12,16 @@
   import SliceContainer from "../components/SliceContainer.svelte";
   import {
     Bell,
+    BellRing,
     Calendar,
     Users,
     TrendingUp,
-    MessageSquare,
     Calculator,
     StickyNote,
-    Timer,
-    Sparkles,
+    WalletCards,
     MapPinned,
     MapPin,
     Package,
-    Search,
     ArrowRight,
     PackageSearch,
     Info,
@@ -33,6 +31,7 @@
   import { navigateTo } from "../router.js";
 
   let hasUnread = $derived($notificationsStore.some((n) => !n.opened));
+  let unreadCount = $derived($notificationsStore.filter((n) => !n.opened).length);
 
   onMount(async () => {
     if ($userStore?.uid) {
@@ -358,10 +357,17 @@
         </div>
       </div>
       <div class="header-actions">
-        <a href="/notifications" class="notification-link">
-          <Bell size={24} color={hasUnread ? "var(--inactive-color)" : "var(--accent-ink)"} />
+        <a
+          href="/notifications"
+          class="notification-link"
+          class:has-unread={hasUnread}
+          aria-label={hasUnread ? `${unreadCount} notificaciones pendientes` : "Notificaciones"}
+        >
           {#if hasUnread}
-            <span class="badget"></span>
+            <BellRing size={27} strokeWidth={2.4} />
+            <span class="notification-count">{unreadCount > 99 ? "99+" : unreadCount}</span>
+          {:else}
+            <Bell size={24} strokeWidth={2.3} />
           {/if}
         </a>
       </div>
@@ -435,11 +441,11 @@
         </div>
         <span class="action-label">Estadísticas</span>
       </button>
-      <a href="/timer" class="action-btn">
+      <a href="/calendar" class="action-btn">
         <div class="action-icon-box">
-          <Timer size={28} />
+          <Calendar size={28} />
         </div>
-        <span class="action-label">Timer</span>
+        <span class="action-label">Agenda</span>
       </a>
       <a href="/calculator" class="action-btn">
         <div class="action-icon-box">
@@ -487,35 +493,26 @@
       </div>
     </div>
 
-    <!-- Tutorial Banner -->
-    <a href="/tour" class="tutorial-card">
-      <div class="tutorial-icon">
-        <Sparkles size={32} />
+    <!-- Main Earnings Card -->
+    <button
+      type="button"
+      class="main-card"
+      title="Ver detalle de ganancias"
+      aria-label="Ver detalle de ganancias"
+      onclick={() => (showEarningsDetails = true)}
+    >
+      <div class="main-card-icon">
+        <WalletCards size={30} />
       </div>
-      <div class="tutorial-text">
-        <h3>Aprende a usar MetricWork</h3>
-        <p>Domina el calendario, tareas y equipos en 1 minuto.</p>
-      </div>
-      <div class="tutorial-arrow">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
-      </div>
-    </a>
-        <!-- Main Earnings Card -->
-    <div class="main-card">
-      <div class="main-card-header">
+      <div class="main-card-content">
         <span>Ganancias estimadas del mes</span>
-        <button
-          type="button"
-          class="earnings-details-btn"
-          title="Ver detalle de ganancias"
-          aria-label="Ver detalle de ganancias"
-          onclick={() => (showEarningsDetails = true)}
-        >
-          <Info size={18} />
-        </button>
+        <strong>{formatCurrency(estimatedEarnings)}</strong>
+        <small>{getEarningsMonthLabel()} · {formatWorkDays(workDaysThisMonth)}</small>
       </div>
-      <div class="main-card-value">{formatCurrency(estimatedEarnings)}</div>
-    </div>
+      <span class="earnings-details-btn" aria-hidden="true">
+        <Info size={18} />
+      </span>
+    </button>
   </div>
 </div>
 
@@ -673,77 +670,131 @@
 
   .notification-link {
     position: relative;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: 42px;
+    height: 40px;
     color: var(--accent-ink);
-    background: transparent;
-    border: none;
+    background: color-mix(in srgb, var(--bg-card) 34%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent-ink) 12%, transparent);
+    border-radius: 15px;
+    text-decoration: none;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
     transition: all 0.2s ease;
+  }
+
+  .notification-link.has-unread {
+    width: 58px;
+    background: var(--accent-strong);
+    color: var(--bg-page);
+    border-color: transparent;
+    box-shadow: 0 12px 28px color-mix(in srgb, var(--accent-strong) 24%, transparent);
   }
   
   .notification-link:active {
     transform: scale(0.95);
   }
 
-  .badget {
+  .notification-count {
     position: absolute;
-    top: 2px;
-    right: 4px;
-    width: 8px;
-    height: 8px;
+    top: -7px;
+    right: -7px;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     background-color: var(--danger-color);
-    border-radius: 50%;
-    box-shadow: 0 0 0 2px var(--accent-color);
+    color: #ffffff;
+    border: 2px solid var(--accent-color);
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 900;
+    line-height: 1;
+    box-shadow: 0 6px 16px rgba(220, 38, 38, 0.28);
   }
 
   /* Main Card Section */
   .main-card {
-    background: var(--bg-card);
+    width: 100%;
+    background: linear-gradient(135deg, var(--accent-color) 0%, var(--bg-card) 100%);
     border-radius: var(--radius-lg);
-    padding: 24px;
+    padding: 20px;
+    border: 1px solid var(--border-color);
     box-shadow: var(--shadow-card);
     display: flex;
-    flex-direction: column;
-    gap: 12px;
+    align-items: center;
+    gap: 16px;
+    color: var(--accent-ink);
+    text-align: left;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
   }
 
-  .main-card-header {
+  .main-card:active {
+    transform: scale(0.98);
+  }
+
+  .main-card-icon {
+    width: 58px;
+    height: 58px;
+    background: var(--accent-strong);
+    color: var(--bg-card);
+    border-radius: 16px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--text-primary);
+    justify-content: center;
+    flex-shrink: 0;
   }
 
-  .main-card-value {
-    font-size: 42px;
+  :global(:root.dark) .main-card-icon {
+    color: #000000;
+  }
+
+  .main-card-content {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .main-card-content span {
+    color: var(--accent-ink);
+    opacity: 0.76;
+    font-size: 13px;
     font-weight: 800;
-    color: var(--text-primary);
+  }
+
+  .main-card-content strong {
+    color: var(--accent-ink);
+    font-size: clamp(28px, 8vw, 42px);
+    font-weight: 800;
     letter-spacing: 0;
     line-height: 1;
   }
 
+  .main-card-content small {
+    color: var(--accent-ink);
+    opacity: 0.68;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+
   .earnings-details-btn {
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
     border: none;
     border-radius: var(--radius-sm);
-    background: var(--bg-input);
-    color: var(--text-primary);
+    background: color-mix(in srgb, var(--accent-ink) 10%, transparent);
+    color: var(--accent-ink);
     display: flex;
     align-items: center;
     justify-content: center;
-    cursor: pointer;
     flex-shrink: 0;
-  }
-
-  .earnings-details-btn:active {
-    transform: scale(0.95);
   }
 
   .earnings-slice {
@@ -1260,57 +1311,4 @@
     cursor: pointer;
   }
 
-  /* Tutorial Card */
-  .tutorial-card {
-    background: linear-gradient(135deg, var(--accent-color) 0%, #ffffff 100%);
-    border-radius: var(--radius-lg);
-    padding: 20px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    text-decoration: none;
-    box-shadow: var(--shadow-card);
-    border: 1px solid var(--border-color);
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-  }
-
-  .tutorial-card:active {
-    transform: scale(0.98);
-  }
-
-  .tutorial-icon {
-    width: 56px;
-    height: 56px;
-    background: var(--accent-strong);
-    color: white;
-    border-radius: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
-
-  .tutorial-text {
-    flex: 1;
-  }
-
-  .tutorial-text h3 {
-    font-size: 16px;
-    font-weight: 700;
-    margin-bottom: 4px;
-    color: var(--accent-ink);
-  }
-
-  .tutorial-text p {
-    font-size: 13px;
-    color: var(--accent-ink);
-    opacity: 0.7;
-    margin: 0;
-    line-height: 1.4;
-  }
-
-  .tutorial-arrow {
-    color: var(--accent-ink);
-    opacity: 0.5;
-  }
 </style>
