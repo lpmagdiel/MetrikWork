@@ -2,6 +2,7 @@ import { writable, get } from 'svelte/store';
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged, signOut, updateProfile } from 'firebase/auth';
 import { deleteField, doc, setDoc, getDoc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { uploader } from './fileHelper.js';
 
 export const userStore = writable(null);
 export const authReady = writable(false);
@@ -9,6 +10,10 @@ export const settingsStore = writable(null);
 
 let settingsUnsubscribe;
 const PRIVATE_PROFILE_FIELDS = ['phone', 'address', 'iban'];
+const CLOUDINARY_PRESET_AVATAR =
+    import.meta.env.VITE_CLOUDINARY_PRESET_AVATAR ||
+    import.meta.env.CLOUDINARY_PRESET_AVATAR ||
+    'MetricWorkProfile';
 
 function splitProfileData(data = {}) {
     const publicData = {};
@@ -68,15 +73,37 @@ async function migrateLegacyPrivateProfile(uid) {
 
 async function saveAuthPublicProfile(user) {
     const userRef = doc(db, 'users', user.uid);
+    const userSnapshot = await getDoc(userRef);
+    const existingData = userSnapshot.exists() ? userSnapshot.data() : {};
+    const existingAvatar = isProfileImage(existingData.avatar) && !isProviderProfileImage(existingData.avatar)
+        ? existingData.avatar
+        : '';
+    const existingPhotoURL = isProfileImage(existingData.photoURL) && !isProviderProfileImage(existingData.photoURL)
+        ? existingData.photoURL
+        : '';
+    let copiedProviderImage = '';
+
+    if (!existingAvatar && !existingPhotoURL && isProviderProfileImage(user.photoURL)) {
+        try {
+            copiedProviderImage = await uploader(user.photoURL, CLOUDINARY_PRESET_AVATAR);
+        } catch (error) {
+            console.warn('No se pudo copiar la foto de Google a Cloudinary:', error);
+        }
+    }
+
+    const profileImage = existingAvatar || existingPhotoURL || copiedProviderImage;
     const publicProfile = {
         email: user.email,
         emailNormalized: user.email?.trim().toLowerCase() || '',
         name: user.displayName || '',
-        photoURL: user.photoURL || '',
+        photoURL: profileImage || '',
         lastLogin: new Date().toISOString()
     };
 
-    const userSnapshot = await getDoc(userRef);
+    if (copiedProviderImage && !existingAvatar) {
+        publicProfile.avatar = copiedProviderImage;
+    }
+
     if (userSnapshot.exists()) {
         await updateDoc(userRef, {
             ...publicProfile,
@@ -88,6 +115,23 @@ async function saveAuthPublicProfile(user) {
     } else {
         await setDoc(userRef, publicProfile, { merge: true });
     }
+
+    if (copiedProviderImage && auth.currentUser?.uid === user.uid) {
+        try {
+            await updateProfile(auth.currentUser, { photoURL: copiedProviderImage });
+        } catch (error) {
+            console.warn('No se pudo actualizar la foto en Firebase Auth:', error);
+        }
+    }
+
+    const currentUser = get(userStore);
+    if (currentUser?.uid === user.uid) {
+        userStore.update((storedUser) => ({
+            ...storedUser,
+            photoURL: publicProfile.photoURL,
+            ...(publicProfile.avatar ? { avatar: publicProfile.avatar } : {})
+        }));
+    }
 }
 
 export function isProfileImage(value) {
@@ -95,12 +139,23 @@ export function isProfileImage(value) {
     return /^(https?:|data:|blob:)/i.test(value.trim());
 }
 
+export function isProviderProfileImage(value) {
+    if (!value || typeof value !== 'string') return false;
+
+    try {
+        const { hostname } = new URL(value.trim());
+        return hostname === 'lh3.googleusercontent.com' || hostname.endsWith('.googleusercontent.com');
+    } catch {
+        return false;
+    }
+}
+
 export function getProfileImage(profile) {
     if (!profile) return '';
     const avatar = typeof profile.avatar === 'string' ? profile.avatar.trim() : '';
     const photoURL = typeof profile.photoURL === 'string' ? profile.photoURL.trim() : '';
-    if (isProfileImage(avatar)) return avatar;
-    if (isProfileImage(photoURL)) return photoURL;
+    if (isProfileImage(avatar) && !isProviderProfileImage(avatar)) return avatar;
+    if (isProfileImage(photoURL) && !isProviderProfileImage(photoURL)) return photoURL;
     return '';
 }
 

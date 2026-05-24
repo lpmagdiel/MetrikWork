@@ -1,15 +1,37 @@
 <script>
+  import { onDestroy } from "svelte";
   import { ChevronDown } from "lucide-svelte";
   import { useSwipe } from "svelte-gestures";
   import { slide } from "svelte/transition";
+  import { openSliceContainers } from "../data/ui.js";
+
   export let show = false;
   export let bg = "var(--bg-card)";
+
+  let registeredOpen = false;
 
   const handleSwipe = (event) => {
     if (event.detail.direction == "bottom") {
       show = false;
     }
   };
+
+  const syncOpenState = () => {
+    if (show === registeredOpen) return;
+
+    openSliceContainers.update((count) =>
+      Math.max(0, count + (show ? 1 : -1)),
+    );
+    registeredOpen = show;
+  };
+
+  $: syncOpenState();
+
+  onDestroy(() => {
+    if (!registeredOpen) return;
+
+    openSliceContainers.update((count) => Math.max(0, count - 1));
+  });
 </script>
 
 {#if show}

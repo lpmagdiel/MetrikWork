@@ -1,5 +1,5 @@
 <script>
-  import { updateUserProfile, userStore } from "../data/stores.js";
+  import { getProfileImage, updateUserProfile, userStore } from "../data/stores.js";
   import {
     cropToSquare,
     resizer,
@@ -35,6 +35,13 @@
   function isImageUrl(url) {
     if (!url) return false;
     return url.startsWith("http") || url.startsWith("data:");
+  }
+
+  function getDisplayAvatar(profile) {
+    const image = getProfileImage(profile);
+    if (image) return image;
+    if (profile?.avatar && !isImageUrl(profile.avatar)) return profile.avatar;
+    return "";
   }
 
   async function handleAvatarUpload(event) {
@@ -85,7 +92,7 @@
     }
   });
 
-  const displayAvatar = $derived(optimisticAvatar || $userStore?.avatar || $userStore?.photoURL);
+  const displayAvatar = $derived(optimisticAvatar || getDisplayAvatar($userStore));
   const isImage = $derived(isImageUrl(displayAvatar));
 </script>
 

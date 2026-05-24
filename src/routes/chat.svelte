@@ -42,6 +42,7 @@
     teamsStore,
     locationsStore,
     getUserProfile,
+    getProfileImage,
     userPresenceStore,
     subscribeToUsersPresence,
     isUserPresenceActive,
@@ -112,7 +113,7 @@
     activeCall?.receiverName ||
     "Usuario",
   );
-  let remoteAvatarUrl = $derived(remoteProfile?.avatar || remoteProfile?.photoURL || selectedMember?.avatar || selectedMember?.photoURL || "");
+  let remoteAvatarUrl = $derived(getProfileImage(remoteProfile) || getProfileImage(selectedMember) || "");
   let remoteVideoEnabled = $derived(activeCall?.media?.[remoteUserId]?.videoEnabled !== false);
   let showRemoteAvatar = $derived(!remoteHasVideo || !remoteVideoEnabled);
   const pageSize = 20;

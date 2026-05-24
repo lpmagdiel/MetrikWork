@@ -8,6 +8,7 @@
     Users,
   } from "lucide-svelte";
   import { currentPath } from "../router.js";
+  import { hasOpenSliceContainer } from "../data/ui.js";
 
   const navItems = [
     { href: "/", label: "Inicio", icon: LayoutDashboard },
@@ -80,7 +81,7 @@
   });
 </script>
 
-<nav class="navbar">
+<nav class="navbar" class:hidden={$hasOpenSliceContainer}>
   <ul bind:this={navList} style={navStyle}>
     {#each navItems as item, index}
       {@const active = isPathActive($currentPath, item.href)}
@@ -111,6 +112,29 @@
     z-index: 100;
     padding: 0 20px;
     pointer-events: none;
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+    transition:
+      transform 0.34s cubic-bezier(0.3, 0.8, 0.2, 1),
+      opacity 0.22s ease,
+      visibility 0s linear 0s;
+    will-change: transform, opacity;
+  }
+
+  .navbar.hidden {
+    opacity: 0;
+    visibility: hidden;
+    transform: translate3d(
+      0,
+      calc(
+        100% + var(--bottom-nav-gap) + env(safe-area-inset-bottom, 0px) + 12px
+      ),
+      0
+    );
+    transition:
+      transform 0.28s cubic-bezier(0.4, 0, 0.8, 0.2),
+      opacity 0.18s ease,
+      visibility 0s linear 0.28s;
   }
 
   .navbar ul {
