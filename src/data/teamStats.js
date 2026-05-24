@@ -8,17 +8,24 @@ export async function getTeamAdvancedStatsData(teamId) {
             works: [],
             payments: [],
             inventory: [],
-            locations: []
+            locations: [],
+            absenceRequests: []
         };
     }
 
     const paymentsQuery = query(collection(db, 'team_payments'), where('teamId', '==', teamId));
+    const absenceRequestsQuery = query(
+        collection(db, 'absenceRequests'),
+        where('teamId', '==', teamId),
+        where('status', '==', 'aceptado')
+    );
 
-    const [works, paymentsSnapshot, inventorySnapshot, locationsSnapshot] = await Promise.all([
+    const [works, paymentsSnapshot, inventorySnapshot, locationsSnapshot, absenceRequestsSnapshot] = await Promise.all([
         getTeamWorks(teamId),
         getDocs(paymentsQuery),
         getDocs(collection(db, 'teams', teamId, 'inventory')),
-        getDocs(collection(db, 'teams', teamId, 'locations'))
+        getDocs(collection(db, 'teams', teamId, 'locations')),
+        getDocs(absenceRequestsQuery)
     ]);
 
     const payments = [];
@@ -36,11 +43,17 @@ export async function getTeamAdvancedStatsData(teamId) {
         locations.push({ id: locationDoc.id, ...locationDoc.data() });
     });
 
+    const absenceRequests = [];
+    absenceRequestsSnapshot.forEach((requestDoc) => {
+        absenceRequests.push({ id: requestDoc.id, ...requestDoc.data() });
+    });
+
     return {
         works,
         payments,
         inventory,
-        locations: locations.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+        locations: locations.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)),
+        absenceRequests: absenceRequests.sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''))
     };
 }
 

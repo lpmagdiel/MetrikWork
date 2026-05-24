@@ -500,6 +500,7 @@
   select,
   textarea {
     width: 100%;
+    min-width: 0;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
     background: var(--bg-input);
@@ -516,6 +517,14 @@
   select {
     min-height: 46px;
     padding: 0 12px;
+  }
+
+  input[type="date"] {
+    min-width: 0;
+    max-width: 100%;
+    padding-inline: 8px;
+    appearance: none;
+    -webkit-appearance: none;
   }
 
   textarea {
@@ -542,8 +551,8 @@
 
   .date-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
   }
 
   .date-grid > div {
@@ -750,7 +759,6 @@
 
   @media (max-width: 520px) {
     .summary-grid,
-    .date-grid,
     .section-tabs,
     .review-actions {
       grid-template-columns: 1fr;

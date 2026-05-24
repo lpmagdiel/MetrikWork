@@ -201,7 +201,11 @@ service cloud.firestore {
       allow read: if request.auth != null &&
                   (
                     request.auth.uid == resource.data.requesterId ||
-                    request.auth.uid == resource.data.adminId
+                    request.auth.uid == resource.data.adminId ||
+                    (
+                      resource.data.status == "aceptado" &&
+                      hasTeamPermission(resource.data.teamId, "stats", "view")
+                    )
                   );
 
       allow create: if request.auth != null &&

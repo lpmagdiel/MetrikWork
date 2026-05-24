@@ -2,6 +2,7 @@
   import {
     AlertCircle,
     BarChart3,
+    CalendarCheck,
     Clock,
     Download,
     DollarSign,
@@ -35,6 +36,7 @@
   let payments = $state([]);
   let inventory = $state([]);
   let locations = $state([]);
+  let absenceRequests = $state([]);
   let isLoading = $state(false);
   let isSavingBudget = $state(false);
   let period = $state("month");
@@ -115,6 +117,14 @@
     }),
   );
 
+  let filteredAcceptedRequests = $derived.by(() =>
+    absenceRequests.filter((request) => {
+      if (!requestOverlapsRange(request, range)) return false;
+      if (!matchesMember(request.requesterId)) return false;
+      return matchesRequestLocation(request, selectedLocationId);
+    }),
+  );
+
   let currentConsumables = $derived.by(() =>
     inventory.filter((item) => isConsumable(item) && matchesProductLocation(item, selectedLocationId)),
   );
@@ -180,6 +190,11 @@
     const budgetRemaining = budgetBase - spentAgainstBudget;
     const budgetUsage = budgetBase > 0 ? (spentAgainstBudget / budgetBase) * 100 : 0;
     const pendingPayroll = Math.max(laborCost - paymentsCost, 0);
+    const acceptedAbsenceRequests = filteredAcceptedRequests.length;
+    const acceptedAbsenceDays = filteredAcceptedRequests.reduce(
+      (sum, request) => sum + getRequestDays(request),
+      0,
+    );
 
     return {
       fullDays,
@@ -199,6 +214,8 @@
       budgetRemaining,
       budgetUsage,
       pendingPayroll,
+      acceptedAbsenceRequests,
+      acceptedAbsenceDays,
       totalWorks: filteredWorks.length,
       totalPayments: filteredPayments.length,
       activeDates: activeDates.size,
@@ -379,6 +396,7 @@
       payments = data.payments;
       inventory = data.inventory;
       locations = data.locations;
+      absenceRequests = data.absenceRequests || [];
     } catch (error) {
       console.error("Error loading advanced team stats:", error);
       showNotification("Error al cargar estadísticas", "error");
@@ -433,6 +451,10 @@
 
   function matchesProductLocation(item, locationId) {
     return locationId === "all" || item.locationId === locationId;
+  }
+
+  function matchesRequestLocation(request, locationId) {
+    return locationId === "all" || isMemberAssignedToLocation(request.requesterId, locationId);
   }
 
   function workBelongsToLocation(work, locationId) {
@@ -527,6 +549,24 @@
     return dateKey >= currentRange.start && dateKey <= currentRange.end;
   }
 
+  function requestOverlapsRange(request, currentRange) {
+    const start = getDateKey(request.startDate);
+    const end = getDateKey(request.endDate || request.startDate);
+    if (!start || !end) return false;
+    return start <= currentRange.end && end >= currentRange.start;
+  }
+
+  function getRequestDays(request) {
+    const startKey = getDateKey(request.startDate);
+    const endKey = getDateKey(request.endDate || request.startDate);
+    if (!startKey || !endKey) return 0;
+    const start = new Date(`${startKey}T00:00:00`);
+    const end = new Date(`${endKey}T00:00:00`);
+    const diff = end.getTime() - start.getTime();
+    if (Number.isNaN(diff) || diff < 0) return 0;
+    return Math.floor(diff / 86400000) + 1;
+  }
+
   function getPeriodRange(periodKey) {
     const today = new Date();
     const year = today.getFullYear();
@@ -571,6 +611,14 @@
       month: "short",
       year: "numeric",
     });
+  }
+
+  function formatRequestRange(request) {
+    const start = getDateKey(request.startDate);
+    const end = getDateKey(request.endDate || request.startDate);
+    if (!start) return "";
+    if (!end || start === end) return formatDate(start);
+    return `${formatDate(start)} - ${formatDate(end)}`;
   }
 
   function formatMoney(value) {
@@ -644,6 +692,8 @@
             ["Consumibles del periodo", formatMoney(summary.consumableCost)],
             ["Jornadas equivalentes", formatNumber(summary.totalWorkDays)],
             ["Horas extra", `${formatNumber(summary.overtimeHours)}h`],
+            ["Solicitudes aceptadas", summary.acceptedAbsenceRequests],
+            ["Días de ausencia aceptados", formatNumber(summary.acceptedAbsenceDays)],
             ["Miembros activos", summary.activeMembers],
             ["Ubicaciones activas", summary.activeLocations],
           ],
@@ -714,6 +764,17 @@
             getLocationName(getPaymentLocationId(payment)) || "Sin ubicacion",
             payment.type === "total" ? "Pago total" : "Pago parcial",
             formatMoney(payment.amount),
+          ]),
+        },
+        {
+          title: "Solicitudes aceptadas",
+          headers: ["Periodo", "Miembro", "Tipo", "Dias", "Nota"],
+          rows: filteredAcceptedRequests.map((request) => [
+            formatRequestRange(request),
+            getMemberName(request.requesterId),
+            request.absenceTypeLabel || "Ausencia",
+            formatNumber(getRequestDays(request), 0),
+            request.note || "",
           ]),
         },
       ],
@@ -883,6 +944,13 @@
             </article>
 
             <article class="metric-card">
+              <div class="metric-icon requests"><CalendarCheck size={20} /></div>
+              <span>Solicitudes aceptadas</span>
+              <strong>{summary.acceptedAbsenceRequests}</strong>
+              <small>{formatNumber(summary.acceptedAbsenceDays, 0)} días de ausencia</small>
+            </article>
+
+            <article class="metric-card">
               <div class="metric-icon members"><Users size={20} /></div>
               <span>Miembros activos</span>
               <strong>{summary.activeMembers}</strong>
@@ -1007,6 +1075,33 @@
                 </div>
               {:else}
                 <div class="empty-inline">Sin miembros con actividad.</div>
+              {/if}
+            </article>
+          </section>
+
+          <section class="insights-grid">
+            <article class="panel">
+              <div class="panel-heading">
+                <div>
+                  <p>Ausencias</p>
+                  <h2>Solicitudes aceptadas</h2>
+                </div>
+                <CalendarCheck size={20} />
+              </div>
+              {#if filteredAcceptedRequests.length}
+                <div class="request-list">
+                  {#each filteredAcceptedRequests.slice(0, 8) as request (request.id)}
+                    <article class="request-row">
+                      <div>
+                        <h3>{request.absenceTypeLabel || "Ausencia"}</h3>
+                        <p>{getMemberName(request.requesterId)} · {formatRequestRange(request)}</p>
+                      </div>
+                      <strong>{formatNumber(getRequestDays(request), 0)} días</strong>
+                    </article>
+                  {/each}
+                </div>
+              {:else}
+                <div class="empty-inline">Sin solicitudes aceptadas en este periodo.</div>
               {/if}
             </article>
           </section>
@@ -1405,7 +1500,8 @@
   }
 
   .metric-icon.labor,
-  .metric-icon.locations {
+  .metric-icon.locations,
+  .metric-icon.requests {
     background: var(--bg-info-subtle);
     color: var(--info-color);
   }
@@ -1440,7 +1536,8 @@
   }
 
   .bar-list,
-  .member-list {
+  .member-list,
+  .request-list {
     display: grid;
     gap: 12px;
   }
@@ -1539,6 +1636,39 @@
     border: 1px solid var(--border-color);
     border-radius: 12px;
     padding: 10px;
+  }
+
+  .request-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 12px;
+    background: var(--bg-input);
+  }
+
+  .request-row h3 {
+    margin: 0 0 4px;
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .request-row p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.3;
+  }
+
+  .request-row strong {
+    color: var(--info-color);
+    font-size: 13px;
+    text-align: right;
+    white-space: nowrap;
   }
 
   .member-avatar {
