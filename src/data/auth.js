@@ -1,13 +1,94 @@
 import { writable, get } from 'svelte/store';
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged, signOut, updateProfile } from 'firebase/auth';
-import { doc, setDoc, getDoc, onSnapshot } from 'firebase/firestore';
+import { deleteField, doc, setDoc, getDoc, onSnapshot, updateDoc } from 'firebase/firestore';
 
 export const userStore = writable(null);
 export const authReady = writable(false);
 export const settingsStore = writable(null);
 
 let settingsUnsubscribe;
+const PRIVATE_PROFILE_FIELDS = ['phone', 'address', 'iban'];
+
+function splitProfileData(data = {}) {
+    const publicData = {};
+    const privateData = {};
+
+    for (const [key, value] of Object.entries(data)) {
+        if (PRIVATE_PROFILE_FIELDS.includes(key)) {
+            privateData[key] = value;
+        } else {
+            publicData[key] = value;
+        }
+    }
+
+    return { publicData, privateData };
+}
+
+function stripPrivateProfileData(data = {}) {
+    const publicData = { ...data };
+    for (const field of PRIVATE_PROFILE_FIELDS) {
+        delete publicData[field];
+    }
+    return publicData;
+}
+
+function getPrivateProfileData(data = {}) {
+    return PRIVATE_PROFILE_FIELDS.reduce((profile, field) => {
+        profile[field] = typeof data[field] === 'string' ? data[field] : '';
+        return profile;
+    }, {});
+}
+
+async function migrateLegacyPrivateProfile(uid) {
+    if (!uid) return;
+
+    try {
+        const userRef = doc(db, 'users', uid);
+        const userSnapshot = await getDoc(userRef);
+        if (!userSnapshot.exists()) return;
+
+        const legacyPrivateData = getPrivateProfileData(userSnapshot.data());
+        const hasLegacyPrivateData = PRIVATE_PROFILE_FIELDS.some((field) => legacyPrivateData[field]);
+        if (!hasLegacyPrivateData) return;
+
+        await setDoc(doc(db, 'users', uid, 'private', 'profile'), {
+            ...legacyPrivateData,
+            updatedAt: new Date().toISOString()
+        }, { merge: true });
+
+        await updateDoc(userRef, PRIVATE_PROFILE_FIELDS.reduce((updates, field) => {
+            updates[field] = deleteField();
+            return updates;
+        }, {}));
+    } catch (error) {
+        console.error("Error migrating private user profile:", error);
+    }
+}
+
+async function saveAuthPublicProfile(user) {
+    const userRef = doc(db, 'users', user.uid);
+    const publicProfile = {
+        email: user.email,
+        emailNormalized: user.email?.trim().toLowerCase() || '',
+        name: user.displayName || '',
+        photoURL: user.photoURL || '',
+        lastLogin: new Date().toISOString()
+    };
+
+    const userSnapshot = await getDoc(userRef);
+    if (userSnapshot.exists()) {
+        await updateDoc(userRef, {
+            ...publicProfile,
+            ...PRIVATE_PROFILE_FIELDS.reduce((updates, field) => {
+                updates[field] = deleteField();
+                return updates;
+            }, {})
+        });
+    } else {
+        await setDoc(userRef, publicProfile, { merge: true });
+    }
+}
 
 export function isProfileImage(value) {
     if (!value || typeof value !== 'string') return false;
@@ -49,14 +130,10 @@ export function initAuth(setupListeners) {
             };
             userStore.set(userData);
             
-            // Save basic profile for others to see
-            setDoc(doc(db, 'users', user.uid), {
-                email: user.email,
-                emailNormalized: user.email?.trim().toLowerCase() || '',
-                name: user.displayName || '',
-                photoURL: user.photoURL || '',
-                lastLogin: new Date().toISOString()
-            }, { merge: true });
+            // Save only public profile data for others to see.
+            migrateLegacyPrivateProfile(user.uid)
+                .then(() => saveAuthPublicProfile(user))
+                .catch((error) => console.error("Error saving auth public profile:", error));
 
             if (setupListeners) setupListeners(user.uid);
         } else {
@@ -77,7 +154,7 @@ export async function getUserProfile(uid) {
     try {
         const userDoc = await getDoc(doc(db, 'users', uid));
         if (userDoc.exists()) {
-            const data = {...userDoc.data(), id: uid};
+            const data = {...stripPrivateProfileData(userDoc.data()), id: uid};
             const image = getProfileImage(data);
             if (image && !isProfileImage(data.avatar)) {
                 data.avatar = image;
@@ -95,6 +172,41 @@ export async function getUserProfile(uid) {
     }
 }
 
+export async function getUserPrivateProfile(uid) {
+    if (!uid) return null;
+
+    try {
+        const privateDoc = await getDoc(doc(db, 'users', uid, 'private', 'profile'));
+        if (privateDoc.exists()) {
+            return getPrivateProfileData(privateDoc.data());
+        }
+
+        if (auth.currentUser?.uid === uid) {
+            const userDoc = await getDoc(doc(db, 'users', uid));
+            if (userDoc.exists()) {
+                return getPrivateProfileData(userDoc.data());
+            }
+        }
+
+        return null;
+    } catch (error) {
+        console.error("Error getting private user profile:", error);
+        return null;
+    }
+}
+
+export async function getTeamMemberPrivateProfile(teamId, memberId) {
+    if (!teamId || !memberId) return null;
+
+    try {
+        const privateDoc = await getDoc(doc(db, 'teams', teamId, 'privateMemberProfiles', memberId));
+        return privateDoc.exists() ? getPrivateProfileData(privateDoc.data()) : null;
+    } catch (error) {
+        console.error("Error getting team member private profile:", error);
+        return null;
+    }
+}
+
 export async function logout() {
     try {
         await signOut(auth);
@@ -104,15 +216,47 @@ export async function logout() {
     }
 }
 
-export async function updateUserProfile(uid, data) {
+export async function updateUserProfile(uid, data, options = {}) {
     try {
+        await migrateLegacyPrivateProfile(uid);
+
         const userRef = doc(db, 'users', uid);
+        const { publicData, privateData } = splitProfileData(data);
+        const now = new Date().toISOString();
         const profileData = {
-            ...data,
-            updatedAt: new Date().toISOString()
+            ...publicData,
+            updatedAt: now
         };
 
-        await setDoc(userRef, profileData, { merge: true });
+        const userSnapshot = await getDoc(userRef);
+        if (userSnapshot.exists()) {
+            await updateDoc(userRef, {
+                ...profileData,
+                ...PRIVATE_PROFILE_FIELDS.reduce((updates, field) => {
+                    updates[field] = deleteField();
+                    return updates;
+                }, {})
+            });
+        } else {
+            await setDoc(userRef, profileData, { merge: true });
+        }
+
+        if (Object.keys(privateData).length > 0) {
+            const privateProfileData = {
+                ...getPrivateProfileData(privateData),
+                updatedAt: now
+            };
+            await setDoc(doc(db, 'users', uid, 'private', 'profile'), privateProfileData, { merge: true });
+
+            const teamIds = Array.isArray(options.teamIds) ? options.teamIds.filter(Boolean) : [];
+            await Promise.all(teamIds.map((teamId) =>
+                setDoc(doc(db, 'teams', teamId, 'privateMemberProfiles', uid), {
+                    phone: privateProfileData.phone || '',
+                    iban: privateProfileData.iban || '',
+                    updatedAt: now
+                }, { merge: true })
+            ));
+        }
         
         // Update Firebase Auth profile if name is changed
         if (data.name && auth.currentUser) {
@@ -124,7 +268,7 @@ export async function updateUserProfile(uid, data) {
         // Update local userStore if it's the current user
         const currentUser = get(userStore);
         if (currentUser && currentUser.uid === uid) {
-            userStore.update(u => ({ ...u, ...data }));
+            userStore.update(u => ({ ...u, ...publicData }));
         }
 
         userProfileCache[uid] = {

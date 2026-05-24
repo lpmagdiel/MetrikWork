@@ -60,16 +60,96 @@ service cloud.firestore {
              request.resource.data.participants == resource.data.participants;
     }
 
+    function isPublicUserProfileDocument(data) {
+      return data.keys().hasOnly([
+        "email",
+        "emailNormalized",
+        "name",
+        "photoURL",
+        "avatar",
+        "createdAt",
+        "lastLogin",
+        "updatedAt"
+      ]);
+    }
+
+    function isPublicUserProfileCreate() {
+      return isPublicUserProfileDocument(request.resource.data);
+    }
+
+    function isPublicUserProfileUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+               "email",
+               "emailNormalized",
+               "name",
+               "photoURL",
+               "avatar",
+               "createdAt",
+               "lastLogin",
+               "updatedAt",
+               "phone",
+               "address",
+               "iban"
+             ]) &&
+             isPublicUserProfileDocument(request.resource.data);
+    }
+
+    function isUserPrivateProfileData() {
+      return request.resource.data.keys().hasOnly([
+        "phone",
+        "address",
+        "iban",
+        "updatedAt"
+      ]);
+    }
+
+    function isTeamMemberPrivateProfileData() {
+      return request.resource.data.keys().hasOnly([
+        "phone",
+        "iban",
+        "updatedAt"
+      ]);
+    }
+
     // --- USUARIOS ---
     match /users/{userId} {
       // Necesario para ver miembros y buscar usuarios por email.
-      allow read: if request.auth != null;
+      allow read: if request.auth != null &&
+                  (
+                    request.auth.uid == userId ||
+                    isPublicUserProfileDocument(resource.data)
+                  );
 
-      // Solo el usuario puede escribir su propio perfil.
-      allow write: if request.auth != null && request.auth.uid == userId;
+      // Solo el usuario puede escribir su perfil público, sin datos sensibles.
+      allow create: if request.auth != null &&
+                    request.auth.uid == userId &&
+                    isPublicUserProfileCreate();
+      allow update: if request.auth != null &&
+                    request.auth.uid == userId &&
+                    isPublicUserProfileUpdate();
+      allow delete: if request.auth != null && request.auth.uid == userId;
 
-      // Notas y configuraciones dentro del usuario.
-      match /{allSubcollections=**} {
+      match /private/{privateDocId} {
+        allow read, delete: if request.auth != null && request.auth.uid == userId;
+        allow create, update: if request.auth != null &&
+                              request.auth.uid == userId &&
+                              privateDocId == "profile" &&
+                              isUserPrivateProfileData();
+      }
+
+      match /settings/{settingsId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      match /notes/{noteId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      match /locations/{locationId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      match /pushTokens/{tokenId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
     }
@@ -154,6 +234,25 @@ service cloud.firestore {
 
       match /messages/{messageId} {
         allow read, write: if isTeamMember(teamId);
+      }
+
+      match /privateMemberProfiles/{userId} {
+        allow read: if request.auth != null &&
+                    (
+                      request.auth.uid == userId ||
+                      isTeamAdmin(teamId) ||
+                      hasTeamPermission(teamId, "payments", "view") ||
+                      hasTeamPermission(teamId, "payments", "edit")
+                    );
+        allow create, update: if request.auth != null &&
+                              request.auth.uid == userId &&
+                              isTeamMember(teamId) &&
+                              isTeamMemberPrivateProfileData();
+        allow delete: if request.auth != null &&
+                      (
+                        request.auth.uid == userId ||
+                        isTeamAdmin(teamId)
+                      );
       }
     }
 

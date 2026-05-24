@@ -5,6 +5,9 @@
   import {
     User,
     Mail,
+    Phone,
+    MapPin,
+    Landmark,
     LogOut,
     Bell,
     Moon,
@@ -19,7 +22,9 @@
     logout,
     updateUserProfile,
     getUserProfile,
+    getUserPrivateProfile,
     settingsStore,
+    teamsStore,
     updateSettings,
     pushNotificationState,
     requestPushNotifications,
@@ -35,6 +40,9 @@
 
   let name = $state("");
   let email = $state("");
+  let phone = $state("");
+  let address = $state("");
+  let iban = $state("");
   let isSaving = $state(false);
   let showToast = $state(false);
   let toastMessage = $state("");
@@ -58,6 +66,13 @@
         // Actualizamos el store para que AvatarCircle reaccione
         userStore.update((u) => ({ ...u, ...profile }));
       }
+
+      const privateProfile = await getUserPrivateProfile($userStore.uid);
+      if (privateProfile) {
+        phone = privateProfile.phone || "";
+        address = privateProfile.address || "";
+        iban = privateProfile.iban || "";
+      }
     }
   });
 
@@ -65,7 +80,14 @@
     if (!$userStore) return;
     isSaving = true;
     try {
-      const success = await updateUserProfile($userStore.uid, { name });
+      const success = await updateUserProfile($userStore.uid, {
+        name: name.trim(),
+        phone: phone.trim(),
+        address: address.trim(),
+        iban: iban.trim().toUpperCase(),
+      }, {
+        teamIds: ($teamsStore || []).map((team) => team.id),
+      });
       if (success) {
         toastMessage = "Perfil actualizado correctamente";
         toastType = "success";
@@ -157,6 +179,49 @@
               id="name"
               bind:value={name}
               placeholder="Tu nombre"
+            />
+          </div>
+        </div>
+
+        <div class="input-group">
+          <label for="phone">Teléfono</label>
+          <div class="input-wrapper">
+            <Phone size={18} />
+            <input
+              type="tel"
+              id="phone"
+              bind:value={phone}
+              placeholder="Tu teléfono"
+              autocomplete="tel"
+            />
+          </div>
+        </div>
+
+        <div class="input-group">
+          <label for="address">Dirección</label>
+          <div class="input-wrapper">
+            <MapPin size={18} />
+            <input
+              type="text"
+              id="address"
+              bind:value={address}
+              placeholder="Tu dirección"
+              autocomplete="street-address"
+            />
+          </div>
+        </div>
+
+        <div class="input-group">
+          <label for="iban">IBAN</label>
+          <div class="input-wrapper">
+            <Landmark size={18} />
+            <input
+              type="text"
+              id="iban"
+              bind:value={iban}
+              placeholder="ES00 0000 0000 0000 0000 0000"
+              autocomplete="off"
+              inputmode="text"
             />
           </div>
         </div>

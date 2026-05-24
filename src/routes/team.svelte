@@ -1,6 +1,7 @@
 <script>
   import {
     ChevronLeft,
+    ChevronDown,
     Users,
     Shield,
     UserPlus,
@@ -9,6 +10,10 @@
     Clock,
     BarChart2,
     Settings,
+    Info,
+    Phone,
+    Landmark,
+    Copy,
     DollarSign,
     Save,
     Mail,
@@ -31,6 +36,7 @@
     userStore,
     updateMemberSettings,
     getUserProfile,
+    getTeamMemberPrivateProfile,
     addMemberByEmail,
     registerWorkday,
     hasWorkdayForDate,
@@ -73,6 +79,7 @@
   let canViewTasks = $derived(hasTeamPermission(team, $userStore?.uid, "tasks", "view"));
   let canViewInventory = $derived(hasTeamPermission(team, $userStore?.uid, "inventory", "view"));
   let canViewPayments = $derived(hasTeamPermission(team, $userStore?.uid, "payments", "view"));
+  let canViewMemberPrivate = $derived(isAdmin || canViewPayments);
   let canViewStats = $derived(hasTeamPermission(team, $userStore?.uid, "stats", "view"));
   let canViewSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "view"));
   let canCreateSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "create"));
@@ -91,10 +98,14 @@
   const permissionActions = Object.entries(TEAM_PERMISSION_ACTION_LABELS);
 
   let showMemberSettings = $state(false);
+  let showAddMemberPermissions = $state(false);
+  let showMemberPermissions = $state(false);
   let memberList = $state([]);
   let showAddMember = $state(false);
   let selectedMemberId = $state(null);
   let selectedMemberEmail = $state("");
+  let selectedMemberPhone = $state("");
+  let selectedMemberIban = $state("");
   let newMemberEmail = $state("");
   let newMemberPermissions = $state(createDefaultMemberPermissions());
   let selectedNewMemberRole = $state("");
@@ -282,14 +293,22 @@
       active = false;
     };
   });
-  async function openMemberSettings(memberId, email) {
-    selectedMemberId = memberId;
-    selectedMemberEmail = email;
-    const settings = team.memberSettings?.[memberId] || {};
+  async function openMemberSettings(member) {
+    selectedMemberId = member.id;
+    selectedMemberEmail = member.email || "";
+    selectedMemberPhone = "";
+    selectedMemberIban = "";
+    const settings = team.memberSettings?.[member.id] || {};
     dailyRate = settings.dailyRate || 0;
     extraHourRate = settings.extraHourRate || 0;
-    memberPermissions = normalizeTeamPermissions(team.memberPermissions?.[memberId]);
+    memberPermissions = normalizeTeamPermissions(team.memberPermissions?.[member.id]);
     selectedMemberRole = "";
+    showMemberPermissions = false;
+    if (canViewMemberPrivate) {
+      const privateProfile = await getTeamMemberPrivateProfile(team.id, member.id);
+      selectedMemberPhone = privateProfile?.phone || "";
+      selectedMemberIban = privateProfile?.iban || "";
+    }
     showMemberSettings = true;
   }
 
@@ -297,6 +316,7 @@
     newMemberEmail = "";
     newMemberPermissions = createDefaultMemberPermissions();
     selectedNewMemberRole = "";
+    showAddMemberPermissions = false;
   }
 
   function applyRoleTemplate(roleId, target) {
@@ -324,6 +344,18 @@
     setTimeout(() => {
       showToast = false;
     }, 3000);
+  }
+
+  async function copyMemberDetail(value, label) {
+    const text = String(value || "").trim();
+    if (!text) return;
+
+    try {
+      await navigator.clipboard.writeText(text);
+      showNotification(`${label} copiado`);
+    } catch (error) {
+      showNotification(`No se pudo copiar ${label.toLowerCase()}`, "error");
+    }
   }
 
   async function checkTodayWorkday() {
@@ -650,10 +682,10 @@
                 {#if canEditSettings}
                   <button
                     class="member-action-btn"
-                    onclick={() => openMemberSettings(member.id, member.email)}
-                    aria-label="Ajustes de miembro"
+                    onclick={() => openMemberSettings(member)}
+                    aria-label="Información de miembro"
                   >
-                    <Settings size={18} />
+                    <Info size={18} />
                   </button>
                 {/if}
               </div>
@@ -684,47 +716,64 @@
           </div>
         </div>
 
-        <div class="role-template-section">
-          <div class="role-template-heading">
-            <h4>Plantillas de rol</h4>
-            <p>Elige una plantilla para rellenar los permisos y ajusta cualquier permiso después.</p>
-          </div>
-          <div class="role-template-grid">
-            {#each TEAM_PERMISSION_ROLE_TEMPLATES as role}
-              <button
-                type="button"
-                class="role-template-btn"
-                class:active={selectedNewMemberRole === role.id}
-                onclick={() => applyRoleTemplate(role.id, "new")}
-                title={role.description}
-              >
-                <span>{role.label}</span>
-                <small>{role.description}</small>
-              </button>
-            {/each}
-          </div>
-        </div>
+        <div class="settings-accordion">
+          <button
+            type="button"
+            class="settings-accordion-trigger"
+            class:open={showAddMemberPermissions}
+            aria-expanded={showAddMemberPermissions}
+            onclick={() => (showAddMemberPermissions = !showAddMemberPermissions)}
+          >
+            <span>Plantillas y permisos</span>
+            <ChevronDown size={18} />
+          </button>
 
-        <div class="permissions-editor">
-          <h4>Permisos del miembro</h4>
-          {#each permissionModules as [module, moduleLabel]}
-            <div class="permission-row">
-              <span class="permission-module">{moduleLabel}</span>
-              <div class="permission-actions">
-                {#each permissionActions as [action, actionLabel]}
-                  <label class="permission-toggle">
-                    <input
-                      type="checkbox"
-                      checked={newMemberPermissions[module][action]}
-                      onchange={() =>
-                        togglePermission(newMemberPermissions, module, action, "new")}
-                    />
-                    <span>{actionLabel}</span>
-                  </label>
+          {#if showAddMemberPermissions}
+            <div class="settings-accordion-panel">
+              <div class="role-template-section">
+                <div class="role-template-heading">
+                  <h4>Plantillas de rol</h4>
+                  <p>Elige una plantilla para rellenar los permisos y ajusta cualquier permiso después.</p>
+                </div>
+                <div class="role-template-grid">
+                  {#each TEAM_PERMISSION_ROLE_TEMPLATES as role}
+                    <button
+                      type="button"
+                      class="role-template-btn"
+                      class:active={selectedNewMemberRole === role.id}
+                      onclick={() => applyRoleTemplate(role.id, "new")}
+                      title={role.description}
+                    >
+                      <span>{role.label}</span>
+                      <small>{role.description}</small>
+                    </button>
+                  {/each}
+                </div>
+              </div>
+
+              <div class="permissions-editor">
+                <h4>Permisos del miembro</h4>
+                {#each permissionModules as [module, moduleLabel]}
+                  <div class="permission-row">
+                    <span class="permission-module">{moduleLabel}</span>
+                    <div class="permission-actions">
+                      {#each permissionActions as [action, actionLabel]}
+                        <label class="permission-toggle">
+                          <input
+                            type="checkbox"
+                            checked={newMemberPermissions[module][action]}
+                            onchange={() =>
+                              togglePermission(newMemberPermissions, module, action, "new")}
+                          />
+                          <span>{actionLabel}</span>
+                        </label>
+                      {/each}
+                    </div>
+                  </div>
                 {/each}
               </div>
             </div>
-          {/each}
+          {/if}
         </div>
 
         <button
@@ -755,6 +804,56 @@
           </div>
         </div>
 
+        {#if canViewMemberPrivate}
+          <div class="form-group">
+            <label for="memberPhone">Teléfono</label>
+            <div class="copy-field">
+              <div class="input-with-icon readonly-field">
+                <Phone size={18} color="#38bdf8" />
+                <input
+                  type="text"
+                  id="memberPhone"
+                  value={selectedMemberPhone || "No registrado"}
+                  readonly
+                />
+              </div>
+              <button
+                type="button"
+                class="copy-detail-btn"
+                onclick={() => copyMemberDetail(selectedMemberPhone, "Teléfono")}
+                disabled={!selectedMemberPhone}
+                aria-label="Copiar teléfono"
+              >
+                <Copy size={18} />
+              </button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="memberIban">IBAN</label>
+            <div class="copy-field">
+              <div class="input-with-icon readonly-field">
+                <Landmark size={18} color="#38bdf8" />
+                <input
+                  type="text"
+                  id="memberIban"
+                  value={selectedMemberIban || "No registrado"}
+                  readonly
+                />
+              </div>
+              <button
+                type="button"
+                class="copy-detail-btn"
+                onclick={() => copyMemberDetail(selectedMemberIban, "IBAN")}
+                disabled={!selectedMemberIban}
+                aria-label="Copiar IBAN"
+              >
+                <Copy size={18} />
+              </button>
+            </div>
+          </div>
+        {/if}
+
         <div class="form-group">
           <label for="dailyRate">Salario por día</label>
           <div class="input-with-icon">
@@ -782,47 +881,64 @@
         </div>
 
         {#if selectedMemberId !== team.admin}
-          <div class="role-template-section">
-            <div class="role-template-heading">
-              <h4>Plantillas de rol</h4>
-              <p>Aplicar una plantilla reemplaza los permisos marcados en este formulario.</p>
-            </div>
-            <div class="role-template-grid">
-              {#each TEAM_PERMISSION_ROLE_TEMPLATES as role}
-                <button
-                  type="button"
-                  class="role-template-btn"
-                  class:active={selectedMemberRole === role.id}
-                  onclick={() => applyRoleTemplate(role.id, "member")}
-                  title={role.description}
-                >
-                  <span>{role.label}</span>
-                  <small>{role.description}</small>
-                </button>
-              {/each}
-            </div>
-          </div>
+          <div class="settings-accordion">
+            <button
+              type="button"
+              class="settings-accordion-trigger"
+              class:open={showMemberPermissions}
+              aria-expanded={showMemberPermissions}
+              onclick={() => (showMemberPermissions = !showMemberPermissions)}
+            >
+              <span>Plantillas y permisos</span>
+              <ChevronDown size={18} />
+            </button>
 
-          <div class="permissions-editor">
-            <h4>Permisos del miembro</h4>
-            {#each permissionModules as [module, moduleLabel]}
-              <div class="permission-row">
-                <span class="permission-module">{moduleLabel}</span>
-                <div class="permission-actions">
-                  {#each permissionActions as [action, actionLabel]}
-                    <label class="permission-toggle">
-                      <input
-                        type="checkbox"
-                        checked={memberPermissions[module][action]}
-                        onchange={() =>
-                          togglePermission(memberPermissions, module, action, "member")}
-                      />
-                      <span>{actionLabel}</span>
-                    </label>
+            {#if showMemberPermissions}
+              <div class="settings-accordion-panel">
+                <div class="role-template-section">
+                  <div class="role-template-heading">
+                    <h4>Plantillas de rol</h4>
+                    <p>Aplicar una plantilla reemplaza los permisos marcados en este formulario.</p>
+                  </div>
+                  <div class="role-template-grid">
+                    {#each TEAM_PERMISSION_ROLE_TEMPLATES as role}
+                      <button
+                        type="button"
+                        class="role-template-btn"
+                        class:active={selectedMemberRole === role.id}
+                        onclick={() => applyRoleTemplate(role.id, "member")}
+                        title={role.description}
+                      >
+                        <span>{role.label}</span>
+                        <small>{role.description}</small>
+                      </button>
+                    {/each}
+                  </div>
+                </div>
+
+                <div class="permissions-editor">
+                  <h4>Permisos del miembro</h4>
+                  {#each permissionModules as [module, moduleLabel]}
+                    <div class="permission-row">
+                      <span class="permission-module">{moduleLabel}</span>
+                      <div class="permission-actions">
+                        {#each permissionActions as [action, actionLabel]}
+                          <label class="permission-toggle">
+                            <input
+                              type="checkbox"
+                              checked={memberPermissions[module][action]}
+                              onchange={() =>
+                                togglePermission(memberPermissions, module, action, "member")}
+                            />
+                            <span>{actionLabel}</span>
+                          </label>
+                        {/each}
+                      </div>
+                    </div>
                   {/each}
                 </div>
               </div>
-            {/each}
+            {/if}
           </div>
         {/if}
 
@@ -1334,6 +1450,77 @@
     font-size: 16px;
     font-weight: 500;
     color: var(--text-primary);
+  }
+
+  .copy-field {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 46px;
+    gap: 8px;
+  }
+
+  .readonly-field {
+    margin: 0;
+  }
+
+  .readonly-field input {
+    color: var(--text-secondary);
+  }
+
+  .copy-detail-btn {
+    width: 46px;
+    min-height: 46px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+
+  .copy-detail-btn:hover:not(:disabled) {
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+  }
+
+  .copy-detail-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .settings-accordion {
+    margin: 6px 0 20px;
+  }
+
+  .settings-accordion-trigger {
+    width: 100%;
+    min-height: 46px;
+    padding: 0 14px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 14px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+
+  .settings-accordion-trigger :global(svg) {
+    color: var(--text-secondary);
+    transition: transform 0.18s ease;
+  }
+
+  .settings-accordion-trigger.open :global(svg) {
+    transform: rotate(180deg);
+  }
+
+  .settings-accordion-panel {
+    padding-top: 12px;
   }
 
   .role-template-section {
