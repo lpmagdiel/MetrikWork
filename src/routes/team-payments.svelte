@@ -109,7 +109,12 @@
             // Notificar al usuario
             const title = "Pago Recibido";
             const message = `Has recibido un pago de ${formatMoney(amountToPay)} del equipo "${team.name}"`;
-            await createNotification(selectedMember.id, title, message);
+            await createNotification(selectedMember.id, title, message, {
+                url: `/teams/${team.id}/payments`,
+                type: "payment_received",
+                sourceId: payment?.id || "",
+                teamId: team.id,
+            });
             
             showNotification("Pago registrado exitosamente");
             showPaymentModal = false;

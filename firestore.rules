@@ -276,6 +276,28 @@ service cloud.firestore {
       ]);
     }
 
+    function isNotificationPreferencesData(data) {
+      return data.keys().hasOnly([
+               "privateChats",
+               "groupChats",
+               "calls",
+               "events",
+               "tasks",
+               "requests",
+               "inventory",
+               "payments",
+               "updatedAt"
+             ]) &&
+             (!data.keys().hasAny(["privateChats"]) || data.privateChats is bool) &&
+             (!data.keys().hasAny(["groupChats"]) || data.groupChats is bool) &&
+             (!data.keys().hasAny(["calls"]) || data.calls is bool) &&
+             (!data.keys().hasAny(["events"]) || data.events is bool) &&
+             (!data.keys().hasAny(["tasks"]) || data.tasks is bool) &&
+             (!data.keys().hasAny(["requests"]) || data.requests is bool) &&
+             (!data.keys().hasAny(["inventory"]) || data.inventory is bool) &&
+             (!data.keys().hasAny(["payments"]) || data.payments is bool);
+    }
+
     // --- USUARIOS ---
     match /users/{userId} {
       // Necesario para ver miembros y buscar usuarios por email.
@@ -304,6 +326,15 @@ service cloud.firestore {
 
       match /settings/{settingsId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      match /notificationPreferences/{preferencesId} {
+        allow read: if request.auth != null;
+        allow create, update: if request.auth != null &&
+                              request.auth.uid == userId &&
+                              preferencesId == "default" &&
+                              isNotificationPreferencesData(request.resource.data);
+        allow delete: if request.auth != null && request.auth.uid == userId;
       }
 
       match /notes/{noteId} {

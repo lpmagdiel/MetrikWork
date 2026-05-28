@@ -283,7 +283,12 @@ export async function executeAddTeamTask({ teamId, taskData, user, teamName = 'e
     if (newTask.assignedTo.length > 0) {
         const creatorName = user.name || user.email;
         const notifPromises = newTask.assignedTo.map(uid =>
-            createNotification(uid, '📋 Nueva tarea asignada', `"${newTask.title}" fue asignada a ti en ${teamName} por ${creatorName}.`)
+            createNotification(uid, 'Nueva tarea asignada', `"${newTask.title}" fue asignada a ti en ${teamName} por ${creatorName}.`, {
+                url: `/teams/${teamId}/tasks`,
+                type: 'task_assigned',
+                sourceId: docRef.id,
+                teamId,
+            })
         );
         await Promise.all(notifPromises);
     }

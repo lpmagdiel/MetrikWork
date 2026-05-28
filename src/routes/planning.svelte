@@ -324,6 +324,11 @@
         limitedAssignment.userId,
         "Nueva jornada asignada",
         buildAssignmentNotificationMessage(limitedAssignment),
+        {
+          url: `/teams/${team.id}/planning`,
+          type: "event_assigned",
+          teamId: team.id,
+        },
       );
       await loadWorks();
       openAddEvent = false;

@@ -9,15 +9,33 @@ import {
     doc,
     updateDoc,
     addDoc,
+    setDoc,
     getDoc,
     getDocs,
     writeBatch
 } from 'firebase/firestore';
 import { showDeviceNotification } from './pushNotifications.js';
 
+export const DEFAULT_NOTIFICATION_PREFERENCES = {
+    privateChats: true,
+    groupChats: true,
+    calls: true,
+    events: true,
+    tasks: true,
+    requests: true,
+    inventory: true,
+    payments: true,
+};
+
 export const notificationsStore = writable([]);
+export const notificationPreferencesStore = writable(DEFAULT_NOTIFICATION_PREFERENCES);
 let notificationsUnsubscribe;
+let notificationPreferencesUnsubscribe;
 let hasLoadedInitialSnapshot = false;
+let currentNotificationPreferences = DEFAULT_NOTIFICATION_PREFERENCES;
+let rawNotifications = [];
+const recipientPreferencesCache = new Map();
+const RECIPIENT_PREFERENCES_CACHE_MS = 30000;
 
 function isAppInBackground() {
     if (typeof document === 'undefined') return false;
@@ -31,13 +49,111 @@ function isChatNotification(notification) {
 
 function shouldShowDeviceNotification(notification) {
     if (notification.opened) return false;
+    if (!isNotificationTypeEnabled(notification.type, currentNotificationPreferences)) return false;
     if (isChatNotification(notification)) return isAppInBackground();
     if (notification.showInForeground === false) return isAppInBackground();
     return true;
 }
 
+export function normalizeNotificationPreferences(preferences = {}) {
+    return Object.keys(DEFAULT_NOTIFICATION_PREFERENCES).reduce((normalized, key) => {
+        normalized[key] = typeof preferences?.[key] === 'boolean'
+            ? preferences[key]
+            : DEFAULT_NOTIFICATION_PREFERENCES[key];
+        return normalized;
+    }, {});
+}
+
+function getPreferenceKeyForNotificationType(type = '') {
+    const normalizedType = String(type || '').trim();
+    if (normalizedType === 'private_chat_message') return 'privateChats';
+    if (normalizedType === 'chat_message') return 'groupChats';
+    if (normalizedType === 'private_call') return 'calls';
+    if (normalizedType === 'task_assigned') return 'tasks';
+    if (normalizedType === 'event_assigned') return 'events';
+    if (
+        normalizedType === 'absence_request' ||
+        normalizedType === 'absence_request_status' ||
+        normalizedType === 'team_invitation' ||
+        normalizedType === 'team_invitation_status'
+    ) {
+        return 'requests';
+    }
+    if (normalizedType === 'inventory-problem' || normalizedType === 'inventory_problem') return 'inventory';
+    if (normalizedType === 'payment_received') return 'payments';
+    return '';
+}
+
+export function isNotificationTypeEnabled(type, preferences = currentNotificationPreferences) {
+    const preferenceKey = getPreferenceKeyForNotificationType(type);
+    if (!preferenceKey) return true;
+    return normalizeNotificationPreferences(preferences)[preferenceKey] !== false;
+}
+
+function applyNotificationPreferences() {
+    notificationsStore.set(
+        rawNotifications.filter((notification) =>
+            isNotificationTypeEnabled(notification.type, currentNotificationPreferences)
+        )
+    );
+}
+
+export function subscribeToNotificationPreferences(uid) {
+    if (notificationPreferencesUnsubscribe) notificationPreferencesUnsubscribe();
+    currentNotificationPreferences = DEFAULT_NOTIFICATION_PREFERENCES;
+    notificationPreferencesStore.set(currentNotificationPreferences);
+    recipientPreferencesCache.clear();
+    applyNotificationPreferences();
+    if (!uid) return;
+
+    const preferencesRef = doc(db, 'users', uid, 'notificationPreferences', 'default');
+    notificationPreferencesUnsubscribe = onSnapshot(preferencesRef, (snapshot) => {
+        currentNotificationPreferences = normalizeNotificationPreferences(snapshot.exists() ? snapshot.data() : {});
+        notificationPreferencesStore.set(currentNotificationPreferences);
+        recipientPreferencesCache.set(uid, {
+            preferences: currentNotificationPreferences,
+            expiresAt: Date.now() + RECIPIENT_PREFERENCES_CACHE_MS
+        });
+        applyNotificationPreferences();
+    }, (error) => {
+        console.error("Error in notification preferences listener:", error);
+    });
+}
+
+export async function updateNotificationPreferences(uid, preferences = {}) {
+    if (!uid) return;
+    const normalizedPreferences = normalizeNotificationPreferences(preferences);
+    await setDoc(doc(db, 'users', uid, 'notificationPreferences', 'default'), {
+        ...normalizedPreferences,
+        updatedAt: new Date().toISOString()
+    }, { merge: true });
+    recipientPreferencesCache.set(uid, {
+        preferences: normalizedPreferences,
+        expiresAt: Date.now() + RECIPIENT_PREFERENCES_CACHE_MS
+    });
+}
+
+async function getRecipientNotificationPreferences(uid) {
+    const cached = recipientPreferencesCache.get(uid);
+    if (cached && cached.expiresAt > Date.now()) return cached.preferences;
+
+    try {
+        const snapshot = await getDoc(doc(db, 'users', uid, 'notificationPreferences', 'default'));
+        const preferences = normalizeNotificationPreferences(snapshot.exists() ? snapshot.data() : {});
+        recipientPreferencesCache.set(uid, {
+            preferences,
+            expiresAt: Date.now() + RECIPIENT_PREFERENCES_CACHE_MS
+        });
+        return preferences;
+    } catch (error) {
+        console.warn("No se pudieron leer las preferencias de notificación:", error);
+        return DEFAULT_NOTIFICATION_PREFERENCES;
+    }
+}
+
 export function subscribeToNotifications(uid) {
     if (notificationsUnsubscribe) notificationsUnsubscribe();
+    rawNotifications = [];
     notificationsStore.set([]);
     hasLoadedInitialSnapshot = false;
     if (!uid) return;
@@ -47,6 +163,9 @@ export function subscribeToNotifications(uid) {
         snapshot.forEach((doc) => {
             notifications.push({ id: doc.id, ...doc.data() });
         });
+        notifications.sort((a, b) => new Date(b.date) - new Date(a.date));
+        rawNotifications = notifications;
+
         if (hasLoadedInitialSnapshot) {
             snapshot.docChanges()
                 .filter((change) => change.type === 'added')
@@ -63,9 +182,7 @@ export function subscribeToNotifications(uid) {
                 });
         }
         hasLoadedInitialSnapshot = true;
-        // @ts-ignore
-        notifications.sort((a, b) => new Date(b.date) - new Date(a.date));
-        notificationsStore.set(notifications);
+        applyNotificationPreferences();
     }, (error) => {
         console.error("Error in notifications listener:", error);
     });
@@ -88,6 +205,11 @@ function getOptionalNotificationFields(options = {}) {
 
 export async function createNotification(uid, title, message, options = {}) {
     try {
+        if (!uid) return null;
+
+        const preferences = await getRecipientNotificationPreferences(uid);
+        if (!isNotificationTypeEnabled(options.type, preferences)) return null;
+
         const docRef = await addDoc(collection(db, 'notifications'), {
             title,
             message,
@@ -99,8 +221,10 @@ export async function createNotification(uid, title, message, options = {}) {
         sendPushNotification(docRef.id).catch((error) => {
             console.warn("Notification was saved, but push delivery failed:", error);
         });
+        return docRef.id;
     } catch (error) {
         console.error("Error creating notification:", error);
+        return null;
     }
 }
 

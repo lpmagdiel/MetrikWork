@@ -13,6 +13,7 @@ import {
   subscribeToTeams,
   subscribeToTasks,
   subscribeToNotifications,
+  subscribeToNotificationPreferences,
   subscribeToNotes,
   subscribeToLocations,
   subscribeToSettings,
@@ -104,6 +105,7 @@ initAuth((uid) => {
 
   subscribeToTeams(uid);
   subscribeToTasks(uid);
+  subscribeToNotificationPreferences(uid);
   subscribeToNotifications(uid);
   subscribeToNotes(uid);
   subscribeToLocations(uid);

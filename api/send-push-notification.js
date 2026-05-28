@@ -3,6 +3,16 @@ import crypto from 'node:crypto';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const FIRESTORE_SCOPE = 'https://www.googleapis.com/auth/datastore';
 const FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
+const DEFAULT_NOTIFICATION_PREFERENCES = {
+  privateChats: true,
+  groupChats: true,
+  calls: true,
+  events: true,
+  tasks: true,
+  requests: true,
+  inventory: true,
+  payments: true,
+};
 
 let cachedAccessToken = null;
 let cachedAccessTokenExpiresAt = 0;
@@ -39,6 +49,11 @@ export default async function handler(req, res) {
 
     if (!notificationFor) {
       return sendJson(res, 400, { error: 'Notification has no recipient' });
+    }
+
+    const preferences = await getNotificationPreferences(projectId, accessToken, notificationFor);
+    if (!isNotificationTypeEnabled(type, preferences)) {
+      return sendJson(res, 200, { sent: 0, skipped: true, reason: 'preferences_disabled' });
     }
 
     const tokens = await getPushTokens(projectId, accessToken, notificationFor);
@@ -255,6 +270,48 @@ async function getPushTokens(projectId, accessToken, uid) {
   return (payload.documents || [])
     .map((document) => getStringField(document.fields, 'token'))
     .filter(Boolean);
+}
+
+async function getNotificationPreferences(projectId, accessToken, uid) {
+  const document = await getFirestoreDocument(
+    projectId,
+    accessToken,
+    `users/${uid}/notificationPreferences/default`
+  );
+  if (!document?.fields) return DEFAULT_NOTIFICATION_PREFERENCES;
+
+  return Object.keys(DEFAULT_NOTIFICATION_PREFERENCES).reduce((preferences, key) => {
+    const field = document.fields[key];
+    preferences[key] = field && typeof field.booleanValue !== 'undefined'
+      ? field.booleanValue
+      : DEFAULT_NOTIFICATION_PREFERENCES[key];
+    return preferences;
+  }, {});
+}
+
+function getPreferenceKeyForNotificationType(type = '') {
+  if (type === 'private_chat_message') return 'privateChats';
+  if (type === 'chat_message') return 'groupChats';
+  if (type === 'private_call') return 'calls';
+  if (type === 'task_assigned') return 'tasks';
+  if (type === 'event_assigned') return 'events';
+  if (
+    type === 'absence_request' ||
+    type === 'absence_request_status' ||
+    type === 'team_invitation' ||
+    type === 'team_invitation_status'
+  ) {
+    return 'requests';
+  }
+  if (type === 'inventory-problem' || type === 'inventory_problem') return 'inventory';
+  if (type === 'payment_received') return 'payments';
+  return '';
+}
+
+function isNotificationTypeEnabled(type, preferences = DEFAULT_NOTIFICATION_PREFERENCES) {
+  const preferenceKey = getPreferenceKeyForNotificationType(type);
+  if (!preferenceKey) return true;
+  return preferences[preferenceKey] !== false;
 }
 
 async function markPushAsSent(projectId, accessToken, notificationId) {

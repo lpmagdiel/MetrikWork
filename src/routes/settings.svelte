@@ -24,8 +24,11 @@
     getUserProfile,
     getUserPrivateProfile,
     settingsStore,
+    notificationPreferencesStore,
     teamsStore,
     updateSettings,
+    updateNotificationPreferences,
+    normalizeNotificationPreferences,
     pushNotificationState,
     requestPushNotifications,
   } from "../data/stores.js";
@@ -50,8 +53,53 @@
   let showUpdateModal = $state(false);
   let canUsePush = $state(false);
   let pushButtonLoading = $state(false);
+  let notificationPreferenceSavingKey = $state("");
   let pushState = $derived($pushNotificationState);
   let pushEnabled = $derived(pushState.status === "enabled" && Boolean(pushState.token));
+  let notificationPreferences = $derived(normalizeNotificationPreferences($notificationPreferencesStore));
+
+  const notificationPreferenceOptions = [
+    {
+      key: "privateChats",
+      label: "Chats privados",
+      description: "Mensajes directos entre miembros.",
+    },
+    {
+      key: "groupChats",
+      label: "Chats de equipo",
+      description: "Mensajes enviados en chats grupales.",
+    },
+    {
+      key: "calls",
+      label: "Llamadas privadas",
+      description: "Avisos de llamadas entrantes.",
+    },
+    {
+      key: "events",
+      label: "Eventos y jornadas",
+      description: "Jornadas asignadas desde planning.",
+    },
+    {
+      key: "tasks",
+      label: "Tareas",
+      description: "Nuevas tareas asignadas a ti.",
+    },
+    {
+      key: "requests",
+      label: "Solicitudes",
+      description: "Ausencias, invitaciones y respuestas.",
+    },
+    {
+      key: "inventory",
+      label: "Inventario",
+      description: "Problemas reportados en productos.",
+    },
+    {
+      key: "payments",
+      label: "Pagos",
+      description: "Pagos registrados a tu favor.",
+    },
+  ];
 
   onMount(async () => {
     canUsePush = "Notification" in window && "serviceWorker" in navigator;
@@ -154,6 +202,30 @@
       showToast = true;
     } finally {
       pushButtonLoading = false;
+    }
+  }
+
+  async function toggleNotificationPreference(key) {
+    if (!$userStore?.uid || notificationPreferenceSavingKey) return;
+
+    const nextPreferences = {
+      ...notificationPreferences,
+      [key]: !notificationPreferences[key],
+    };
+
+    notificationPreferenceSavingKey = key;
+    try {
+      await updateNotificationPreferences($userStore.uid, nextPreferences);
+      toastMessage = "Preferencias de notificación actualizadas";
+      toastType = "success";
+      showToast = true;
+    } catch (error) {
+      console.error("Error updating notification preferences:", error);
+      toastMessage = "No se pudieron guardar las preferencias";
+      toastType = "error";
+      showToast = true;
+    } finally {
+      notificationPreferenceSavingKey = "";
     }
   }
 </script>
@@ -265,6 +337,31 @@
             />
             <span class="slider"></span>
           </label>
+        </div>
+
+        <div class="notification-preferences">
+          <div class="notification-preferences-heading">
+            <span>Personalizar notificaciones</span>
+            <p>Elige qué avisos quieres recibir en la app y por push.</p>
+          </div>
+
+          {#each notificationPreferenceOptions as option}
+            <div class="settings-item notification-option">
+              <div class="item-info">
+                <span>{option.label}</span>
+                <p>{option.description}</p>
+              </div>
+              <label class="switch">
+                <input
+                  type="checkbox"
+                  checked={notificationPreferences[option.key]}
+                  disabled={Boolean(notificationPreferenceSavingKey)}
+                  onchange={() => toggleNotificationPreference(option.key)}
+                />
+                <span class="slider"></span>
+              </label>
+            </div>
+          {/each}
         </div>
 
         <div class="settings-item">
@@ -464,6 +561,33 @@
 
   .settings-item:last-child {
     border-bottom: none;
+  }
+
+  .notification-preferences {
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .notification-preferences-heading {
+    padding: 16px 20px 10px;
+  }
+
+  .notification-preferences-heading span {
+    display: block;
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 800;
+  }
+
+  .notification-preferences-heading p {
+    margin: 3px 0 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  .notification-option {
+    padding-top: 12px;
+    padding-bottom: 12px;
   }
 
   .item-icon {
