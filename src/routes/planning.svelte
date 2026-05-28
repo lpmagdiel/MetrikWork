@@ -24,6 +24,7 @@
     createNotification,
     applyWorkdayOvertimeLimit,
     exceedsOvertimeLimit,
+    hasOvertimeEnabled,
     getOvertimeLimitHours,
     getOvertimeLimitMessage,
     isNonWorkingDay,
@@ -57,6 +58,7 @@
     $userStore?.uid && team?.admin && $userStore.uid === team.admin,
   );
   let overtimeLimitHours = $derived(getOvertimeLimitHours(team));
+  let overtimeEnabled = $derived(hasOvertimeEnabled(team));
   let isAssignmentNonWorkingDay = $derived(isNonWorkingDay(team, assignmentForm.date));
   let assignmentNonWorkingMessage = $derived(getNonWorkingDayMessage(team, assignmentForm.date));
 
@@ -87,6 +89,13 @@
     overtime: "#0284c7",
     variable: "#7c3aed",
   };
+
+  $effect(() => {
+    if (!overtimeEnabled) {
+      if (assignmentForm.type === "overtime") assignmentForm.type = "full-day";
+      if (assignmentForm.overtimeHours !== 0) assignmentForm.overtimeHours = 0;
+    }
+  });
 
   let calendarDays = $derived.by(() => {
     const days = [];
@@ -285,6 +294,14 @@
     if (!team?.id || !assignmentForm.userId || !assignmentForm.date) return;
     if (isAssignmentNonWorkingDay) {
       showNotification(assignmentNonWorkingMessage, "error");
+      return;
+    }
+
+    if (
+      !overtimeEnabled &&
+      (assignmentForm.type === "overtime" || Number(assignmentForm.overtimeHours) > 0)
+    ) {
+      showNotification(getOvertimeLimitMessage(team), "error");
       return;
     }
 
@@ -525,8 +542,10 @@
     <div class="assignment-form">
       <h3>Asignar jornada</h3>
       <p>Marca un día de trabajo para un miembro del equipo.</p>
-      {#if overtimeLimitHours > 0}
+      {#if overtimeEnabled}
         <p class="form-instruction">Límite de horas extra del equipo: {overtimeLimitHours}h.</p>
+      {:else}
+        <p class="form-instruction">Las horas extra están desactivadas para este equipo.</p>
       {/if}
       {#if isAssignmentNonWorkingDay}
         <p class="form-instruction error">{assignmentNonWorkingMessage}</p>
@@ -551,7 +570,7 @@
         <select bind:value={assignmentForm.type} disabled={isAssignmentNonWorkingDay}>
           <option value="full-day">Jornada completa</option>
           <option value="half-day">Media jornada</option>
-          <option value="overtime">Horas extra</option>
+          <option value="overtime" disabled={!overtimeEnabled}>Horas extra</option>
           <option value="variable">Jornada variable</option>
         </select>
       </label>
@@ -561,10 +580,10 @@
         <input
           type="number"
           min="0"
-          max={overtimeLimitHours || undefined}
+          max={overtimeEnabled ? overtimeLimitHours : 0}
           step="0.5"
           bind:value={assignmentForm.overtimeHours}
-          disabled={isAssignmentNonWorkingDay}
+          disabled={isAssignmentNonWorkingDay || !overtimeEnabled}
         />
       </label>
 

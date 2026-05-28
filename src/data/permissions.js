@@ -159,6 +159,78 @@ export function createRoleTemplatePermissions(templateId) {
     return permissions;
 }
 
+function normalizeCustomRoleId(value, fallback = 'rol') {
+    const id = String(value || fallback)
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    return id || 'rol';
+}
+
+export function createCustomRoleId(label = 'rol', roles = []) {
+    const usedIds = new Set(
+        (Array.isArray(roles) ? roles : [])
+            .map((role) => String(role?.id || '').trim())
+            .filter(Boolean)
+    );
+    const baseId = normalizeCustomRoleId(label);
+    let roleId = baseId;
+    let counter = 2;
+
+    while (usedIds.has(roleId)) {
+        roleId = `${baseId}-${counter}`;
+        counter += 1;
+    }
+
+    return roleId;
+}
+
+export function normalizeCustomTeamRoles(roles = []) {
+    if (!Array.isArray(roles)) return [];
+
+    return roles
+        .map((role, index) => {
+            const label = String(role?.label || role?.name || '').trim();
+            if (!label) return null;
+
+            return {
+                id: normalizeCustomRoleId(role?.id, `${label}-${index + 1}`),
+                label: label.slice(0, 48),
+                description: String(role?.description || '').trim().slice(0, 140),
+                permissions: normalizeTeamPermissions(role?.permissions),
+                createdAt: typeof role?.createdAt === 'string' ? role.createdAt : '',
+                updatedAt: typeof role?.updatedAt === 'string' ? role.updatedAt : ''
+            };
+        })
+        .filter(Boolean);
+}
+
+export function getTeamRoleTemplates(team = {}) {
+    const systemRoles = TEAM_PERMISSION_ROLE_TEMPLATES.map((role) => ({
+        id: `system:${role.id}`,
+        source: 'system',
+        label: role.label,
+        description: role.description,
+        permissions: createRoleTemplatePermissions(role.id)
+    }));
+    const customRoles = normalizeCustomTeamRoles(team?.customRoles).map((role) => ({
+        ...role,
+        id: `custom:${role.id}`,
+        source: 'custom'
+    }));
+
+    return [...systemRoles, ...customRoles];
+}
+
+export function createPermissionsFromTeamRole(roleId, team = {}) {
+    const role = getTeamRoleTemplates(team).find((item) => item.id === roleId || item.id.endsWith(`:${roleId}`));
+    if (role) return normalizeTeamPermissions(role.permissions);
+    return createRoleTemplatePermissions(roleId);
+}
+
 export function normalizeTeamPermissions(permissions = {}, enabledFallback = false) {
     const normalized = createTeamPermissions(enabledFallback);
 

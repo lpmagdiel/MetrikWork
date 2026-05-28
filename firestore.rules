@@ -48,6 +48,7 @@ service cloud.firestore {
                "nonWorkingDays",
                "projectBudget",
                "projectBudgetCurrency",
+               "customRoles",
                "memberSettings",
                "memberPermissions",
                "members",

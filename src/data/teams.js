@@ -3,7 +3,7 @@ import { db } from './firebase.js';
 import { doc, onSnapshot, collection, addDoc, query, where, updateDoc, getDoc, getDocs, setDoc, deleteField, deleteDoc } from 'firebase/firestore';
 import { userStore, getProfileImage } from './auth.js';
 import { createNotification } from './notifications.js';
-import { createTeamPermissions, normalizeTeamPermissions } from './permissions.js';
+import { createTeamPermissions, normalizeCustomTeamRoles, normalizeTeamPermissions } from './permissions.js';
 import { normalizeNonWorkingDays } from './workLimits.js';
 
 export const teamsStore = writable([]);
@@ -258,6 +258,21 @@ export async function updateMemberPermissions(teamId, memberId, permissions) {
         });
     } catch (error) {
         console.error("Error updating member permissions:", error);
+        throw error;
+    }
+}
+
+export async function updateTeamCustomRoles(teamId, roles = []) {
+    const user = get(userStore);
+    if (!user || !teamId) return;
+
+    try {
+        await updateDoc(doc(db, 'teams', teamId), {
+            customRoles: normalizeCustomTeamRoles(roles),
+            updatedAt: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error("Error updating team custom roles:", error);
         throw error;
     }
 }

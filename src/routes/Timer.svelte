@@ -21,6 +21,7 @@
     userStore,
     applyWorkdayOvertimeLimit,
     exceedsOvertimeLimit,
+    hasOvertimeEnabled,
     getOvertimeLimitHours,
     getOvertimeLimitMessage,
     getTodayDateString,
@@ -59,6 +60,7 @@
     $teamsStore.find((team) => team.id === activeTeamId) || null,
   );
   let overtimeLimitHours = $derived(getOvertimeLimitHours(selectedTeam));
+  let overtimeEnabled = $derived(hasOvertimeEnabled(selectedTeam));
   let todayDate = $derived(getTodayDateString());
   let isTodayNonWorkingDay = $derived(isNonWorkingDay(selectedTeam, todayDate));
   let todayNonWorkingMessage = $derived(getNonWorkingDayMessage(selectedTeam, todayDate));
@@ -97,6 +99,12 @@
   $effect(() => {
     if (isRunning) {
       persistActiveTimer();
+    }
+  });
+
+  $effect(() => {
+    if (!isRunning && !overtimeEnabled && timerMode === "overtime") {
+      timerMode = "variable";
     }
   });
 
@@ -367,6 +375,14 @@
         return;
       }
 
+      if (timerMode === "overtime" && !overtimeEnabled) {
+        endedAt = null;
+        startTicker();
+        persistActiveTimer();
+        await showErrorAlert("Horas extra desactivadas", getOvertimeLimitMessage(selectedTeam));
+        return;
+      }
+
       if (timerMode === "overtime" && exceedsOvertimeLimit(totalHours, selectedTeam)) {
         endedAt = null;
         startTicker();
@@ -503,9 +519,9 @@
         <button
           type="button"
           class:active={timerMode === "overtime"}
-          disabled={isRunning || isSaving || isTodayNonWorkingDay}
+          disabled={isRunning || isSaving || isTodayNonWorkingDay || !overtimeEnabled}
           onclick={() => {
-            if (!isTodayNonWorkingDay) timerMode = "overtime";
+            if (!isTodayNonWorkingDay && overtimeEnabled) timerMode = "overtime";
           }}
         >
           <TimerReset size={16} />
@@ -553,8 +569,10 @@
             <strong>{formatTime(elapsedSeconds)}</strong>
             <small>{formatHours(elapsedSeconds)} h</small>
           {/if}
-          {#if overtimeLimitHours > 0}
+          {#if overtimeEnabled}
             <small>Máximo: {overtimeLimitHours} h</small>
+          {:else}
+            <small>Horas extra desactivadas</small>
           {/if}
         </div>
       </div>

@@ -5,6 +5,8 @@
     ChevronDown,
     Mail,
     Palette,
+    Pencil,
+    Plus,
     Save,
     Trash2,
     UserMinus,
@@ -21,15 +23,18 @@
     addMemberByEmail,
     updateMemberPermissions,
     updateTeamProfile,
+    updateTeamCustomRoles,
     removeTeamMember,
     deleteTeam,
+    createCustomRoleId,
     createDefaultMemberPermissions,
+    createPermissionsFromTeamRole,
+    getTeamRoleTemplates,
+    normalizeCustomTeamRoles,
     normalizeTeamPermissions,
     hasTeamPermission,
     TEAM_PERMISSION_LABELS,
     TEAM_PERMISSION_ACTION_LABELS,
-    TEAM_PERMISSION_ROLE_TEMPLATES,
-    createRoleTemplatePermissions,
     WEEKDAY_OPTIONS,
     normalizeNonWorkingDays,
   } from "../data/stores.js";
@@ -51,6 +56,7 @@
   const permissionActions = Object.entries(TEAM_PERMISSION_ACTION_LABELS);
 
   let memberList = $state([]);
+  let customRoles = $state([]);
   let teamName = $state("");
   let teamCurrency = $state("MXN");
   let overtimeLimitHours = $state(0);
@@ -63,10 +69,17 @@
   let selectedNewMemberRole = $state("");
   let editingPermissions = $state({});
   let selectedMemberRoles = $state({});
+  let showCustomRoleForm = $state(false);
+  let editingCustomRoleId = $state(null);
+  let customRoleName = $state("");
+  let customRoleDescription = $state("");
+  let customRolePermissions = $state(createDefaultMemberPermissions());
   let isSavingProfile = $state(false);
+  let isSavingCustomRole = $state(false);
   let isAddingMember = $state(false);
   let showNewMemberPermissions = $state(false);
   let openPermissionMemberId = $state(null);
+  let roleTemplates = $derived(getTeamRoleTemplates({ customRoles }));
 
   const currencyOptions = [
     { code: "MXN", label: "Peso mexicano" },
@@ -107,6 +120,7 @@
       themePrimaryColor = normalizeThemeColor(team.themePrimaryColor) || "#a7f3d0";
       photoPreview = team.photoURL || "";
       pendingPhoto = "";
+      customRoles = normalizeCustomTeamRoles(team.customRoles);
       const nextEditingPermissions = {};
       const nextSelectedMemberRoles = {};
       for (const memberId of team.members || []) {
@@ -156,16 +170,115 @@
   }
 
   function applyNewMemberRoleTemplate(roleId) {
-    newMemberPermissions = createRoleTemplatePermissions(roleId);
+    newMemberPermissions = createPermissionsFromTeamRole(roleId, { customRoles });
     selectedNewMemberRole = roleId;
   }
 
   function applyMemberRoleTemplate(memberId, roleId) {
     editingPermissions = {
       ...editingPermissions,
-      [memberId]: createRoleTemplatePermissions(roleId),
+      [memberId]: createPermissionsFromTeamRole(roleId, { customRoles }),
     };
     selectedMemberRoles = { ...selectedMemberRoles, [memberId]: roleId };
+  }
+
+  function resetCustomRoleForm() {
+    editingCustomRoleId = null;
+    customRoleName = "";
+    customRoleDescription = "";
+    customRolePermissions = createDefaultMemberPermissions();
+  }
+
+  function openCreateCustomRole() {
+    resetCustomRoleForm();
+    showCustomRoleForm = true;
+  }
+
+  function openEditCustomRole(role) {
+    editingCustomRoleId = role.id;
+    customRoleName = role.label || "";
+    customRoleDescription = role.description || "";
+    customRolePermissions = normalizeTeamPermissions(role.permissions);
+    showCustomRoleForm = true;
+  }
+
+  function closeCustomRoleForm() {
+    showCustomRoleForm = false;
+    resetCustomRoleForm();
+  }
+
+  function toggleCustomRolePermission(module, action) {
+    const modulePermissions = customRolePermissions[module] || {};
+    customRolePermissions = {
+      ...customRolePermissions,
+      [module]: {
+        ...modulePermissions,
+        [action]: !modulePermissions[action],
+      },
+    };
+  }
+
+  function getRolePermissionSummary(permissions) {
+    const normalized = normalizeTeamPermissions(permissions);
+    const enabledModules = permissionModules
+      .filter(([module]) => permissionActions.some(([action]) => normalized[module]?.[action]))
+      .map(([, moduleLabel]) => moduleLabel);
+    return enabledModules.length > 0 ? enabledModules : ["Sin permisos"];
+  }
+
+  async function handleSaveCustomRole() {
+    if (!team?.id || !canEditSettings || !customRoleName.trim()) return;
+
+    isSavingCustomRole = true;
+    try {
+      const now = new Date().toISOString();
+      const existingRole = customRoles.find((role) => role.id === editingCustomRoleId);
+      const roleId = editingCustomRoleId || createCustomRoleId(customRoleName, customRoles);
+      const nextRole = {
+        id: roleId,
+        label: customRoleName.trim(),
+        description: customRoleDescription.trim(),
+        permissions: normalizeTeamPermissions(customRolePermissions),
+        createdAt: existingRole?.createdAt || now,
+        updatedAt: now,
+      };
+      const nextRoles = editingCustomRoleId
+        ? customRoles.map((role) => (role.id === editingCustomRoleId ? nextRole : role))
+        : [...customRoles, nextRole];
+
+      await updateTeamCustomRoles(team.id, nextRoles);
+      customRoles = normalizeCustomTeamRoles(nextRoles);
+      closeCustomRoleForm();
+      await showSuccessAlert("Rol guardado", "El rol personalizado quedó disponible para el equipo.");
+    } catch (error) {
+      await showErrorAlert(
+        "Error al guardar rol",
+        error?.message || "No se pudo guardar el rol personalizado.",
+      );
+    } finally {
+      isSavingCustomRole = false;
+    }
+  }
+
+  async function handleDeleteCustomRole(role) {
+    if (!team?.id || !canEditSettings || !role?.id) return;
+    const confirmed = await confirmAlert({
+      title: "Eliminar rol",
+      text: `¿Eliminar el rol "${role.label}"?`,
+      confirmButtonText: "Eliminar",
+      danger: true,
+    });
+    if (!confirmed) return;
+
+    try {
+      const nextRoles = customRoles.filter((item) => item.id !== role.id);
+      await updateTeamCustomRoles(team.id, nextRoles);
+      customRoles = normalizeCustomTeamRoles(nextRoles);
+      if (editingCustomRoleId === role.id) closeCustomRoleForm();
+      await showSuccessAlert("Rol eliminado", "El rol personalizado se eliminó correctamente.");
+    } catch (error) {
+      await showErrorAlert("Error al eliminar rol", error?.message || "No se pudo eliminar el rol.");
+    }
   }
 
   function toggleNonWorkingDay(day) {
@@ -406,10 +519,10 @@
             step="0.25"
             bind:value={overtimeLimitHours}
             disabled={!canEditSettings}
-            placeholder="0 = sin límite"
+            placeholder="0 = desactivadas"
           />
           <p class="field-help">
-            Usa 0 para no limitar. Las jornadas flexibles se recortan al máximo configurado.
+            Usa 0 para desactivar las horas extra. Con un valor mayor, se limita el máximo permitido.
           </p>
         </div>
         <div class="profile-fields settings-field">
@@ -439,6 +552,100 @@
         {/if}
       </section>
 
+      <section class="section">
+        <div class="section-heading-row">
+          <h2>Roles personalizados</h2>
+          {#if canEditSettings}
+            <button type="button" class="secondary-btn compact-btn" onclick={openCreateCustomRole}>
+              <Plus size={16} />
+              <span>Nuevo rol</span>
+            </button>
+          {/if}
+        </div>
+
+        {#if customRoles.length > 0}
+          <div class="custom-roles-list">
+            {#each customRoles as role (role.id)}
+              <article class="custom-role-card">
+                <div class="custom-role-main">
+                  <div>
+                    <h3>{role.label}</h3>
+                    {#if role.description}
+                      <p>{role.description}</p>
+                    {/if}
+                  </div>
+                  {#if canEditSettings}
+                    <div class="custom-role-actions">
+                      <button type="button" class="icon-btn" onclick={() => openEditCustomRole(role)} aria-label="Editar rol">
+                        <Pencil size={16} />
+                      </button>
+                      <button type="button" class="icon-btn danger" onclick={() => handleDeleteCustomRole(role)} aria-label="Eliminar rol">
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  {/if}
+                </div>
+                <div class="role-summary">
+                  {#each getRolePermissionSummary(role.permissions) as summary}
+                    <span>{summary}</span>
+                  {/each}
+                </div>
+              </article>
+            {/each}
+          </div>
+        {:else}
+          <div class="compact-empty">Sin roles personalizados</div>
+        {/if}
+
+        {#if showCustomRoleForm && canEditSettings}
+          <div class="custom-role-form">
+            <div class="profile-fields settings-field">
+              <label for="customRoleName">Nombre del rol</label>
+              <input id="customRoleName" bind:value={customRoleName} placeholder="Supervisor de obra" />
+            </div>
+            <div class="profile-fields settings-field">
+              <label for="customRoleDescription">Descripción</label>
+              <input id="customRoleDescription" bind:value={customRoleDescription} placeholder="Permisos principales del rol" />
+            </div>
+
+            <div class="permissions-editor">
+              {#each permissionModules as [module, moduleLabel]}
+                <div class="permission-row">
+                  <span>{moduleLabel}</span>
+                  <div class="permission-actions">
+                    {#each permissionActions as [action, actionLabel]}
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={customRolePermissions[module]?.[action]}
+                          onchange={() => toggleCustomRolePermission(module, action)}
+                        />
+                        {actionLabel}
+                      </label>
+                    {/each}
+                  </div>
+                </div>
+              {/each}
+            </div>
+
+            <div class="custom-role-form-actions">
+              <button type="button" class="secondary-btn" onclick={closeCustomRoleForm}>
+                <span>Cancelar</span>
+              </button>
+              <button
+                type="button"
+                class="primary-btn"
+                onclick={handleSaveCustomRole}
+                disabled={isSavingCustomRole || !customRoleName.trim()}
+              >
+                <Save size={18} />
+                <span>{isSavingCustomRole ? "Guardando..." : "Guardar rol"}</span>
+              </button>
+            </div>
+          </div>
+        {/if}
+      </section>
+
       {#if canCreateSettings}
         <section class="section">
           <h2>Invitar miembro</h2>
@@ -461,11 +668,11 @@
               <div class="permissions-editor accordion-panel">
                 <div class="role-template-section">
                   <div class="role-template-heading">
-                    <h4>Plantillas de rol</h4>
+                    <h4>Roles</h4>
                     <p>Rellena los permisos de una vez y ajusta cualquier checkbox después.</p>
                   </div>
                   <div class="role-template-grid">
-                    {#each TEAM_PERMISSION_ROLE_TEMPLATES as role}
+                    {#each roleTemplates as role}
                       <button
                         type="button"
                         class="role-template-btn"
@@ -549,11 +756,11 @@
                       {#if canEditSettings}
                         <div class="role-template-section">
                           <div class="role-template-heading">
-                            <h4>Plantillas de rol</h4>
+                            <h4>Roles</h4>
                             <p>Aplicar una plantilla reemplaza los permisos visibles antes de guardar.</p>
                           </div>
                           <div class="role-template-grid">
-                            {#each TEAM_PERMISSION_ROLE_TEMPLATES as role}
+                            {#each roleTemplates as role}
                               <button
                                 type="button"
                                 class="role-template-btn"
@@ -849,6 +1056,118 @@
     background: transparent;
     margin: 0;
     padding-left: 0;
+  }
+
+  .section-heading-row,
+  .custom-role-main,
+  .custom-role-actions,
+  .custom-role-form-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .section-heading-row {
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+
+  .section-heading-row h2 {
+    margin-bottom: 0;
+  }
+
+  .compact-btn {
+    min-height: 36px;
+    padding-inline: 11px;
+    font-size: 13px;
+  }
+
+  .custom-roles-list,
+  .custom-role-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .custom-role-card {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    padding: 12px;
+  }
+
+  .custom-role-main {
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+
+  .custom-role-main h3 {
+    font-size: 15px;
+    font-weight: 800;
+  }
+
+  .custom-role-main p,
+  .compact-empty {
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.4;
+    margin-top: 4px;
+  }
+
+  .custom-role-actions {
+    flex-shrink: 0;
+  }
+
+  .icon-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-card);
+    color: var(--text-primary);
+  }
+
+  .icon-btn.danger {
+    background: var(--bg-danger-subtle);
+    color: var(--danger-color);
+  }
+
+  .role-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+  }
+
+  .role-summary span {
+    min-height: 26px;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    padding: 0 9px;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .custom-role-form {
+    margin-top: 14px;
+    border-top: 1px solid var(--border-color);
+    padding-top: 14px;
+  }
+
+  .custom-role-form-actions {
+    justify-content: flex-end;
+    align-items: stretch;
+  }
+
+  .custom-role-form-actions .primary-btn,
+  .custom-role-form-actions .secondary-btn {
+    width: auto;
+    min-width: 132px;
   }
 
   .role-template-section {

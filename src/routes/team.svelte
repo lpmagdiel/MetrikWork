@@ -51,10 +51,11 @@
     hasTeamPermission,
     TEAM_PERMISSION_LABELS,
     TEAM_PERMISSION_ACTION_LABELS,
-    TEAM_PERMISSION_ROLE_TEMPLATES,
-    createRoleTemplatePermissions,
+    createPermissionsFromTeamRole,
+    getTeamRoleTemplates,
     applyWorkdayOvertimeLimit,
     exceedsOvertimeLimit,
+    hasOvertimeEnabled,
     getOvertimeLimitHours,
     getOvertimeLimitMessage,
     getTodayDateString,
@@ -91,11 +92,13 @@
       canViewSettings,
   );
   let overtimeLimitHours = $derived(getOvertimeLimitHours(team));
+  let overtimeEnabled = $derived(hasOvertimeEnabled(team));
   let todayDate = $derived(getTodayDateString());
   let isTodayNonWorkingDay = $derived(isNonWorkingDay(team, todayDate));
   let todayNonWorkingMessage = $derived(getNonWorkingDayMessage(team, todayDate));
   const permissionModules = Object.entries(TEAM_PERMISSION_LABELS);
   const permissionActions = Object.entries(TEAM_PERMISSION_ACTION_LABELS);
+  let roleTemplates = $derived(getTeamRoleTemplates(team));
 
   let showMemberSettings = $state(false);
   let showAddMemberPermissions = $state(false);
@@ -173,7 +176,7 @@
   });
 
   $effect(() => {
-    if (isTodayNonWorkingDay && workDay.overtimeHours !== 0) {
+    if ((isTodayNonWorkingDay || !overtimeEnabled) && workDay.overtimeHours !== 0) {
       workDay.overtimeHours = 0;
     }
   });
@@ -320,7 +323,7 @@
   }
 
   function applyRoleTemplate(roleId, target) {
-    const permissions = createRoleTemplatePermissions(roleId);
+    const permissions = createPermissionsFromTeamRole(roleId, team);
     if (target === "new") {
       newMemberPermissions = permissions;
       selectedNewMemberRole = roleId;
@@ -404,6 +407,14 @@
         ...workDay,
         type: alreadyHasWorkday ? "overtime" : workDay.type,
       };
+
+      if (
+        !overtimeEnabled &&
+        (workDayToRegister.type === "overtime" || Number(workDayToRegister.overtimeHours) > 0)
+      ) {
+        await showErrorAlert("Horas extra desactivadas", getOvertimeLimitMessage(team));
+        return;
+      }
 
       if (exceedsOvertimeLimit(workDayToRegister.overtimeHours, team)) {
         await showErrorAlert("Límite de horas extra", getOvertimeLimitMessage(team));
@@ -733,11 +744,11 @@
             <div class="settings-accordion-panel">
               <div class="role-template-section">
                 <div class="role-template-heading">
-                  <h4>Plantillas de rol</h4>
+                  <h4>Roles</h4>
                   <p>Elige una plantilla para rellenar los permisos y ajusta cualquier permiso después.</p>
                 </div>
                 <div class="role-template-grid">
-                  {#each TEAM_PERMISSION_ROLE_TEMPLATES as role}
+                  {#each roleTemplates as role}
                     <button
                       type="button"
                       class="role-template-btn"
@@ -898,11 +909,11 @@
               <div class="settings-accordion-panel">
                 <div class="role-template-section">
                   <div class="role-template-heading">
-                    <h4>Plantillas de rol</h4>
+                  <h4>Roles</h4>
                     <p>Aplicar una plantilla reemplaza los permisos marcados en este formulario.</p>
                   </div>
                   <div class="role-template-grid">
-                    {#each TEAM_PERMISSION_ROLE_TEMPLATES as role}
+                    {#each roleTemplates as role}
                       <button
                         type="button"
                         class="role-template-btn"
@@ -964,11 +975,15 @@
         <p class="form-instruction">
           {isTodayNonWorkingDay
             ? todayNonWorkingMessage
+            : hasWorkdayToday && !overtimeEnabled
+              ? "Ya ingresaste una jornada hoy y las horas extra están desactivadas."
             : hasWorkdayToday
               ? "Ya ingresaste una jornada hoy. Solo puedes añadir horas extra."
               : "Selecciona el tipo de jornada que deseas registrar para hoy."}
-          {#if overtimeLimitHours > 0}
+          {#if overtimeEnabled}
             Límite de horas extra: {overtimeLimitHours}h.
+          {:else}
+            Horas extra desactivadas.
           {/if}
         </p>
 
@@ -1011,7 +1026,7 @@
             </div>
           </button>
 
-          <div class="workday-option overtime" class:work-option-disabled={isTodayNonWorkingDay}>
+          <div class="workday-option overtime" class:work-option-disabled={isTodayNonWorkingDay || !overtimeEnabled}>
             <div class="option-icon overtime-icon">
               <Clock size={24} />
             </div>
@@ -1025,7 +1040,7 @@
                       0,
                       workDay.overtimeHours - 1,
                     ))}
-                  disabled={isTodayNonWorkingDay || workDay.overtimeHours === 0}
+                  disabled={isTodayNonWorkingDay || !overtimeEnabled || workDay.overtimeHours === 0}
                 >
                   <Minus size={18} />
                 </button>
@@ -1034,10 +1049,10 @@
                   class="counter-btn"
                   onclick={() =>
                     (workDay.overtimeHours = Math.min(
-                      overtimeLimitHours || 12,
+                      overtimeLimitHours,
                       workDay.overtimeHours + 1,
                     ))}
-                  disabled={isTodayNonWorkingDay || (overtimeLimitHours > 0 && workDay.overtimeHours >= overtimeLimitHours)}
+                  disabled={isTodayNonWorkingDay || !overtimeEnabled || workDay.overtimeHours >= overtimeLimitHours}
                 >
                   <Plus size={18} />
                 </button>
@@ -1049,7 +1064,7 @@
         <button
           class="register-workday-btn"
           onclick={handleRegisterWorkday}
-          disabled={isCheckingWorkday || isTodayNonWorkingDay || (hasWorkdayToday && workDay.overtimeHours <= 0)}
+          disabled={isCheckingWorkday || isTodayNonWorkingDay || (hasWorkdayToday && (!overtimeEnabled || workDay.overtimeHours <= 0))}
         >
           <Save size={20} />
           <span>{hasWorkdayToday ? "Registrar Horas Extra" : "Registrar Jornada"}</span>
