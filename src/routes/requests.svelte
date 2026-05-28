@@ -6,9 +6,11 @@
     FileText,
     Inbox,
     Send,
+    UserPlus,
     Users,
     X,
   } from "lucide-svelte";
+  import { currentPath } from "../router.js";
   import TitleHeader from "../components/TitleHeader.svelte";
   import Toast from "../components/Toast.svelte";
   import {
@@ -18,6 +20,7 @@
     getAbsenceRequestsForUser,
     teamsStore,
     updateAbsenceRequestStatus,
+    updateTeamInvitationStatus,
     userStore,
   } from "../data/stores.js";
 
@@ -29,13 +32,22 @@
   let note = $state("");
   let ownRequests = $state([]);
   let incomingRequests = $state([]);
+  let teamInvitations = $state([]);
   let isLoading = $state(true);
   let isSaving = $state(false);
   let updatingRequestId = $state(null);
+  let updatingInvitationId = $state(null);
   let showToast = $state(false);
   let toastMessage = $state("");
   let toastType = $state("success");
   let loadRequestId = 0;
+  let requestedSection = $derived.by(() => {
+    try {
+      return new URL($currentPath, window.location.origin).searchParams.get("section") || "";
+    } catch {
+      return "";
+    }
+  });
 
   let hasAdminTeams = $derived(
     ($teamsStore || []).some((team) => team.admin === $userStore?.uid),
@@ -46,8 +58,15 @@
   let pendingOwnCount = $derived(
     ownRequests.filter((request) => request.status === REQUEST_STATUS.pending).length,
   );
+  let pendingInvitationCount = $derived(
+    teamInvitations.filter((invitation) => invitation.status === REQUEST_STATUS.pending).length,
+  );
   let visibleRequests = $derived(
-    activeSection === "incoming" ? incomingRequests : ownRequests,
+    activeSection === "incoming"
+      ? incomingRequests
+      : activeSection === "invitations"
+      ? teamInvitations
+      : ownRequests,
   );
   let canSubmit = $derived(
     Boolean(selectedTeamId && absenceType && startDate && endDate) && !isSaving,
@@ -63,6 +82,12 @@
   $effect(() => {
     if (!hasAdminTeams && activeSection === "incoming") {
       activeSection = "mine";
+    }
+  });
+
+  $effect(() => {
+    if (requestedSection === "invitations") {
+      activeSection = "invitations";
     }
   });
 
@@ -96,8 +121,16 @@
     try {
       const result = await getAbsenceRequestsForUser(uid);
       if (requestId !== loadRequestId) return;
+      const invitations = result.invitations || [];
       ownRequests = result.own;
       incomingRequests = result.incoming;
+      teamInvitations = invitations;
+      if (
+        requestedSection === "invitations" ||
+        invitations.some((invitation) => invitation.status === REQUEST_STATUS.pending)
+      ) {
+        activeSection = "invitations";
+      }
     } catch (error) {
       console.error("Error loading absence requests:", error);
       showRequestToast("No se pudieron cargar las solicitudes.", "error");
@@ -160,6 +193,26 @@
     }
   }
 
+  async function handleReviewInvitation(invitation, status) {
+    if (invitation.status !== REQUEST_STATUS.pending || updatingInvitationId) return;
+    updatingInvitationId = invitation.id;
+
+    try {
+      await updateTeamInvitationStatus(invitation.id, status);
+      showRequestToast(
+        status === REQUEST_STATUS.accepted
+          ? "Te uniste al equipo."
+          : "Invitación rechazada.",
+      );
+      await loadRequests();
+    } catch (error) {
+      console.error("Error updating team invitation:", error);
+      showRequestToast(error?.message || "No se pudo actualizar la invitación.", "error");
+    } finally {
+      updatingInvitationId = null;
+    }
+  }
+
   function formatDate(dateValue) {
     if (!dateValue) return "";
     const date = new Date(`${dateValue}T00:00:00`);
@@ -185,6 +238,16 @@
     if (status === REQUEST_STATUS.accepted) return "accepted";
     if (status === REQUEST_STATUS.rejected) return "rejected";
     return "pending";
+  }
+
+  function formatDateTime(isoString) {
+    if (!isoString) return "";
+    return new Date(isoString).toLocaleDateString("es-ES", {
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   }
 </script>
 
@@ -213,6 +276,13 @@
       <div>
         <small>Por revisar</small>
         <strong>{pendingIncomingCount}</strong>
+      </div>
+    </div>
+    <div class="summary-item">
+      <span class="summary-icon invitation"><UserPlus size={19} /></span>
+      <div>
+        <small>Invitaciones</small>
+        <strong>{pendingInvitationCount}</strong>
       </div>
     </div>
   </section>
@@ -293,6 +363,15 @@
             <span>Por revisar</span>
           </button>
         {/if}
+        <button
+          type="button"
+          class:active={activeSection === "invitations"}
+          aria-pressed={activeSection === "invitations"}
+          onclick={() => (activeSection = "invitations")}
+        >
+          <UserPlus size={16} />
+          <span>Invitaciones</span>
+        </button>
       </div>
 
       <div class="requests-list">
@@ -307,9 +386,66 @@
             <p>
               {activeSection === "incoming"
                 ? "No hay solicitudes por revisar."
+                : activeSection === "invitations"
+                ? "No tienes invitaciones pendientes."
                 : "Aún no has creado solicitudes."}
             </p>
           </div>
+        {:else if activeSection === "invitations"}
+          {#each teamInvitations as invitation (invitation.id)}
+            <article class="request-card">
+              <div class="request-main-row">
+                <span class="request-icon invitation">
+                  <UserPlus size={18} />
+                </span>
+                <div class="request-title">
+                  <h3>{invitation.teamName || "Equipo"}</h3>
+                  <p>Invitado por {invitation.invitedByName || "un administrador"}</p>
+                </div>
+                <span class={`status-pill ${getStatusClass(invitation.status)}`}>
+                  {getStatusLabel(invitation.status)}
+                </span>
+              </div>
+
+              <div class="request-meta">
+                <span>
+                  <Users size={14} />
+                  {invitation.teamName || "Equipo"}
+                </span>
+                <span>
+                  <CalendarDays size={14} />
+                  {formatDateTime(invitation.createdAt)}
+                </span>
+              </div>
+
+              <p class="request-note">
+                Acepta para unirte al equipo con los permisos asignados por el administrador.
+              </p>
+
+              {#if invitation.status === REQUEST_STATUS.pending}
+                <div class="review-actions">
+                  <button
+                    type="button"
+                    class="reject-btn"
+                    disabled={updatingInvitationId === invitation.id}
+                    onclick={() => handleReviewInvitation(invitation, REQUEST_STATUS.rejected)}
+                  >
+                    <X size={16} />
+                    <span>Rechazar</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="accept-btn"
+                    disabled={updatingInvitationId === invitation.id}
+                    onclick={() => handleReviewInvitation(invitation, REQUEST_STATUS.accepted)}
+                  >
+                    <Check size={16} />
+                    <span>Aceptar</span>
+                  </button>
+                </div>
+              {/if}
+            </article>
+          {/each}
         {:else}
           {#each visibleRequests as request (request.id)}
             <article class="request-card">
@@ -400,7 +536,7 @@
 
   .summary-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 12px;
   }
 
@@ -432,6 +568,12 @@
   .summary-icon.admin {
     background: var(--bg-info-subtle);
     color: var(--info-color);
+  }
+
+  .summary-icon.invitation,
+  .request-icon.invitation {
+    background: var(--bg-success-subtle);
+    color: var(--success-color);
   }
 
   .summary-item small {
@@ -594,7 +736,7 @@
 
   .section-tabs {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
     gap: 8px;
     padding: 12px;
     border-bottom: 1px solid var(--border-color);

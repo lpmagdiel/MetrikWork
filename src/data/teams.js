@@ -1,6 +1,6 @@
 import { writable, get, derived } from 'svelte/store';
 import { db } from './firebase.js';
-import { doc, onSnapshot, collection, addDoc, query, where, updateDoc, getDoc, arrayUnion, getDocs, deleteField, deleteDoc } from 'firebase/firestore';
+import { doc, onSnapshot, collection, addDoc, query, where, updateDoc, getDoc, getDocs, setDoc, deleteField, deleteDoc } from 'firebase/firestore';
 import { userStore, getProfileImage } from './auth.js';
 import { createNotification } from './notifications.js';
 import { createTeamPermissions, normalizeTeamPermissions } from './permissions.js';
@@ -131,6 +131,9 @@ export async function createTeam(teamName, paymentData = null) {
  */
 export async function addMemberByEmail(teamId, email, permissions = {}) {
     try {
+        const user = get(userStore);
+        if (!user?.uid) throw new Error("Usuario no autenticado");
+
         // 1. Search for user by email
         const normalizedEmail = email.trim().toLowerCase();
         const usersRef = collection(db, 'users');
@@ -154,7 +157,7 @@ export async function addMemberByEmail(teamId, email, permissions = {}) {
         const memberName = memberProfile.name || email;
         const memberImage = getProfileImage(memberProfile);
 
-        // 2. Add member to team
+        // 2. Create an invitation instead of adding the member directly.
         const teamRef = doc(db, 'teams', teamId);
         
         const teamSnapshot = await getDoc(teamRef);
@@ -167,28 +170,51 @@ export async function addMemberByEmail(teamId, email, permissions = {}) {
             throw new Error("El usuario ya es miembro de este equipo");
         }
 
-        await updateDoc(teamRef, {
-            members: arrayUnion(memberUid),
-            membersData: arrayUnion({
-                id: memberUid,
-                name: memberName,
-                avatar: memberImage,
-                photoURL: memberImage
-            }),
-            [`memberPermissions.${memberUid}`]: normalizeTeamPermissions(permissions)
+        const teamName = teamSnapshot.data()?.team || "un equipo";
+        const invitationRef = doc(db, 'users', memberUid, 'teamInvitations', teamId);
+        const invitationSnapshot = await getDoc(invitationRef);
+        if (invitationSnapshot.exists()) {
+            const invitationStatus = invitationSnapshot.data()?.status;
+            if (invitationStatus === 'pendiente') {
+                throw new Error("Este usuario ya tiene una invitación pendiente");
+            }
+            if (invitationStatus === 'aceptado') {
+                throw new Error("Este usuario ya aceptó una invitación para este equipo");
+            }
+        }
+
+        const normalizedPermissions = normalizeTeamPermissions(permissions);
+        const now = new Date().toISOString();
+        await setDoc(invitationRef, {
+            teamId,
+            teamName,
+            invitedUserId: memberUid,
+            invitedUserEmail: memberProfile.email || email,
+            invitedUserName: memberName,
+            invitedUserPhotoURL: memberImage,
+            invitedBy: user.uid,
+            invitedByName: user.name || user.email || 'Un administrador',
+            permissions: normalizedPermissions,
+            status: 'pendiente',
+            createdAt: now,
+            updatedAt: now
         });
 
-        // 3. Create notification for the new member
-        const teamName = teamSnapshot.data()?.team || "un equipo";
         await createNotification(
             memberUid, 
-            "¡Bienvenido al equipo!", 
-            `Te han añadido al equipo "${teamName}".`
+            "Invitación a equipo",
+            `${user.name || user.email || 'Un administrador'} te invitó a unirte a "${teamName}".`,
+            {
+                url: '/requests?section=invitations',
+                type: 'team_invitation',
+                sourceId: teamId,
+                teamId
+            }
         );
 
-        return { id: memberUid, name: memberName };
+        return { id: memberUid, name: memberName, invited: true };
     } catch (error) {
-        console.error("Error adding member by email:", error);
+        console.error("Error inviting member by email:", error);
         throw error;
     }
 }

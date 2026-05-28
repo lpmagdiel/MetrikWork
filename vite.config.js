@@ -199,6 +199,9 @@ export default defineConfig(({ mode }) => {
       'import.meta.env.CLOUDINARY_PRESET_AVATAR': JSON.stringify(
         env.CLOUDINARY_PRESET_AVATAR || 'MetricWorkProfile'
       ),
+      'import.meta.env.CLOUDINARY_PRESET_TEAM': JSON.stringify(
+        env.CLOUDINARY_PRESET_TEAM || env.CLOUDINARY_PRESET_AVATAR || 'MetricWorkProfile'
+      ),
       'import.meta.env.CLOUDINARY_PRESET_INVENTARY': JSON.stringify(
         env.CLOUDINARY_PRESET_INVENTARY || 'MetricWorkInventary'
       ),
@@ -220,6 +223,7 @@ export default defineConfig(({ mode }) => {
           background_color: '#ffffff',
           display: 'standalone',
           start_url: '/',
+          lang: 'es',
           icons: [
             {
               src: '/icons/android/launchericon-192x192.png',
@@ -257,6 +261,23 @@ export default defineConfig(({ mode }) => {
                 },
                 expiration: {
                   maxEntries: 80,
+                  maxAgeSeconds: 60 * 60 * 24 * 30
+                }
+              }
+            },
+            {
+              urlPattern: ({ url, request }) => (
+                request.destination === 'image' &&
+                url.origin === 'https://res.cloudinary.com'
+              ),
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'metricwork-cloudinary-images',
+                cacheableResponse: {
+                  statuses: [0, 200]
+                },
+                expiration: {
+                  maxEntries: 120,
                   maxAgeSeconds: 60 * 60 * 24 * 30
                 }
               }

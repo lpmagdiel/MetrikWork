@@ -454,8 +454,9 @@
       await addMemberByEmail(team.id, newMemberEmail, newMemberPermissions);
       resetNewMemberForm();
       showAddMember = false;
+      showNotification("Invitación enviada al usuario.");
     } catch (error) {
-      messageToast = "Error al añadir miembro";
+      messageToast = error?.message || "Error al enviar invitación";
       typeToast = "error";
       showToast = true;
     } finally {
@@ -698,7 +699,7 @@
 
     <SliceContainer bind:show={showAddMember}>
       <div class="member-settings-form">
-        <h3>Agregar Miembro</h3>
+        <h3>Invitar miembro</h3>
         <p class="form-instruction">
           Ingresa el correo del usuario que deseas invitar al equipo.
         </p>
@@ -782,10 +783,10 @@
           disabled={isAddingMember || !newMemberEmail}
         >
           {#if isAddingMember}
-            <span>Añadiendo...</span>
+            <span>Enviando...</span>
           {:else}
             <UserPlus size={20} />
-            <span>Añadir al Equipo</span>
+            <span>Enviar invitación</span>
           {/if}
         </button>
       </div>

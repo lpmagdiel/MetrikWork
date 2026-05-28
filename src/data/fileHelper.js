@@ -33,8 +33,14 @@ export const uploader = async (file, preset = DEFAULT_CLOUDINARY_PRESET) => {
         });
 
         if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error?.message || 'Error al subir la imagen');
+            let message = 'Error al subir la imagen';
+            try {
+                const errorData = await response.json();
+                message = errorData.error?.message || errorData.error || message;
+            } catch {
+                // Some network/proxy failures do not return JSON.
+            }
+            throw new Error(message);
         }
 
         const result = await response.json();
@@ -102,7 +108,7 @@ export const destroyer = async (url) => {
  * @param {number} max 
  * @returns 
  */
-export const resizer = async (fileURL, max = 800) => {
+export const resizer = async (fileURL, max = 800, options = {}) => {
     const image = await loadImage(fileURL);
     const { width, height } = calcMaxDimensions(image.width, image.height, max);
     const canvas = document.createElement('canvas');
@@ -112,8 +118,24 @@ export const resizer = async (fileURL, max = 800) => {
     if (!ctx) {
         throw new Error('No se pudo obtener el contexto del canvas');
     }
+    ctx.fillStyle = options.background || '#ffffff';
+    ctx.fillRect(0, 0, width, height);
     ctx.drawImage(image, 0, 0, width, height);
-    return canvas.toDataURL("image/webp", 0.7);
+    return canvasToDataUrl(canvas, options.type || "image/webp", options.quality ?? 0.7);
+}
+
+export const resizeImageFile = async (file, max = 800, options = {}) => {
+    if (!file || (file.type && !file.type.startsWith('image/'))) {
+        throw new Error('Selecciona un archivo de imagen válido');
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+
+    try {
+        return await resizer(objectUrl, max, options);
+    } finally {
+        URL.revokeObjectURL(objectUrl);
+    }
 }
 
 /**
@@ -122,13 +144,39 @@ export const resizer = async (fileURL, max = 800) => {
  * @returns 
  */
 const loadImage = (fileURL) => {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
         const image = new Image();
-        image.src = fileURL;
+        let settled = false;
+        const timeout = setTimeout(() => {
+            settle(() => reject(new Error('La imagen tardó demasiado en cargar')));
+        }, 15000);
+
+        function settle(callback) {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            callback();
+        }
+
         image.onload = () => {
-            resolve(image);
+            settle(() => resolve(image));
         };
+        image.onerror = () => {
+            settle(() => reject(new Error('El formato de imagen no es compatible')));
+        };
+        image.src = fileURL;
     });
+}
+
+const canvasToDataUrl = (canvas, preferredType = 'image/webp', quality = 0.7) => {
+    const types = [...new Set([preferredType, 'image/jpeg', 'image/png'])].filter(Boolean);
+
+    for (const type of types) {
+        const dataUrl = canvas.toDataURL(type, quality);
+        if (dataUrl.startsWith(`data:${type}`)) return dataUrl;
+    }
+
+    return canvas.toDataURL();
 }
 
 /**
@@ -160,7 +208,7 @@ const calcMaxDimensions = (width, height, max) => {
 export const cropToSquare = async (file) => {
     return new Promise((resolve, reject) => {
       const img = new Image();
-      img.src = URL.createObjectURL(file);
+      const objectUrl = URL.createObjectURL(file);
 
       img.onload = () => {
         const size = Math.min(img.width, img.height);
@@ -175,6 +223,7 @@ export const cropToSquare = async (file) => {
         const ctx = canvas.getContext("2d");
 
         if (!ctx) {
+          URL.revokeObjectURL(objectUrl);
           reject(new Error("No se pudo obtener el contexto del canvas"));
           return;
         }
@@ -185,7 +234,12 @@ export const cropToSquare = async (file) => {
           0, 0, size, size
         );
         resolve(canvas.toDataURL());
+        URL.revokeObjectURL(objectUrl);
       };
-      img.onerror = reject;
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error("El formato de imagen no es compatible"));
+      };
+      img.src = objectUrl;
     });
 }

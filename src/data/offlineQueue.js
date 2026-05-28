@@ -3,9 +3,12 @@ import { writable } from 'svelte/store';
 const DB_NAME = 'metricwork-offline';
 const DB_VERSION = 1;
 const STORE_NAME = 'operations';
+const FALLBACK_STORAGE_KEY = 'metricwork-offline-operations';
 const MAX_ATTEMPTS = 8;
 
 let dbPromise = null;
+let useStorageFallback = false;
+let memoryFallbackOperations = [];
 let syncHandlers = {};
 let isSyncing = false;
 let syncStarted = false;
@@ -18,7 +21,49 @@ export const offlineQueueStore = writable({
 });
 
 function canUseIndexedDb() {
-    return typeof indexedDB !== 'undefined';
+    return typeof globalThis !== 'undefined' && typeof globalThis.indexedDB !== 'undefined';
+}
+
+function canUseLocalStorage() {
+    if (typeof localStorage === 'undefined') return false;
+
+    try {
+        const testKey = `${FALLBACK_STORAGE_KEY}:test`;
+        localStorage.setItem(testKey, '1');
+        localStorage.removeItem(testKey);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function readFallbackOperations() {
+    if (!canUseLocalStorage()) return [...memoryFallbackOperations];
+
+    try {
+        const rawOperations = localStorage.getItem(FALLBACK_STORAGE_KEY);
+        const operations = rawOperations ? JSON.parse(rawOperations) : [];
+        return Array.isArray(operations) ? operations : [];
+    } catch {
+        return [];
+    }
+}
+
+function writeFallbackOperations(operations) {
+    const nextOperations = Array.isArray(operations) ? operations : [];
+    memoryFallbackOperations = nextOperations;
+
+    if (!canUseLocalStorage()) return;
+
+    try {
+        localStorage.setItem(FALLBACK_STORAGE_KEY, JSON.stringify(nextOperations));
+    } catch {
+        // Keep the in-memory copy so the current session can still sync.
+    }
+}
+
+function sortOperations(operations = []) {
+    return operations.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
 }
 
 function createId(prefix = 'offline') {
@@ -67,22 +112,60 @@ function runStore(mode, callback) {
 }
 
 async function getAllOperations() {
-    if (!canUseIndexedDb()) return [];
-    const operations = await runStore('readonly', (store) => store.getAll());
-    return (operations || []).sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+    if (!canUseIndexedDb() || useStorageFallback) {
+        return sortOperations(readFallbackOperations());
+    }
+
+    try {
+        const operations = await runStore('readonly', (store) => store.getAll());
+        return sortOperations(operations || []);
+    } catch (error) {
+        useStorageFallback = true;
+        return sortOperations(readFallbackOperations());
+    }
 }
 
 async function countOperations() {
-    if (!canUseIndexedDb()) return 0;
-    return runStore('readonly', (store) => store.count());
+    if (!canUseIndexedDb() || useStorageFallback) {
+        return readFallbackOperations().length;
+    }
+
+    try {
+        return await runStore('readonly', (store) => store.count());
+    } catch {
+        useStorageFallback = true;
+        return readFallbackOperations().length;
+    }
 }
 
 async function putOperation(operation) {
-    await runStore('readwrite', (store) => store.put(operation));
+    if (!canUseIndexedDb() || useStorageFallback) {
+        const operations = readFallbackOperations().filter((item) => item.id !== operation.id);
+        operations.push(operation);
+        writeFallbackOperations(sortOperations(operations));
+        return;
+    }
+
+    try {
+        await runStore('readwrite', (store) => store.put(operation));
+    } catch (error) {
+        useStorageFallback = true;
+        await putOperation(operation);
+    }
 }
 
 async function deleteOperation(operationId) {
-    await runStore('readwrite', (store) => store.delete(operationId));
+    if (!canUseIndexedDb() || useStorageFallback) {
+        writeFallbackOperations(readFallbackOperations().filter((operation) => operation.id !== operationId));
+        return;
+    }
+
+    try {
+        await runStore('readwrite', (store) => store.delete(operationId));
+    } catch (error) {
+        useStorageFallback = true;
+        await deleteOperation(operationId);
+    }
 }
 
 async function refreshQueueState(patch = {}) {
@@ -99,7 +182,7 @@ async function refreshQueueState(patch = {}) {
 }
 
 export function isBrowserOffline() {
-    return false;
+    return typeof navigator !== 'undefined' && navigator.onLine === false;
 }
 
 export function isOfflineError(error) {

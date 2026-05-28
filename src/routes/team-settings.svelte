@@ -34,7 +34,7 @@
     normalizeNonWorkingDays,
   } from "../data/stores.js";
   import { navigateTo } from "../router.js";
-  import { resizer, uploader } from "../data/fileHelper.js";
+  import { resizeImageFile, uploader } from "../data/fileHelper.js";
   import { confirmAlert, showErrorAlert, showSuccessAlert } from "../data/alerts.js";
   import TitleHeader from "../components/TitleHeader.svelte";
   import { optimizeCloudinary } from "../helpers/image.js";
@@ -90,6 +90,13 @@
     "#8b5cf6",
     "#14b8a6",
   ];
+
+  const CLOUDINARY_PRESET_TEAM =
+    import.meta.env.VITE_CLOUDINARY_PRESET_TEAM ||
+    import.meta.env.CLOUDINARY_PRESET_TEAM ||
+    import.meta.env.VITE_CLOUDINARY_PRESET_AVATAR ||
+    import.meta.env.CLOUDINARY_PRESET_AVATAR ||
+    "MetricWorkProfile";
 
   $effect(() => {
     if (team) {
@@ -173,16 +180,19 @@
     if (!file) return;
 
     try {
-      const reader = new FileReader();
-      reader.onload = async (readerEvent) => {
-        pendingPhoto = await resizer(readerEvent.target.result, 700);
-        photoPreview = pendingPhoto;
-      };
-      reader.readAsDataURL(file);
+      pendingPhoto = await resizeImageFile(file, 700, {
+        type: "image/jpeg",
+        quality: 0.82,
+      });
+      photoPreview = pendingPhoto;
     } catch (error) {
-      await showErrorAlert("Error al cargar la imagen", "No se pudo cargar la imagen.");
+      await showErrorAlert(
+        "Error al cargar la imagen",
+        error?.message || "No se pudo cargar la imagen.",
+      );
+    } finally {
+      event.target.value = "";
     }
-    event.target.value = "";
   }
 
   async function handleSaveProfile() {
@@ -191,7 +201,7 @@
     try {
       let photoURL = team.photoURL || "";
       if (pendingPhoto) {
-        photoURL = await uploader(pendingPhoto);
+        photoURL = await uploader(pendingPhoto, CLOUDINARY_PRESET_TEAM);
       }
       await updateTeamProfile(team.id, {
         name: teamName,
@@ -225,11 +235,11 @@
       newMemberPermissions = createDefaultMemberPermissions();
       selectedNewMemberRole = "";
       showNewMemberPermissions = false;
-      await showSuccessAlert("Miembro agregado", "El miembro se agregó al equipo correctamente.");
+      await showSuccessAlert("Invitación enviada", "El usuario podrá aceptar o rechazar la invitación.");
     } catch (error) {
       await showErrorAlert(
-        "Error al agregar miembro",
-        error?.message || "No se pudo agregar el miembro al equipo.",
+        "Error al invitar miembro",
+        error?.message || "No se pudo enviar la invitación.",
       );
     } finally {
       isAddingMember = false;
@@ -431,7 +441,7 @@
 
       {#if canCreateSettings}
         <section class="section">
-          <h2>Agregar miembro</h2>
+          <h2>Invitar miembro</h2>
           <div class="input-with-icon">
             <Mail size={18} />
             <input type="email" bind:value={newMemberEmail} placeholder="usuario@ejemplo.com" />
@@ -493,7 +503,7 @@
 
           <button class="primary-btn" onclick={handleAddMember} disabled={isAddingMember || !newMemberEmail.trim()}>
             <UserPlus size={18} />
-            <span>{isAddingMember ? "Agregando..." : "Agregar miembro"}</span>
+            <span>{isAddingMember ? "Enviando..." : "Enviar invitación"}</span>
           </button>
         </section>
       {/if}
