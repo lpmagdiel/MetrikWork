@@ -81,6 +81,58 @@ service cloud.firestore {
              request.resource.data.membersData.size() == resource.data.membersData.size() + 1;
     }
 
+    function isSelfLeavingTeam(teamId) {
+      return request.auth != null &&
+             request.auth.uid != resource.data.admin &&
+             request.auth.uid in resource.data.members &&
+             !(request.auth.uid in request.resource.data.members) &&
+             request.resource.data.admin == resource.data.admin &&
+             resource.data.admin in request.resource.data.members &&
+             request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+               "members",
+               "membersData",
+               "memberSettings",
+               "memberPermissions",
+               "updatedAt"
+             ]) &&
+             resource.data.members.hasAll(request.resource.data.members) &&
+             request.resource.data.members.size() == resource.data.members.size() - 1 &&
+             resource.data.membersData.hasAll(request.resource.data.membersData) &&
+             request.resource.data.membersData.size() == resource.data.membersData.size() - 1 &&
+             (
+               !request.resource.data.keys().hasAny(["memberSettings"]) ||
+               request.resource.data.memberSettings[request.auth.uid] == null
+             ) &&
+             (
+               !request.resource.data.keys().hasAny(["memberPermissions"]) ||
+               request.resource.data.memberPermissions[request.auth.uid] == null
+             ) &&
+             (
+               !resource.data.keys().hasAny(["memberSettings"]) ||
+               (
+                 !request.resource.data.keys().hasAny(["memberSettings"]) &&
+                 resource.data.memberSettings.keys().hasOnly([request.auth.uid])
+               ) ||
+               (
+                 request.resource.data.keys().hasAny(["memberSettings"]) &&
+                 resource.data.memberSettings.diff(request.resource.data.memberSettings)
+                   .affectedKeys().hasOnly([request.auth.uid])
+               )
+             ) &&
+             (
+               !resource.data.keys().hasAny(["memberPermissions"]) ||
+               (
+                 !request.resource.data.keys().hasAny(["memberPermissions"]) &&
+                 resource.data.memberPermissions.keys().hasOnly([request.auth.uid])
+               ) ||
+               (
+                 request.resource.data.keys().hasAny(["memberPermissions"]) &&
+                 resource.data.memberPermissions.diff(request.resource.data.memberPermissions)
+                   .affectedKeys().hasOnly([request.auth.uid])
+               )
+             );
+    }
+
     function isValidTeamInvitationDocument(data, userId, teamId) {
       return data.keys().hasOnly([
                "teamId",
@@ -327,7 +379,8 @@ service cloud.firestore {
                         hasTeamPermission(teamId, "stats", "edit") &&
                         isStatsBudgetUpdate()
                       ) ||
-                      isAcceptingTeamInvitation(teamId)
+                      isAcceptingTeamInvitation(teamId) ||
+                      isSelfLeavingTeam(teamId)
                     );
 
       // Solo el administrador puede eliminar el equipo.

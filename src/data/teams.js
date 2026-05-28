@@ -349,6 +349,41 @@ export async function removeTeamMember(teamId, memberId) {
     }
 }
 
+export async function leaveTeam(teamId) {
+    const user = get(userStore);
+    if (!user?.uid || !teamId) return;
+
+    try {
+        const teamRef = doc(db, 'teams', teamId);
+        const teamSnapshot = await getDoc(teamRef);
+        if (!teamSnapshot.exists()) throw new Error("Equipo no encontrado");
+
+        const teamData = teamSnapshot.data();
+        if (teamData.admin === user.uid) {
+            throw new Error("El administrador debe eliminar el equipo para abandonarlo");
+        }
+
+        if (!(teamData.members || []).includes(user.uid)) {
+            throw new Error("No perteneces a este equipo");
+        }
+
+        await updateDoc(teamRef, {
+            members: (teamData.members || []).filter((id) => id !== user.uid),
+            membersData: (teamData.membersData || []).filter((member) => member.id !== user.uid),
+            [`memberSettings.${user.uid}`]: deleteField(),
+            [`memberPermissions.${user.uid}`]: deleteField(),
+            updatedAt: new Date().toISOString()
+        });
+
+        if (get(selectedTeamId) === teamId) {
+            selectedTeamId.set(null);
+        }
+    } catch (error) {
+        console.error("Error leaving team:", error);
+        throw error;
+    }
+}
+
 export async function deleteTeam(teamId) {
     const user = get(userStore);
     if (!user || !teamId) return;

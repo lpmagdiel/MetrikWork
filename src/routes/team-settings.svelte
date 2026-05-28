@@ -25,6 +25,7 @@
     updateTeamProfile,
     updateTeamCustomRoles,
     removeTeamMember,
+    leaveTeam,
     deleteTeam,
     createCustomRoleId,
     createDefaultMemberPermissions,
@@ -40,7 +41,7 @@
   } from "../data/stores.js";
   import { navigateTo } from "../router.js";
   import { resizeImageFile, uploader } from "../data/fileHelper.js";
-  import { confirmAlert, showErrorAlert, showSuccessAlert } from "../data/alerts.js";
+  import { confirmAlert, promptAlert, showErrorAlert, showSuccessAlert } from "../data/alerts.js";
   import TitleHeader from "../components/TitleHeader.svelte";
   import { optimizeCloudinary } from "../helpers/image.js";
 
@@ -390,21 +391,96 @@
     }
   }
 
+  function getTeamDisplayName() {
+    return team?.team || team?.name || "este equipo";
+  }
+
+  function normalizeVerificationValue(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  async function confirmAdminTeamDeletion() {
+    const teamName = getTeamDisplayName();
+    const confirmed = await confirmAlert({
+      title: "Abandonar y eliminar equipo",
+      text: `Eres el administrador de "${teamName}". Si continúas, el equipo se eliminará definitivamente y todos los miembros perderán acceso.`,
+      confirmButtonText: "Entiendo, continuar",
+      danger: true,
+    });
+    if (!confirmed) return false;
+
+    const typedTeamName = await promptAlert({
+      title: "Verificación 1 de 2",
+      text: `Escribe el nombre del equipo para confirmar: ${teamName}`,
+      inputPlaceholder: teamName,
+      confirmButtonText: "Verificar nombre",
+      requiredMessage: "Escribe el nombre del equipo para continuar",
+    });
+    if (typedTeamName === null) return false;
+    if (normalizeVerificationValue(typedTeamName) !== normalizeVerificationValue(teamName)) {
+      await showErrorAlert("Nombre incorrecto", "El nombre escrito no coincide con el equipo.");
+      return false;
+    }
+
+    if ($userStore?.email) {
+      const typedEmail = await promptAlert({
+        title: "Verificación 2 de 2",
+        text: `Confirma tu correo de administrador: ${$userStore.email}`,
+        input: "email",
+        inputPlaceholder: $userStore.email,
+        confirmButtonText: "Confirmar correo",
+        requiredMessage: "Escribe tu correo para continuar",
+      });
+      if (typedEmail === null) return false;
+      if (normalizeVerificationValue(typedEmail) !== normalizeVerificationValue($userStore.email)) {
+        await showErrorAlert("Correo incorrecto", "El correo escrito no coincide con tu cuenta.");
+        return false;
+      }
+    }
+
+    return true;
+  }
+
   async function handleDeleteTeam() {
     if (!team?.id || !isAdmin) return;
+    const verified = await confirmAdminTeamDeletion();
+    if (!verified) return;
+
+    try {
+      await deleteTeam(team.id);
+      await showSuccessAlert("Equipo eliminado", "El equipo se eliminó definitivamente.");
+      navigateTo("/teams");
+    } catch (error) {
+      await showErrorAlert("Error al eliminar el equipo", "No se pudo eliminar el equipo.");
+    }
+  }
+
+  async function handleLeaveTeam() {
+    if (!team?.id || !$userStore?.uid) return;
+
+    if (isAdmin) {
+      await handleDeleteTeam();
+      return;
+    }
+
+    const teamName = getTeamDisplayName();
     const confirmed = await confirmAlert({
-      title: "Eliminar equipo",
-      text: `¿Eliminar definitivamente el equipo "${team.team || team.name}"?`,
-      confirmButtonText: "Eliminar",
+      title: "Abandonar equipo",
+      text: `¿Quieres abandonar "${teamName}"? Perderás acceso a sus tareas, chat, pagos, inventario y ubicaciones.`,
+      confirmButtonText: "Abandonar",
       danger: true,
     });
     if (!confirmed) return;
 
     try {
-      await deleteTeam(team.id);
+      await leaveTeam(team.id);
+      await showSuccessAlert("Saliste del equipo", `Ya no perteneces a "${teamName}".`);
       navigateTo("/teams");
     } catch (error) {
-      await showErrorAlert("Error al eliminar el equipo", "No se pudo eliminar el equipo.");
+      await showErrorAlert(
+        "Error al abandonar equipo",
+        error?.message || "No se pudo abandonar el equipo.",
+      );
     }
   }
 
@@ -818,16 +894,22 @@
         </div>
       </section>
 
-      {#if isAdmin}
-        <section class="section danger-section">
-          <h2>Zona peligrosa</h2>
-          <p>Eliminar el equipo quita el acceso a todos los miembros.</p>
-          <button class="delete-team-btn" onclick={handleDeleteTeam}>
+      <section class="section danger-section">
+        <h2>Zona peligrosa</h2>
+        {#if isAdmin}
+          <p>Como administrador, abandonar el equipo eliminará definitivamente el equipo y quitará el acceso a todos los miembros.</p>
+          <button class="delete-team-btn" onclick={handleLeaveTeam}>
             <Trash2 size={18} />
-            <span>Eliminar equipo</span>
+            <span>Abandonar y eliminar equipo</span>
           </button>
-        </section>
-      {/if}
+        {:else}
+          <p>Abandonar el equipo quitará tu acceso a sus tareas, chat, pagos, inventario y ubicaciones.</p>
+          <button class="delete-team-btn" onclick={handleLeaveTeam}>
+            <UserMinus size={18} />
+            <span>Abandonar equipo</span>
+          </button>
+        {/if}
+      </section>
     </div>
   {/if}
 </div>

@@ -2,6 +2,7 @@ import { mount } from 'svelte'
 import './app.css'
 import Layout from './layout.svelte'
 import { navigateTo } from './router.js';
+import { captureCurrentUserLocation } from './data/geolocation.js';
 
 import {
   initAuth,
@@ -94,6 +95,7 @@ initAuth((uid) => {
   if (uid) {
     startOfflineActionsSync();
     startUserPresence(uid);
+    captureCurrentUserLocation();
     incomingCallUnsubscribe = subscribeToIncomingPrivateCalls(uid, bringIncomingCallToFront);
   } else {
     stopUserPresence();

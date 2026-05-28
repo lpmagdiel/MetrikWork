@@ -1,3 +1,7 @@
+import { writable } from "svelte/store";
+
+const USER_LOCATION_STORAGE_KEY = "metricwork:user-location";
+
 export const GEOLOCATION_ERRORS = {
   unsupported: "Tu navegador no permite obtener la ubicación GPS.",
   insecure:
@@ -11,6 +15,47 @@ export const GEOLOCATION_ERRORS = {
     "El navegador bloqueó el acceso a la ubicación. Revisa los permisos del sitio o del dispositivo.",
   unknown: "No se pudo obtener tu ubicación actual.",
 };
+
+function normalizeGpsPosition(value) {
+  const lat = Number(value?.lat);
+  const lon = Number(value?.lon ?? value?.lng);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+
+  return {
+    lat,
+    lon,
+    accuracy: Number.isFinite(Number(value?.accuracy)) ? Number(value.accuracy) : null,
+    updatedAt: value?.updatedAt || new Date().toISOString(),
+  };
+}
+
+function loadStoredUserLocation() {
+  if (typeof localStorage === "undefined") return null;
+
+  try {
+    return normalizeGpsPosition(JSON.parse(localStorage.getItem(USER_LOCATION_STORAGE_KEY) || "null"));
+  } catch {
+    return null;
+  }
+}
+
+export const currentUserLocation = writable(loadStoredUserLocation());
+
+export function storeCurrentUserLocation(gps) {
+  const normalizedLocation = normalizeGpsPosition(gps);
+  if (!normalizedLocation) return null;
+
+  currentUserLocation.set(normalizedLocation);
+
+  try {
+    localStorage.setItem(USER_LOCATION_STORAGE_KEY, JSON.stringify(normalizedLocation));
+  } catch {
+    // Local storage can be unavailable in private mode; the in-memory store still works.
+  }
+
+  return normalizedLocation;
+}
 
 function getGeolocationErrorMessage(error) {
   if (!error) return GEOLOCATION_ERRORS.unknown;
@@ -56,10 +101,13 @@ export async function getCurrentGpsPosition() {
   return new Promise((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        resolve({
+        const gps = {
           lat: position.coords.latitude.toFixed(6),
           lon: position.coords.longitude.toFixed(6),
-        });
+          accuracy: position.coords.accuracy,
+        };
+        storeCurrentUserLocation(gps);
+        resolve(gps);
       },
       (error) => {
         reject(new Error(getGeolocationErrorMessage(error)));
@@ -71,4 +119,14 @@ export async function getCurrentGpsPosition() {
       },
     );
   });
+}
+
+export async function captureCurrentUserLocation({ silent = true } = {}) {
+  try {
+    return await getCurrentGpsPosition();
+  } catch (error) {
+    if (!silent) throw error;
+    console.warn("No se pudo capturar la ubicación del usuario:", error?.message || error);
+    return null;
+  }
 }

@@ -26,7 +26,8 @@
   import CircleAddButton from "../components/CircleAddButton.svelte";
   import TitleHeader from "../components/TitleHeader.svelte";
   import { confirmAlert } from "../data/alerts.js";
-  import { getCurrentGpsPosition } from "../data/geolocation.js";
+  import { currentUserLocation, getCurrentGpsPosition } from "../data/geolocation.js";
+  import { distanceInfo } from "../helpers/navigation.js";
 
   let team = $derived($selectedTeam);
   let teamId = $derived(team?.id || $selectedTeamId);
@@ -180,6 +181,20 @@
     }).format(Number(value) || 0);
   }
 
+  function normalizeCoordinates(value) {
+    const lat = Number(value?.lat);
+    const lon = Number(value?.lon ?? value?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    return { lat, lon };
+  }
+
+  function getLocationDistanceLabel(location) {
+    const userCoordinates = normalizeCoordinates($currentUserLocation);
+    const locationCoordinates = normalizeCoordinates(location?.gps);
+    if (!userCoordinates || !locationCoordinates) return "";
+    return distanceInfo(userCoordinates, locationCoordinates);
+  }
+
   async function useCurrentLocation() {
     isLocating = true;
     locationError = "";
@@ -306,6 +321,9 @@
                 <p>{location.description || "Sin descripción"}</p>
                 {#if canViewLocationBudget && Number(location.budget) > 0}
                   <small class="location-budget">Presupuesto: {formatLocationBudget(location.budget)}</small>
+                {/if}
+                {#if getLocationDistanceLabel(location)}
+                  <small class="location-distance">a {getLocationDistanceLabel(location)} de ti</small>
                 {/if}
                 {#if location.gps}
                   <small>{location.gps.lat}, {location.gps.lon}</small>
@@ -550,6 +568,11 @@
 
   .location-info .location-budget {
     color: var(--success-color);
+    font-weight: 800;
+  }
+
+  .location-info .location-distance {
+    color: var(--info-color);
     font-weight: 800;
   }
 

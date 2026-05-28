@@ -1,11 +1,12 @@
 export const updateData = {
-  version: "0.9.8", // Actualiza este valor en cada release
-  message: "¡Novedades de MetricWork 0.9.8! ⚠️ Beta",
+  version: "0.9.81", // Actualiza este valor en cada release
+  message: "Novedades de MetricWork 0.9.81 - Beta",
   features: [
-    "Nuevas plantillas de roles para asignar permisos del equipo en segundos.",
-    "Exportación de reportes financieros y de tiempo en PDF imprimible y Excel.",
-    "Botón de cerrar en reportes PDF y comprobantes para volver fácilmente a la app móvil.",
-    "Personalización de color primario por equipo para preparar experiencias de marca blanca.",
-    "Unificación de colores de estados de tareas con variables CSS para mejorar soporte claro/oscuro."
+    "Invitaciones a equipos con solicitud para aceptar o rechazar antes de unirse.",
+    "Roles personalizados en ajustes del equipo para guardar combinaciones propias de permisos.",
+    "Las horas extra ahora se desactivan al configurar el límite en 0.",
+    "La app guarda tu ubicación al iniciar y muestra la distancia a cada ubicación disponible.",
+    "Mejoras al actualizar la foto de perfil del equipo.",
+    "Ajustes de estabilidad para el modo offline, especialmente en iPhone."
   ]
 };

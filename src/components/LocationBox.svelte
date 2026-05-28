@@ -1,5 +1,7 @@
 <script>
     import { MapPinned } from "lucide-svelte";
+    import { currentUserLocation } from "../data/geolocation.js";
+    import { distanceInfo } from "../helpers/navigation.js";
     import LocationMap from "./LocationMap.svelte";
 
     let {
@@ -11,10 +13,23 @@
     const hasCoordinates = $derived(
         Number.isFinite(Number(gps?.lat)) && Number.isFinite(Number(gps?.lon ?? gps?.lng))
     );
+    const locationCoordinates = $derived(normalizeCoordinates(gps));
+    const userCoordinates = $derived(normalizeCoordinates($currentUserLocation));
+    const distanceLabel = $derived.by(() => {
+        if (!locationCoordinates || !userCoordinates) return "";
+        return distanceInfo(userCoordinates, locationCoordinates);
+    });
     const googleMapsUrl = $derived.by(() => {
         if (!hasCoordinates) return "";
         return `https://www.google.com/maps/search/?api=1&query=${gps.lat},${gps.lon ?? gps.lng}`;
     });
+
+    function normalizeCoordinates(value) {
+        const lat = Number(value?.lat);
+        const lon = Number(value?.lon ?? value?.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+        return { lat, lon };
+    }
 </script>
 
 <style>
@@ -28,7 +43,7 @@
         background-color: var(--bg-card);
         margin: 10px;
         width: 100%;
-        min-height: 200px;
+        min-height: 220px;
         position: relative;
         overflow: hidden;
     }
@@ -40,8 +55,8 @@
         position: absolute;
         bottom: 0;
         width: 100%;
-        height: 80px;
-        padding-right: 46px;
+        min-height: 94px;
+        padding: 10px 46px 10px 10px;
         background-color: var(--bg-card);
     }
 
@@ -56,6 +71,12 @@
         color: var(--text-secondary);
         font-size: 14px;
         line-height: 1.4;
+    }
+
+    .location-distance {
+        color: var(--text-secondary);
+        font-size: 12px;
+        font-weight: 700;
     }
 
     .location-map-button {
@@ -93,5 +114,8 @@
         {/if}
         <h3>{name}</h3>
         <p>{description}</p>
+        {#if distanceLabel}
+            <small class="location-distance">a {distanceLabel} de ti</small>
+        {/if}
     </div>
 </div>
