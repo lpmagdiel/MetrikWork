@@ -401,17 +401,19 @@
 
     <div class="inventory-type-grid" aria-label="Tipos de inventario">
       {#each inventoryTypes as type}
+        {@const TypeIcon = type.Icon}
         <button
           class:active={selectedInventoryType === type.value}
           class="inventory-type-card"
           type="button"
+          aria-pressed={selectedInventoryType === type.value}
           onclick={() => {
             selectedInventoryType = type.value;
             searchTerm = "";
           }}
         >
           <span class="type-icon">
-            <svelte:component this={type.Icon} size={28} />
+            <TypeIcon size={28} />
           </span>
           <span class="type-copy">
             <strong>{type.title}</strong>
@@ -542,15 +544,17 @@
       </div>
 
       <div class="form-group">
-        <label>Tipo de inventario</label>
-        <div class="type-selector">
+        <span class="form-label" id="inventory-type-label">Tipo de inventario</span>
+        <div class="type-selector" role="group" aria-labelledby="inventory-type-label">
           {#each inventoryTypes as type}
+            {@const TypeIcon = type.Icon}
             <button
               type="button"
               class:active={formData.productType === type.value}
+              aria-pressed={formData.productType === type.value}
               onclick={() => (formData.productType = type.value)}
             >
-              <svelte:component this={type.Icon} size={18} />
+              <TypeIcon size={18} />
               <span>{type.title}</span>
             </button>
           {/each}
@@ -840,7 +844,8 @@
     gap: 16px;
   }
 
-  label {
+  label,
+  .form-label {
     display: block;
     margin-bottom: 8px;
     font-size: 14px;
@@ -1030,7 +1035,8 @@
     gap: 16px;
   }
 
-  label {
+  label,
+  .form-label {
     display: block;
     margin-bottom: 8px;
     font-size: 14px;

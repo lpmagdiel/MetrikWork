@@ -187,7 +187,21 @@ export default defineConfig(({ mode }) => {
 
   return {
     build: {
-      sourcemap: true
+      sourcemap: true,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return;
+            if (id.includes('/firebase/') || id.includes('/@firebase/')) return 'firebase';
+            if (id.includes('/svelte/') || id.includes('/svelte@')) return 'svelte';
+            if (id.includes('/lucide') || id.includes('/lucide-svelte')) return 'icons';
+            if (id.includes('/@stripe/') || id.includes('/stripe/') || id.includes('/svelte-stripe/')) {
+              return 'payments';
+            }
+            return 'vendor';
+          }
+        }
+      }
     },
     define: {
       'import.meta.env.CLOUDINARY_CLOUD_NAME': JSON.stringify(

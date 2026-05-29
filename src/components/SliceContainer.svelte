@@ -5,8 +5,7 @@
   import { slide } from "svelte/transition";
   import { openSliceContainers } from "../data/ui.js";
 
-  export let show = false;
-  export let bg = "var(--bg-card)";
+  let { show = $bindable(false), bg = "var(--bg-card)", children } = $props();
 
   let registeredOpen = false;
 
@@ -25,7 +24,9 @@
     registeredOpen = show;
   };
 
-  $: show, syncOpenState();
+  $effect(() => {
+    syncOpenState();
+  });
 
   onDestroy(() => {
     if (!registeredOpen) return;
@@ -42,12 +43,14 @@
     {...useSwipe(handleSwipe)}
   >
     <div class="slice-container-close">
-      <button on:click={() => (show = false)}>
+      <button onclick={() => (show = false)}>
         <ChevronDown size={32} color="var(--accent-color)" strokeWidth={3} />
       </button>
     </div>
     <div class="slice-container-content">
-      <slot />
+      {#if children}
+        {@render children()}
+      {/if}
     </div>
   </div>
 {/if}

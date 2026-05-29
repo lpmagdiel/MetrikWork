@@ -1,5 +1,5 @@
 <script>
-    const { text } = $props();
+    const { text, children } = $props();
 </script>
 
 <style>
@@ -30,6 +30,10 @@
 
 
 <div class="badget-button">
-    <div class="badget-icon"><slot /></div>
+    <div class="badget-icon">
+        {#if children}
+            {@render children()}
+        {/if}
+    </div>
     <div class="badget-text">{text}</div>
 </div>

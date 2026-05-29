@@ -116,30 +116,32 @@
     </div>
 
     <div class="stripe-element-wrapper">
-      <label>Datos de pago</label>
+      <span class="stripe-label" id="payment-data-label">Datos de pago</span>
       {#if stripe && paymentStore.clientSecret}
-        <Elements
-          {stripe}
-          bind:elements
-          clientSecret={paymentStore.clientSecret}
-          theme="flat"
-          variables={{
-            colorPrimary: "var(--accent-strong, #000000)",
-            colorBackground: "var(--bg-input, #f5f5f5)",
-            colorText: "var(--text-primary, #333333)",
-            borderRadius: "12px",
-            fontFamily: "Inter, sans-serif",
-            fontSizeBase: "16px",
-          }}
-          rules={{
-            ".Input": {
-              border: "1px solid var(--border-color, #f9f9f9)",
-              padding: "12px",
-            },
-          }}
-        >
-          <PaymentElement />
-        </Elements>
+        <div aria-labelledby="payment-data-label">
+          <Elements
+            {stripe}
+            bind:elements
+            clientSecret={paymentStore.clientSecret}
+            theme="flat"
+            variables={{
+              colorPrimary: "var(--accent-strong, #000000)",
+              colorBackground: "var(--bg-input, #f5f5f5)",
+              colorText: "var(--text-primary, #333333)",
+              borderRadius: "12px",
+              fontFamily: "Inter, sans-serif",
+              fontSizeBase: "16px",
+            }}
+            rules={{
+              ".Input": {
+                border: "1px solid var(--border-color, #f9f9f9)",
+                padding: "12px",
+              },
+            }}
+          >
+            <PaymentElement />
+          </Elements>
+        </div>
       {:else if paymentStore.paymentStatus === "error"}
         <div class="element-error">
           <AlertCircle size={20} />
@@ -310,7 +312,7 @@
     margin-bottom: 1.5rem;
   }
 
-  .stripe-element-wrapper label {
+  .stripe-label {
     display: block;
     font-size: 0.85rem;
     font-weight: 600;

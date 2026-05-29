@@ -3,7 +3,6 @@ import './app.css'
 import Layout from './layout.svelte'
 import { navigateTo } from './router.js';
 import { captureCurrentUserLocation } from './data/geolocation.js';
-
 import {
   initAuth,
   initializePushNotifications,

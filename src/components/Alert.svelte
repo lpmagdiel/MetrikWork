@@ -34,15 +34,16 @@
     show = false;
   }
 
-  const currentIcon = icons[type] || icons.info;
+  let currentIcon = $derived(icons[type] || icons.info);
 </script>
 
 {#if show}
   <div class="alert-overlay" onclick={close}>
     <div class="alert-container {type} {isVisible ? 'visible' : ''}" onclick={(e) => e.stopPropagation()}>
       <div class="alert-content">
+        {@const AlertIcon = currentIcon.icon}
         <div class="alert-icon" style="color: {currentIcon.color}">
-          <svelte:component this={currentIcon.icon} size={28} />
+          <AlertIcon size={28} />
         </div>
         <div class="alert-text">
           {#if title}

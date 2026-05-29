@@ -13,6 +13,7 @@
 <div class="pricing-container">
   <div class="cards-stack">
     {#each plans as plan}
+      {@const PlanIcon = icons[plan.icon]}
       <button
         class="plan-option"
         class:selected={paymentStore.selectedPlanName === plan.name}
@@ -25,7 +26,7 @@
         >
           <div class="card-left">
             <div class="icon">
-              <svelte:component this={icons[plan.icon]} size={24} />
+              <PlanIcon size={24} />
             </div>
           </div>
 

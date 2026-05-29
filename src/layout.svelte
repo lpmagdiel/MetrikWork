@@ -13,6 +13,7 @@
   import Toast from "./components/Toast.svelte";
   import UpdateFeaturesModal from "./components/UpdateFeaturesModal.svelte";
   import { updateData } from "./data/updateFeatures.js";
+  import { SpeedInsights } from "@vercel/speed-insights/next";
   // Modal de novedades
   let showUpdateModal = $state(false);
 
@@ -353,6 +354,7 @@
     duration={3500}
     bind:show={showConnectionToast}
   />
+  <SpeedInsights />
 </main>
 
 {#if showNav}

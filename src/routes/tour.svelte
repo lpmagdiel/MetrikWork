@@ -123,8 +123,9 @@
           {#if steps[currentStep].image}
             <img src={steps[currentStep].image} alt="Mascot" class="mascot-img" />
           {:else}
+            {@const StepIcon = steps[currentStep].icon}
             <div class="feature-preview" style="background: {steps[currentStep].color}">
-              <svelte:component this={steps[currentStep].icon} size={80} strokeWidth={1.5} />
+              <StepIcon size={80} strokeWidth={1.5} />
             </div>
           {/if}
           
