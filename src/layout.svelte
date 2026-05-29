@@ -13,11 +13,13 @@
   import Toast from "./components/Toast.svelte";
   import UpdateFeaturesModal from "./components/UpdateFeaturesModal.svelte";
   import { updateData } from "./data/updateFeatures.js";
-  import { SpeedInsights } from "@vercel/speed-insights/next";
+  import { injectSpeedInsights } from "@vercel/speed-insights";
+
   // Modal de novedades
   let showUpdateModal = $state(false);
 
   let cleanPath = $derived($currentPath.split("?")[0]);
+  let speedInsights = $state(null);
   let hasCheckedUpdate = false;
   let isOnline = $state(true);
   let showConnectionToast = $state(false);
@@ -33,6 +35,11 @@
   ];
 
   onMount(() => {
+    speedInsights = injectSpeedInsights({
+      framework: "svelte",
+      route: cleanPath,
+    });
+
     let connectionCheckId = 0;
     let showToastTimeout = null;
 
@@ -124,6 +131,10 @@
       window.removeEventListener("focus", syncConnectionFromNavigator);
       document.removeEventListener("visibilitychange", syncConnectionFromNavigator);
     };
+  });
+
+  $effect(() => {
+    speedInsights?.setRoute(cleanPath);
   });
 
   $effect(() => {
@@ -354,7 +365,6 @@
     duration={3500}
     bind:show={showConnectionToast}
   />
-  <SpeedInsights />
 </main>
 
 {#if showNav}
