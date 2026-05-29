@@ -1,5 +1,5 @@
 <script>
-    import { ChevronDown, ChevronLeft, DollarSign, Filter, CheckCircle, AlertCircle, Eye, History, Printer, Download } from "lucide-svelte";
+    import { ChevronDown, ChevronLeft, DollarSign, Filter, CheckCircle, AlertCircle, Eye, History, Printer, Download, MapPin } from "lucide-svelte";
     import { selectedTeam, selectedTeamId, userStore, hasTeamPermission } from "../data/stores.js";
     import { getTeamPaymentsData, registerTeamPayment } from "../data/teamPayments.js";
     import { createNotification } from "../data/notifications.js";
@@ -8,6 +8,7 @@
     import SliceContainer from "../components/SliceContainer.svelte";
   import TitleHeader from "../components/TitleHeader.svelte";
     import { downloadExcelReport, openPrintableReport } from "../helpers/reportExport.js";
+    import { formatGpsCoordinates, geocodeAddress, normalizeCoordinates } from "../helpers/navigation.js";
 
     let team = $derived($selectedTeam);
     let teamId = $derived(team?.id || $selectedTeamId);
@@ -33,6 +34,9 @@
     let showDetailsModal = $state(false);
     let selectedMemberDetails = $state(null);
     let expandedMemberId = $state(null);
+    let showAdditionalPaymentInfo = $state(false);
+    let workLocationAddresses = $state({});
+    const resolvingLocationAddressIds = new Set();
 
     let filteredMembers = $derived.by(() => {
         if (filterStatus === 'paid') return memberBalances.filter(m => m.balance <= 0.01);
@@ -40,12 +44,20 @@
         return memberBalances;
     });
 
+    let pendingPaymentSummary = $derived.by(() => {
+        const membersWithBalance = memberBalances.filter((member) => Number(member.balance) > 0.01);
+        const totalToPay = membersWithBalance.reduce((acc, member) => acc + (Number(member.balance) || 0), 0);
+        return {
+            totalToPay,
+            memberCount: membersWithBalance.length,
+        };
+    });
+
     async function loadData() {
         if (!team?.id || !canViewPayments) return;
         isLoading = true;
         try {
             memberBalances = await getTeamPaymentsData(team.id);
-            console.log("Datos de pagos y jornadas recuperados de Firebase:",  memberBalances);
         } catch (e) {
             showNotification("Error al cargar datos", "error");
         } finally {
@@ -56,6 +68,22 @@
     $effect(() => {
         if (team?.id) {
             loadData();
+        }
+    });
+
+    $effect(() => {
+        if (!showDetailsModal || !selectedMemberDetails?.works?.length) return;
+
+        const pendingWorks = selectedMemberDetails.works.filter((work) => {
+            const key = getWorkAddressKey(work);
+            return getWorkMemberGps(work) &&
+                !work.memberLocationAddress &&
+                !workLocationAddresses[key] &&
+                !resolvingLocationAddressIds.has(key);
+        });
+
+        if (pendingWorks.length) {
+            resolveWorkLocationAddresses(pendingWorks);
         }
     });
 
@@ -189,6 +217,53 @@
         return base + extra;
     }
 
+    function getWorkAddressKey(work) {
+        return work?.id || `${work?.userId || "member"}-${work?.date || "date"}-${work?.createdAt || ""}`;
+    }
+
+    function getWorkMemberGps(work) {
+        return normalizeCoordinates(work?.memberGps);
+    }
+
+    function getWorkMemberLocationLabel(work) {
+        const gps = getWorkMemberGps(work);
+        if (!gps) return "";
+
+        return work?.memberLocationAddress ||
+            workLocationAddresses[getWorkAddressKey(work)] ||
+            formatGpsCoordinates(gps);
+    }
+
+    function getWorkMemberLocationUrl(work) {
+        const gps = getWorkMemberGps(work);
+        if (!gps) return "";
+        return `https://www.google.com/maps/search/?api=1&query=${gps.lat},${gps.lon}`;
+    }
+
+    async function resolveWorkLocationAddresses(works) {
+        const resolvedEntries = await Promise.all(
+            works.map(async (work) => {
+                const key = getWorkAddressKey(work);
+                const gps = getWorkMemberGps(work);
+                if (!gps) return null;
+
+                resolvingLocationAddressIds.add(key);
+                try {
+                    return [key, await geocodeAddress(gps)];
+                } catch (error) {
+                    return [key, formatGpsCoordinates(gps)];
+                } finally {
+                    resolvingLocationAddressIds.delete(key);
+                }
+            }),
+        );
+
+        const nextAddresses = Object.fromEntries(resolvedEntries.filter(Boolean));
+        if (Object.keys(nextAddresses).length) {
+            workLocationAddresses = { ...workLocationAddresses, ...nextAddresses };
+        }
+    }
+
     function escapeHtml(value) {
         return String(value ?? "")
             .replaceAll("&", "&amp;")
@@ -229,6 +304,7 @@
                 <td>${getWorkUnits(work)}</td>
                 <td>${Number(work.overtimeHours) || 0}h</td>
                 <td>${escapeHtml(work.taskTitle || work.note || "")}</td>
+                <td>${escapeHtml(getWorkMemberLocationLabel(work) || "Sin GPS")}</td>
                 <td class="money">${escapeHtml(formatMoney(getWorkAmount(work, member)))}</td>
             </tr>
         `).join("");
@@ -441,11 +517,12 @@
                     <th>Días</th>
                     <th>Horas extra</th>
                     <th>Nota / tarea</th>
+                    <th>Ubicación GPS</th>
                     <th class="money">Importe</th>
                 </tr>
             </thead>
             <tbody>
-                ${workRows || `<tr><td colspan="6">No hay jornadas registradas.</td></tr>`}
+                ${workRows || `<tr><td colspan="7">No hay jornadas registradas.</td></tr>`}
             </tbody>
         </table>
 
@@ -537,7 +614,7 @@
                 },
                 {
                     title: "Detalle de jornadas",
-                    headers: ["Integrante", "Fecha", "Tipo", "Dias", "Horas extra", "Nota / tarea", "Importe"],
+                    headers: ["Integrante", "Fecha", "Tipo", "Dias", "Horas extra", "Nota / tarea", "Ubicación GPS", "Importe"],
                     rows: filteredMembers.flatMap((member) =>
                         (member.works || []).map((work) => [
                             member?.name || member?.email || "Usuario",
@@ -546,6 +623,7 @@
                             getWorkUnits(work),
                             `${Number(work.overtimeHours) || 0}h`,
                             work.taskTitle || work.note || "",
+                            getWorkMemberLocationLabel(work) || "Sin GPS",
                             formatMoney(getWorkAmount(work, member)),
                         ]),
                     ),
@@ -609,11 +687,28 @@
                     </select>
                 </div>
                 
-                <div class="summary-stats">
-                    <div class="stat">
-                        <span class="stat-label">Total a Pagar</span>
-                        <span class="stat-value danger">{formatMoney(memberBalances.reduce((acc, m) => acc + (m.balance > 0 ? m.balance : 0), 0))}</span>
-                    </div>
+                <div class="additional-info">
+                    <button
+                        type="button"
+                        class="info-toggle"
+                        onclick={() => showAdditionalPaymentInfo = !showAdditionalPaymentInfo}
+                        aria-expanded={showAdditionalPaymentInfo}
+                    >
+                        <span>Información adicional</span>
+                        <ChevronDown size={16} class={showAdditionalPaymentInfo ? "open" : ""} />
+                    </button>
+
+                    {#if showAdditionalPaymentInfo}
+                        <div class="summary-stats">
+                            <div class="stat">
+                                <span class="stat-label">Total a pagar</span>
+                                <span class="stat-value danger">
+                                    {formatMoney(pendingPaymentSummary.totalToPay)}, de {pendingPaymentSummary.memberCount}
+                                    {pendingPaymentSummary.memberCount === 1 ? "miembro" : "miembros"}
+                                </span>
+                            </div>
+                        </div>
+                    {/if}
                 </div>
 
                 <div class="export-actions">
@@ -863,6 +958,14 @@
                                         <span class="item-type">
                                             {work.type === 'full-day' ? 'Día Completo' : work.type === 'half-day' ? 'Medio Día' : 'Horas Extra'}
                                         </span>
+                                        {#if getWorkMemberLocationLabel(work)}
+                                            <a class="work-location-link" href={getWorkMemberLocationUrl(work)} target="_blank" rel="noopener noreferrer">
+                                                <MapPin size={13} />
+                                                <span>{getWorkMemberLocationLabel(work)}</span>
+                                            </a>
+                                        {:else}
+                                            <span class="work-location-muted">Sin GPS registrada</span>
+                                        {/if}
                                     </div>
                                     <div class="item-values">
                                         {#if work.overtimeHours > 0}
@@ -972,6 +1075,44 @@
     .summary-stats {
         display: flex;
         gap: 24px;
+    }
+
+    .additional-info {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+
+    .info-toggle {
+        min-height: 40px;
+        border: 1px solid var(--border-color);
+        background: var(--bg-input);
+        color: var(--text-primary);
+        border-radius: var(--radius-sm);
+        padding: 0 13px;
+        font-weight: 800;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+    }
+
+    .info-toggle:hover {
+        background: var(--bg-accent-subtle);
+        color: var(--accent-ink);
+        border-color: var(--accent-color);
+    }
+
+    .info-toggle :global(svg) {
+        transition: transform 0.2s ease;
+    }
+
+    .info-toggle :global(svg.open) {
+        transform: rotate(180deg);
     }
 
     .export-actions {
@@ -1464,6 +1605,7 @@
         display: flex;
         flex-direction: column;
         gap: 2px;
+        min-width: 0;
     }
 
     .item-date {
@@ -1477,6 +1619,31 @@
         color: var(--text-secondary);
         text-transform: uppercase;
         letter-spacing: 0.5px;
+    }
+
+    .work-location-link,
+    .work-location-muted {
+        color: var(--text-secondary);
+        font-size: 12px;
+        margin-top: 4px;
+    }
+
+    .work-location-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        max-width: 100%;
+        text-decoration: none;
+    }
+
+    .work-location-link:hover {
+        color: var(--text-primary);
+    }
+
+    .work-location-link span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     .item-values {
@@ -1553,11 +1720,17 @@
             font-size: 14px;
         }
 
+        .additional-info,
         .summary-stats,
         .export-actions,
         .stat {
             width: 100%;
             align-items: flex-start;
+        }
+
+        .info-toggle {
+            width: 100%;
+            justify-content: space-between;
         }
 
         .export-actions {

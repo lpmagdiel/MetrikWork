@@ -9,6 +9,7 @@
     ChevronRight,
     Clock,
     Filter,
+    MapPin,
     Save,
     StickyNote,
     User,
@@ -31,6 +32,7 @@
     getNonWorkingDayMessage,
   } from "../data/stores.js";
   import TitleHeader from "../components/TitleHeader.svelte";
+  import { formatGpsCoordinates, geocodeAddress, normalizeCoordinates } from "../helpers/navigation.js";
 
   let messageToast = $state("");
   let typeToast = $state("success");
@@ -52,6 +54,8 @@
     note: "",
   });
   let isSavingAssignment = $state(false);
+  let workLocationAddresses = $state({});
+  const resolvingLocationAddressIds = new Set();
 
   let team = $derived($selectedTeam);
   let isAdmin = $derived(
@@ -158,6 +162,20 @@
   });
 
   $effect(() => {
+    const pendingWorks = works.filter((work) => {
+      const key = getWorkAddressKey(work);
+      return getWorkMemberGps(work) &&
+        !work.memberLocationAddress &&
+        !workLocationAddresses[key] &&
+        !resolvingLocationAddressIds.has(key);
+    });
+
+    if (pendingWorks.length) {
+      resolveWorkLocationAddresses(pendingWorks);
+    }
+  });
+
+  $effect(() => {
     if (!isAssignmentNonWorkingDay) return;
     if (assignmentForm.overtimeHours !== 0) {
       assignmentForm.overtimeHours = 0;
@@ -252,6 +270,53 @@
       .map((color, index) => `${color} ${index * step}% ${(index + 1) * step}%`)
       .join(", ");
     return `--work-color: ${colors[0]}; --work-bg: linear-gradient(135deg, ${gradientStops}); --work-border: ${colors[0]};`;
+  }
+
+  function getWorkAddressKey(work) {
+    return work?.id || `${work?.userId || "member"}-${work?.date || "date"}-${work?.createdAt || ""}`;
+  }
+
+  function getWorkMemberGps(work) {
+    return normalizeCoordinates(work?.memberGps);
+  }
+
+  function getWorkMemberLocationLabel(work) {
+    const gps = getWorkMemberGps(work);
+    if (!gps) return "";
+
+    return work?.memberLocationAddress ||
+      workLocationAddresses[getWorkAddressKey(work)] ||
+      formatGpsCoordinates(gps);
+  }
+
+  function getWorkMemberLocationUrl(work) {
+    const gps = getWorkMemberGps(work);
+    if (!gps) return "";
+    return `https://www.google.com/maps/search/?api=1&query=${gps.lat},${gps.lon}`;
+  }
+
+  async function resolveWorkLocationAddresses(nextWorks) {
+    const resolvedEntries = await Promise.all(
+      nextWorks.map(async (work) => {
+        const key = getWorkAddressKey(work);
+        const gps = getWorkMemberGps(work);
+        if (!gps) return null;
+
+        resolvingLocationAddressIds.add(key);
+        try {
+          return [key, await geocodeAddress(gps)];
+        } catch (error) {
+          return [key, formatGpsCoordinates(gps)];
+        } finally {
+          resolvingLocationAddressIds.delete(key);
+        }
+      }),
+    );
+
+    const nextAddresses = Object.fromEntries(resolvedEntries.filter(Boolean));
+    if (Object.keys(nextAddresses).length) {
+      workLocationAddresses = { ...workLocationAddresses, ...nextAddresses };
+    }
   }
 
   function prevMonth() {
@@ -461,6 +526,12 @@
                   {#if work.note}
                     <small><StickyNote size={13} /> {work.note}</small>
                   {/if}
+                  {#if getWorkMemberLocationLabel(work)}
+                    <a class="work-location-link" href={getWorkMemberLocationUrl(work)} target="_blank" rel="noopener noreferrer">
+                      <MapPin size={13} />
+                      <span>{getWorkMemberLocationLabel(work)}</span>
+                    </a>
+                  {/if}
                 </div>
               </article>
             {/each}
@@ -519,6 +590,12 @@
                   <p>{workTypeLabels[getWorkType(work)] || "Jornada"}</p>
                   {#if work.note}
                     <small>{work.note}</small>
+                  {/if}
+                  {#if getWorkMemberLocationLabel(work)}
+                    <a class="work-location-link" href={getWorkMemberLocationUrl(work)} target="_blank" rel="noopener noreferrer">
+                      <MapPin size={13} />
+                      <span>{getWorkMemberLocationLabel(work)}</span>
+                    </a>
                   {/if}
                 </div>
                 <div class="record-meta">
@@ -891,16 +968,34 @@
   .assignment-card p,
   .record-main p,
   .record-main small,
-  .assignment-card small {
+  .assignment-card small,
+  .work-location-link {
     color: var(--text-secondary);
     font-size: 12px;
   }
 
-  .assignment-card small {
+  .assignment-card small,
+  .work-location-link {
     display: inline-flex;
     align-items: center;
     gap: 4px;
     margin-top: 6px;
+    min-width: 0;
+  }
+
+  .work-location-link {
+    max-width: 100%;
+    text-decoration: none;
+  }
+
+  .work-location-link:hover {
+    color: var(--text-primary);
+  }
+
+  .work-location-link span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .filters-row {

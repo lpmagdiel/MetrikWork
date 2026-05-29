@@ -18,6 +18,7 @@
   import Toast from "../components/Toast.svelte";
   import TitleHeader from "../components/TitleHeader.svelte";
   import { navigateTo } from "../router.js";
+  import { formatGpsCoordinates, geocodeAddress, normalizeCoordinates } from "../helpers/navigation.js";
   import { downloadExcelReport, openPrintableReport } from "../helpers/reportExport.js";
   import {
     getTeamAdvancedStatsData,
@@ -49,6 +50,8 @@
   let messageToast = $state("");
   let typeToast = $state("success");
   let showToast = $state(false);
+  let workLocationAddresses = $state({});
+  const resolvingLocationAddressIds = new Set();
 
   const periodLabels = {
     week: "Semana",
@@ -388,6 +391,20 @@
     if (team?.id && canViewStats) loadStatsData();
   });
 
+  $effect(() => {
+    const pendingWorks = filteredWorks.filter((work) => {
+      const key = getWorkAddressKey(work);
+      return getWorkMemberGps(work) &&
+        !work.memberLocationAddress &&
+        !workLocationAddresses[key] &&
+        !resolvingLocationAddressIds.has(key);
+    });
+
+    if (pendingWorks.length) {
+      resolveWorkLocationAddresses(pendingWorks);
+    }
+  });
+
   async function loadStatsData() {
     isLoading = true;
     try {
@@ -480,6 +497,53 @@
 
   function getLocationName(locationId) {
     return locationMap.get(locationId)?.name || "";
+  }
+
+  function getWorkAddressKey(work) {
+    return work?.id || `${work?.userId || "member"}-${work?.date || "date"}-${work?.createdAt || ""}`;
+  }
+
+  function getWorkMemberGps(work) {
+    return normalizeCoordinates(work?.memberGps);
+  }
+
+  function getWorkMemberLocationLabel(work) {
+    const gps = getWorkMemberGps(work);
+    if (!gps) return "";
+
+    return work?.memberLocationAddress ||
+      workLocationAddresses[getWorkAddressKey(work)] ||
+      formatGpsCoordinates(gps);
+  }
+
+  function getWorkMemberLocationUrl(work) {
+    const gps = getWorkMemberGps(work);
+    if (!gps) return "";
+    return `https://www.google.com/maps/search/?api=1&query=${gps.lat},${gps.lon}`;
+  }
+
+  async function resolveWorkLocationAddresses(nextWorks) {
+    const resolvedEntries = await Promise.all(
+      nextWorks.map(async (work) => {
+        const key = getWorkAddressKey(work);
+        const gps = getWorkMemberGps(work);
+        if (!gps) return null;
+
+        resolvingLocationAddressIds.add(key);
+        try {
+          return [key, await geocodeAddress(gps)];
+        } catch (error) {
+          return [key, formatGpsCoordinates(gps)];
+        } finally {
+          resolvingLocationAddressIds.delete(key);
+        }
+      }),
+    );
+
+    const nextAddresses = Object.fromEntries(resolvedEntries.filter(Boolean));
+    if (Object.keys(nextAddresses).length) {
+      workLocationAddresses = { ...workLocationAddresses, ...nextAddresses };
+    }
   }
 
   function isConsumable(item) {
@@ -744,11 +808,13 @@
         },
         {
           title: "Detalle de jornadas",
-          headers: ["Fecha", "Miembro", "Ubicacion", "Tipo", "Dias", "Horas extra", "Coste"],
+          headers: ["Fecha", "Miembro", "Ubicacion", "GPS miembro", "Direccion GPS", "Tipo", "Dias", "Horas extra", "Coste"],
           rows: filteredWorks.map((work) => [
             formatDate(getDateKey(work.date)),
             getMemberName(work.userId),
             getLocationName(getWorkLocationId(work)) || "Sin ubicacion",
+            formatGpsCoordinates(getWorkMemberGps(work)) || "Sin GPS",
+            getWorkMemberLocationLabel(work) || "Sin direccion",
             getWorkTypeLabel(work),
             formatNumber(getWorkUnits(work)),
             `${formatNumber(work.overtimeHours || 0)}h`,
@@ -1075,6 +1141,40 @@
                 </div>
               {:else}
                 <div class="empty-inline">Sin miembros con actividad.</div>
+              {/if}
+            </article>
+
+            <article class="panel">
+              <div class="panel-heading">
+                <div>
+                  <p>Control GPS</p>
+                  <h2>Jornadas recientes</h2>
+                </div>
+                <MapPin size={20} />
+              </div>
+              {#if filteredWorks.length}
+                <div class="work-list">
+                  {#each filteredWorks.slice(0, 8) as work (work.id)}
+                    <article class="work-row">
+                      <div class="member-avatar">{getMemberInitials(work.userId)}</div>
+                      <div>
+                        <h3>{getMemberName(work.userId)}</h3>
+                        <p>{formatDate(getDateKey(work.date))} · {getWorkTypeLabel(work)}</p>
+                        {#if getWorkMemberLocationLabel(work)}
+                          <a class="work-location-link" href={getWorkMemberLocationUrl(work)} target="_blank" rel="noopener noreferrer">
+                            <MapPin size={13} />
+                            <span>{getWorkMemberLocationLabel(work)}</span>
+                          </a>
+                        {:else}
+                          <small class="work-location-muted">Sin GPS registrada</small>
+                        {/if}
+                      </div>
+                      <strong>{formatMoney(getWorkLaborCost(work))}</strong>
+                    </article>
+                  {/each}
+                </div>
+              {:else}
+                <div class="empty-inline">Sin jornadas en este periodo.</div>
               {/if}
             </article>
           </section>
@@ -1537,7 +1637,8 @@
 
   .bar-list,
   .member-list,
-  .request-list {
+  .request-list,
+  .work-list {
     display: grid;
     gap: 12px;
   }
@@ -1628,7 +1729,8 @@
     background: var(--text-primary);
   }
 
-  .member-row {
+  .member-row,
+  .work-row {
     display: grid;
     grid-template-columns: 38px minmax(0, 1fr) auto;
     align-items: center;
@@ -1684,7 +1786,8 @@
     font-weight: 900;
   }
 
-  .member-row h3 {
+  .member-row h3,
+  .work-row h3 {
     font-size: 14px;
     margin: 0 0 3px;
     overflow: hidden;
@@ -1692,13 +1795,43 @@
     white-space: nowrap;
   }
 
-  .member-row p {
+  .member-row p,
+  .work-row p,
+  .work-location-muted {
     color: var(--text-secondary);
     font-size: 12px;
     margin: 0;
   }
 
-  .member-row strong {
+  .work-location-link {
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    max-width: 100%;
+    min-width: 0;
+    margin-top: 5px;
+    text-decoration: none;
+    font-size: 12px;
+  }
+
+  .work-location-link:hover {
+    color: var(--text-primary);
+  }
+
+  .work-location-link span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .work-location-muted {
+    display: block;
+    margin-top: 5px;
+  }
+
+  .member-row strong,
+  .work-row strong {
     font-size: 13px;
     max-width: 130px;
     overflow-wrap: anywhere;
@@ -1834,11 +1967,13 @@
       font-size: 22px;
     }
 
-    .member-row {
+    .member-row,
+    .work-row {
       grid-template-columns: 38px minmax(0, 1fr);
     }
 
-    .member-row strong {
+    .member-row strong,
+    .work-row strong {
       grid-column: 2;
       justify-self: start;
       max-width: none;

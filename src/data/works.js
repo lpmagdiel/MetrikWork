@@ -8,6 +8,7 @@ import {
     scheduleOfflineSync
 } from './offlineQueue.js';
 import { applyWorkdayOvertimeLimit, assertWorkingDay } from './workLimits.js';
+import { geocodeAddress, getStoredUserGpsLocation, normalizeCoordinates } from '../helpers/navigation.js';
 
 const REGISTER_WORKDAY_OPERATION = 'registerWorkday';
 const WORKDAY_OPTIONAL_FIELDS = [
@@ -21,7 +22,10 @@ const WORKDAY_OPTIONAL_FIELDS = [
     'timerMode',
     'pomodoroEnabled',
     'completedPomodoros',
-    'clientOperationId'
+    'clientOperationId',
+    'memberGps',
+    'memberLocationAddress',
+    'memberLocationCapturedAt'
 ];
 
 export function getTodayDateString() {
@@ -90,6 +94,38 @@ function buildWorkdayDoc(teamId, userId, userName, workDay, teamData = null) {
     return newWork;
 }
 
+async function addStoredMemberLocation(workDay, { includeAddress = true } = {}) {
+    const memberGps = normalizeCoordinates(workDay?.memberGps) || getStoredUserGpsLocation();
+    if (!memberGps) return workDay;
+
+    const workDayWithLocation = {
+        ...workDay,
+        memberGps,
+        memberLocationCapturedAt:
+            workDay?.memberLocationCapturedAt ||
+            memberGps.updatedAt ||
+            new Date().toISOString()
+    };
+
+    if (!includeAddress || workDayWithLocation.memberLocationAddress) {
+        return workDayWithLocation;
+    }
+
+    try {
+        workDayWithLocation.memberLocationAddress = await geocodeAddress(memberGps);
+    } catch (error) {
+        console.warn("No se pudo resolver la dirección GPS de la jornada:", error?.message || error);
+    }
+
+    return workDayWithLocation;
+}
+
+async function ensureStoredMemberLocationAddress(workDay) {
+    const memberGps = normalizeCoordinates(workDay?.memberGps);
+    if (!memberGps || workDay?.memberLocationAddress || isBrowserOffline()) return workDay;
+    return addStoredMemberLocation(workDay, { includeAddress: true });
+}
+
 async function hasQueuedRegularWorkdayForDate(teamId, userId, date) {
     const queuedWorkdays = await getQueuedOperationsByType(REGISTER_WORKDAY_OPERATION);
     return queuedWorkdays.some((operation) => {
@@ -124,7 +160,8 @@ export async function executeRegisterWorkday({ teamId, userId, userName, workDay
     if (!workDay) throw new Error("workDay is missing");
     const teamSnapshot = await getDoc(doc(db, 'teams', teamId));
     const teamData = teamSnapshot.data();
-    const newWork = buildWorkdayDoc(teamId, userId, userName, workDay, teamData);
+    const workDayWithLocation = await ensureStoredMemberLocationAddress(workDay);
+    const newWork = buildWorkdayDoc(teamId, userId, userName, workDayWithLocation, teamData);
     const deterministicId = workDay.clientOperationId || operation?.id;
 
     if (deterministicId) {
@@ -140,16 +177,20 @@ export async function executeRegisterWorkday({ teamId, userId, userName, workDay
 
 export async function registerWorkday(teamId, userId, userName, workDay) {
     if (!workDay) throw new Error("workDay is missing");
+    const workDayWithLocation = await addStoredMemberLocation(workDay, {
+        includeAddress: !isBrowserOffline()
+    });
+
     if (isBrowserOffline()) {
-        return enqueueRegisterWorkday(teamId, userId, userName, workDay);
+        return enqueueRegisterWorkday(teamId, userId, userName, workDayWithLocation);
     }
 
     try {
-        const id = await executeRegisterWorkday({ teamId, userId, userName, workDay });
+        const id = await executeRegisterWorkday({ teamId, userId, userName, workDay: workDayWithLocation });
         return { queued: false, id };
     } catch (error) {
         if (isOfflineError(error)) {
-            return enqueueRegisterWorkday(teamId, userId, userName, workDay);
+            return enqueueRegisterWorkday(teamId, userId, userName, workDayWithLocation);
         }
         console.error("Error registering workday:", error);
         throw error;
