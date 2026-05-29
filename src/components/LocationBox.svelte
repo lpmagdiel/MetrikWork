@@ -69,7 +69,7 @@
     .location-box-info p {
         margin: 0;
         color: var(--text-secondary);
-        font-size: 14px;
+        font-size: 8px;
         line-height: 1.4;
     }
 

@@ -56,6 +56,7 @@
   import { showErrorAlert } from "../data/alerts.js";
   import TitleHeader from "../components/TitleHeader.svelte";
   import { optimizeCloudinary } from "../helpers/image.js";
+  import { geocodeAddress } from "../helpers/navigation.js";
 
   let messageInput = $state("");
   let messages = $derived($chatMessagesStore);
@@ -480,11 +481,19 @@
     isGettingCurrentLocation = true;
     try {
       const gps = await getCurrentGpsPosition();
+      let description = "Ubicación compartida desde el dispositivo";
+
+      try {
+        description = await geocodeAddress(gps);
+      } catch (error) {
+        console.warn("No se pudo resolver la dirección de la ubicación actual:", error?.message || error);
+      }
+
       shouldStickToBottom = true;
       await sendChatLocation({
         id: `current-${Date.now()}`,
         name: "Mi ubicación actual",
-        description: "Ubicación compartida desde el dispositivo",
+        description,
         gps,
       });
       showLocationSlice = false;

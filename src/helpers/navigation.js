@@ -108,6 +108,7 @@ export const geocodeAddress = async (gps = null) => {
     }
 
     geocodeCache.set(cacheKey, formattedAddress);
+    console.log("Dirección geocodificada:", formattedAddress);
     return formattedAddress;
   } catch (error) {
     console.error("Error al geocodificar la ubicación GPS guardada:", error);
