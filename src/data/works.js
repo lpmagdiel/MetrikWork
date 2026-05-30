@@ -25,7 +25,11 @@ const WORKDAY_OPTIONAL_FIELDS = [
     'clientOperationId',
     'memberGps',
     'memberLocationAddress',
-    'memberLocationCapturedAt'
+    'memberLocationCapturedAt',
+    'checkInGps',
+    'checkInLocationCapturedAt',
+    'checkOutGps',
+    'checkOutLocationCapturedAt'
 ];
 
 export function getTodayDateString() {

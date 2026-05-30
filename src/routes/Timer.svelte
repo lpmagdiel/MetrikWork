@@ -28,7 +28,9 @@
     isNonWorkingDay,
     getNonWorkingDayMessage,
   } from "../data/stores.js";
+  import { getCurrentGpsPosition } from "../data/geolocation.js";
   import { showErrorAlert, showSuccessAlert } from "../data/alerts.js";
+  import { normalizeCoordinates } from "../helpers/navigation.js";
   import TitleHeader from "../components/TitleHeader.svelte";
 
   const ACTIVE_TIMER_KEY = "metricwork.activeVariableTimer";
@@ -55,6 +57,10 @@
   let typeToast = $state("success");
   let showToast = $state(false);
   let lastEntry = $state(null);
+  let checkInLocation = $state(null);
+  let checkOutLocation = $state(null);
+  let isCapturingLocation = $state(false);
+  let locationCaptureTarget = $state("");
 
   let selectedTeam = $derived(
     $teamsStore.find((team) => team.id === activeTeamId) || null,
@@ -86,7 +92,7 @@
   });
   let trackedWorkSeconds = $derived.by(() => getTrackedWorkSeconds(now));
   let pomodoroPhaseLabel = $derived(pomodoroPhase === "break" ? "Descanso" : "Enfoque");
-  let canStart = $derived(Boolean(activeTeamId && taskTitle.trim() && !isRunning && !isTodayNonWorkingDay));
+  let canStart = $derived(Boolean(activeTeamId && taskTitle.trim() && !isRunning && !isTodayNonWorkingDay && !isCapturingLocation));
   let canFinish = $derived(Boolean(isRunning && trackedWorkSeconds > 0));
 
   $effect(() => {
@@ -260,6 +266,7 @@
           accumulatedFocusSeconds,
           completedPomodoros,
           startedAt: startedAt.toISOString(),
+          checkInLocation,
         }),
       );
     } catch (error) {
@@ -272,6 +279,45 @@
       localStorage.removeItem(ACTIVE_TIMER_KEY);
     } catch (error) {
       console.warn("No se pudo limpiar el timer activo:", error);
+    }
+  }
+
+  function normalizeLocationSnapshot(value) {
+    const gps = normalizeCoordinates(value?.gps || value);
+    if (!gps) return null;
+
+    return {
+      gps,
+      capturedAt: value?.capturedAt || gps.updatedAt || new Date().toISOString(),
+    };
+  }
+
+  function createLocationSnapshot(gps, capturedAt = new Date()) {
+    const coordinates = normalizeCoordinates(gps);
+    if (!coordinates) return null;
+
+    const capturedAtIso = capturedAt.toISOString();
+    return {
+      gps: {
+        ...coordinates,
+        updatedAt: capturedAtIso,
+      },
+      capturedAt: capturedAtIso,
+    };
+  }
+
+  async function captureLocationSnapshot(capturedAt = new Date(), target = "") {
+    isCapturingLocation = true;
+    locationCaptureTarget = target;
+    try {
+      const gps = await getCurrentGpsPosition();
+      return createLocationSnapshot(gps, capturedAt);
+    } catch (error) {
+      showNotification(error?.message || "No se pudo obtener la ubicación.", "warning");
+      return null;
+    } finally {
+      isCapturingLocation = false;
+      locationCaptureTarget = "";
     }
   }
 
@@ -302,6 +348,8 @@
       }
       accumulatedFocusSeconds = Math.max(0, Number(savedTimer.accumulatedFocusSeconds) || 0);
       completedPomodoros = Math.max(0, Number(savedTimer.completedPomodoros) || 0);
+      checkInLocation = normalizeLocationSnapshot(savedTimer.checkInLocation);
+      checkOutLocation = null;
       startedAt = savedStart;
       endedAt = null;
       startTicker();
@@ -312,7 +360,7 @@
     }
   }
 
-  function startTimer() {
+  async function startTimer() {
     if (isTodayNonWorkingDay) {
       showNotification(todayNonWorkingMessage, "error");
       return;
@@ -322,8 +370,11 @@
       showNotification("Selecciona un equipo y escribe la tarea antes de iniciar.", "error");
       return;
     }
-    startedAt = new Date();
+    const startDate = new Date();
+    startedAt = startDate;
     endedAt = null;
+    checkInLocation = null;
+    checkOutLocation = null;
     if (pomodoroEnabled) {
       pomodoroPhase = "focus";
       pomodoroCycle = 1;
@@ -335,6 +386,16 @@
     }
     startTicker();
     persistActiveTimer();
+
+    const location = await captureLocationSnapshot(startDate, "check-in");
+    if (startedAt?.getTime() === startDate.getTime() && !endedAt) {
+      checkInLocation = location;
+      persistActiveTimer();
+      showNotification(
+        location ? "Entrada iniciada con GPS." : "Entrada iniciada sin GPS.",
+        location ? "success" : "warning",
+      );
+    }
   }
 
   function stopTicker() {
@@ -349,6 +410,8 @@
     clearActiveTimer();
     startedAt = null;
     endedAt = null;
+    checkInLocation = null;
+    checkOutLocation = null;
     resetPomodoroProgress();
     now = Date.now();
   }
@@ -391,6 +454,9 @@
         return;
       }
 
+      const finishLocation = await captureLocationSnapshot(finishDate, "check-out");
+      checkOutLocation = finishLocation;
+      const primaryLocation = checkInLocation || finishLocation;
       const workDayToRegister = applyWorkdayOvertimeLimit(
         {
           type: "variable",
@@ -405,6 +471,12 @@
           timerMode,
           pomodoroEnabled,
           completedPomodoros,
+          memberGps: primaryLocation?.gps || null,
+          memberLocationCapturedAt: primaryLocation?.capturedAt || null,
+          checkInGps: checkInLocation?.gps || null,
+          checkInLocationCapturedAt: checkInLocation?.capturedAt || null,
+          checkOutGps: finishLocation?.gps || null,
+          checkOutLocationCapturedAt: finishLocation?.capturedAt || null,
         },
         selectedTeam,
       );
@@ -425,11 +497,15 @@
         endedAt: finishDate,
         timerMode,
         pomodoroEnabled,
+        checkInLocation,
+        checkOutLocation: finishLocation,
       };
       taskTitle = "";
       note = "";
       startedAt = null;
       endedAt = null;
+      checkInLocation = null;
+      checkOutLocation = null;
       resetPomodoroProgress();
       now = Date.now();
       clearActiveTimer();
@@ -448,6 +524,7 @@
     } catch (error) {
       console.error("Error registering variable workday:", error);
       endedAt = null;
+      checkOutLocation = null;
       startTicker();
       persistActiveTimer();
       await showErrorAlert(
@@ -610,23 +687,31 @@
       {/if}
 
       <div class="actions">
-        {#if isRunning}
-          <button class="finish-btn" onclick={finishTimer} disabled={!canFinish || isSaving}>
-            {#if isSaving}
+        {#if isRunning || isSaving}
+          <button class="finish-btn" onclick={finishTimer} disabled={!canFinish || isSaving || isCapturingLocation}>
+            {#if isCapturingLocation}
+              <Save size={18} />
+              Finalizando
+            {:else if isSaving}
               <Save size={18} />
               Guardando
             {:else}
               <Check size={18} />
-              Finalizar
+              Registrar salida
             {/if}
           </button>
-          <button class="ghost-btn icon-only" onclick={cancelTimer} aria-label="Cancelar registro">
+          <button class="ghost-btn icon-only" onclick={cancelTimer} disabled={isSaving || isCapturingLocation} aria-label="Cancelar registro">
             <RotateCcw size={18} />
           </button>
         {:else}
-          <button class="start-btn" onclick={startTimer} disabled={!canStart || isSaving}>
-            <Play size={18} />
-            Iniciar
+          <button class="start-btn" onclick={startTimer} disabled={!canStart || isSaving || isCapturingLocation}>
+            {#if isCapturingLocation}
+              <Save size={18} />
+              Iniciando
+            {:else}
+              <Play size={18} />
+              Registrar entrada
+            {/if}
           </button>
         {/if}
       </div>
