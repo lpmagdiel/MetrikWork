@@ -14,6 +14,7 @@
   import UpdateFeaturesModal from "./components/UpdateFeaturesModal.svelte";
   import { updateData } from "./data/updateFeatures.js";
   import { injectSpeedInsights } from "@vercel/speed-insights";
+  import { inject } from "@vercel/analytics";
 
   // Modal de novedades
   let showUpdateModal = $state(false);
@@ -35,6 +36,7 @@
   ];
 
   onMount(() => {
+    inject();
     speedInsights = injectSpeedInsights({
       framework: "svelte",
       route: cleanPath,
