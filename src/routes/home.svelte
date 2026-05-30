@@ -6,6 +6,9 @@
     teamsStore,
     getUserProfile,
     getUserTeamWorks,
+    getAssignedTasksFromTeams,
+    getAbsenceRequestsForUser,
+    REQUEST_STATUS,
     hasTeamPermission,
   } from "../data/stores";
   import AvatarCircle from "../components/AvatarCircle.svelte";
@@ -14,6 +17,10 @@
     Bell,
     BellRing,
     Calendar,
+    CalendarCheck,
+    CheckCircle2,
+    ClipboardList,
+    Clock,
     Users,
     TrendingUp,
     Calculator,
@@ -25,6 +32,9 @@
     ArrowRight,
     PackageSearch,
     Info,
+    Inbox,
+    TriangleAlert,
+    UserPlus,
   } from "lucide-svelte";
   import { collection, getDocs } from "firebase/firestore";
   import { db } from "../data/firebase.js";
@@ -57,6 +67,43 @@
   let productSearchError = $state("");
   let productCatalogRequestId = 0;
   let showStatsTeamPicker = $state(false);
+  let todayAssignedTasks = $state([]);
+  let todayRequestsOverview = $state({ own: [], incoming: [], invitations: [] });
+  let todayWorkAssignments = $state([]);
+  let isLoadingTodayPanel = $state(false);
+  let todayPanelError = $state("");
+  let todayPanelRequestId = 0;
+
+  let todayDateKey = $derived(toDateString(new Date()));
+  let activeAssignedTasks = $derived.by(() =>
+    todayAssignedTasks.filter((task) => !isTaskCompleted(task)),
+  );
+  let urgentAssignedTasks = $derived.by(() =>
+    activeAssignedTasks
+      .filter((task) => {
+        const dueDate = getDateKey(task.dueDate);
+        return dueDate && dueDate <= todayDateKey;
+      })
+      .sort((a, b) => getDateKey(a.dueDate).localeCompare(getDateKey(b.dueDate))),
+  );
+  let pendingIncomingRequests = $derived(
+    todayRequestsOverview.incoming.filter((request) => request.status === REQUEST_STATUS.pending),
+  );
+  let pendingOwnRequests = $derived(
+    todayRequestsOverview.own.filter((request) => request.status === REQUEST_STATUS.pending),
+  );
+  let pendingInvitations = $derived(
+    todayRequestsOverview.invitations.filter((invitation) => invitation.status === REQUEST_STATUS.pending),
+  );
+  let pendingRequestCount = $derived(
+    pendingIncomingRequests.length + pendingOwnRequests.length + pendingInvitations.length,
+  );
+  let lowStockProducts = $derived.by(() =>
+    productCatalog
+      .filter((product) => product.minStock > 0 && product.quantity <= product.minStock)
+      .sort((a, b) => (a.quantity - a.minStock) - (b.quantity - b.minStock)),
+  );
+  let todayActionItems = $derived.by(() => buildTodayActionItems());
 
   let filteredProducts = $derived.by(() => {
     const term = normalizeSearch(productSearchTerm);
@@ -91,6 +138,7 @@
         workDaysThisMonth = 0;
         estimatedEarnings = 0;
         earningsBreakdown = [];
+        todayWorkAssignments = [];
         totalStats = {
           workDaysThisMonth,
           totalTeams,
@@ -108,6 +156,19 @@
       );
 
       if (requestId !== statsRequestId) return;
+
+      const todayKey = toDateString(new Date());
+      todayWorkAssignments = teamWorks
+        .flatMap(({ team, works }) =>
+          works
+            .filter((work) => work.date === todayKey)
+            .map((work) => ({
+              ...work,
+              teamId: team.id,
+              teamName: team.name || team.team || "Equipo",
+            })),
+        )
+        .sort((a, b) => (a.teamName || "").localeCompare(b.teamName || "", "es"));
 
       let totalWorkDays = 0;
       let totalEarnings = 0;
@@ -170,6 +231,7 @@
       };
     } catch (error) {
       console.error("Error calculating stats:", error);
+      todayWorkAssignments = [];
     }
   }
 
@@ -180,6 +242,51 @@
   $effect(() => {
     loadProductCatalog($teamsStore || []);
   });
+
+  $effect(() => {
+    loadTodayPanel($userStore?.uid, $teamsStore || []);
+  });
+
+  async function loadTodayPanel(uid, teams = []) {
+    const requestId = ++todayPanelRequestId;
+
+    if (!uid) {
+      todayAssignedTasks = [];
+      todayRequestsOverview = { own: [], incoming: [], invitations: [] };
+      todayPanelError = "";
+      isLoadingTodayPanel = false;
+      return;
+    }
+
+    isLoadingTodayPanel = true;
+    todayPanelError = "";
+
+    try {
+      const [assignedTasks, requests] = await Promise.all([
+        getAssignedTasksFromTeams(teams, uid),
+        getAbsenceRequestsForUser(uid),
+      ]);
+
+      if (requestId !== todayPanelRequestId) return;
+
+      todayAssignedTasks = assignedTasks || [];
+      todayRequestsOverview = {
+        own: requests?.own || [],
+        incoming: requests?.incoming || [],
+        invitations: requests?.invitations || [],
+      };
+    } catch (error) {
+      console.error("Error loading today panel:", error);
+      if (requestId !== todayPanelRequestId) return;
+      todayAssignedTasks = [];
+      todayRequestsOverview = { own: [], incoming: [], invitations: [] };
+      todayPanelError = "No se pudo actualizar el panel.";
+    } finally {
+      if (requestId === todayPanelRequestId) {
+        isLoadingTodayPanel = false;
+      }
+    }
+  }
 
   async function loadProductCatalog(teams) {
     const requestId = ++productCatalogRequestId;
@@ -226,6 +333,8 @@
               quantity: Number(product.quantity) || 0,
               locationName,
               typeLabel: product.productType === "tool" ? "Herramienta" : "Producto",
+              minStock: Number(product.minStock) || 0,
+              productType: product.productType || "material",
             };
           });
         }),
@@ -279,6 +388,100 @@
     navigateTo(`/teams/${team.id}/my-stats`);
   }
 
+  function buildTodayActionItems() {
+    const items = [];
+
+    if (pendingInvitations.length > 0) {
+      items.push({
+        key: "team-invitations",
+        title: "Invitaciones de equipo",
+        subtitle: `${pendingInvitations.length} ${pendingInvitations.length === 1 ? "pendiente" : "pendientes"}`,
+        href: "/requests?section=invitations",
+        Icon: UserPlus,
+        tone: "info",
+      });
+    }
+
+    if (pendingIncomingRequests.length > 0) {
+      items.push({
+        key: "incoming-requests",
+        title: "Solicitudes por revisar",
+        subtitle: `${pendingIncomingRequests.length} ${pendingIncomingRequests.length === 1 ? "solicitud" : "solicitudes"}`,
+        href: "/requests?section=incoming",
+        Icon: Inbox,
+        tone: "warning",
+      });
+    }
+
+    urgentAssignedTasks.slice(0, 2).forEach((task) => {
+      const dueDate = getDateKey(task.dueDate);
+      items.push({
+        key: `task-${task.teamId}-${task.id}`,
+        title: task.title || "Tarea sin título",
+        subtitle: `${task.teamName || "Equipo"} · ${getTaskDueLabel(task)}`,
+        href: `/teams/${task.teamId}/tasks`,
+        Icon: ClipboardList,
+        tone: dueDate < todayDateKey ? "danger" : "warning",
+      });
+    });
+
+    if (pendingOwnRequests.length > 0) {
+      items.push({
+        key: "own-requests",
+        title: "Solicitudes enviadas",
+        subtitle: `${pendingOwnRequests.length} ${pendingOwnRequests.length === 1 ? "sigue" : "siguen"} pendiente${pendingOwnRequests.length === 1 ? "" : "s"}`,
+        href: "/requests",
+        Icon: Clock,
+        tone: "neutral",
+      });
+    }
+
+    todayWorkAssignments.slice(0, 2).forEach((work) => {
+      items.push({
+        key: `work-${work.teamId}-${work.id || work.date}`,
+        title: "Jornada de hoy",
+        subtitle: `${work.teamName} · ${getWorkTypeLabel(work)}`,
+        href: `/teams/${work.teamId}/planning`,
+        Icon: CalendarCheck,
+        tone: "success",
+      });
+    });
+
+    lowStockProducts.slice(0, 2).forEach((product) => {
+      items.push({
+        key: `stock-${product.teamId}-${product.id}`,
+        title: product.name,
+        subtitle: `${product.teamName} · ${product.quantity}/${product.minStock} uds.`,
+        href: `/teams/${product.teamId}/inventory`,
+        Icon: TriangleAlert,
+        tone: "danger",
+      });
+    });
+
+    return items.slice(0, 6);
+  }
+
+  function getTodayWorkHref() {
+    const teamId = todayWorkAssignments[0]?.teamId;
+    return teamId ? `/teams/${teamId}/planning` : "/timer";
+  }
+
+  function getTasksHref() {
+    const teamId = urgentAssignedTasks[0]?.teamId || activeAssignedTasks[0]?.teamId;
+    return teamId ? `/teams/${teamId}/tasks` : "/teams";
+  }
+
+  function getRequestsHref() {
+    if (pendingInvitations.length > 0) return "/requests?section=invitations";
+    if (pendingIncomingRequests.length > 0) return "/requests?section=incoming";
+    return "/requests";
+  }
+
+  function getInventoryHref() {
+    const teamId = lowStockProducts[0]?.teamId || productCatalog[0]?.teamId;
+    return teamId ? `/teams/${teamId}/inventory` : "/teams";
+  }
+
   function getCurrentMonthRange() {
     const today = new Date();
     const year = today.getFullYear();
@@ -295,6 +498,56 @@
     const month = String(date.getMonth() + 1).padStart(2, "0");
     const day = String(date.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
+  }
+
+  function getDateKey(value) {
+    if (!value) return "";
+    const stringValue = String(value);
+    if (/^\d{4}-\d{2}-\d{2}/.test(stringValue)) return stringValue.slice(0, 10);
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return toDateString(date);
+  }
+
+  function formatShortDate(dateValue) {
+    const dateKey = getDateKey(dateValue);
+    if (!dateKey) return "";
+    const [year, month, day] = dateKey.split("-").map(Number);
+    return new Date(year, month - 1, day).toLocaleDateString("es-ES", {
+      day: "2-digit",
+      month: "short",
+    });
+  }
+
+  function isTaskCompleted(task) {
+    return task?.status === "completed";
+  }
+
+  function getTaskDueLabel(task) {
+    const dueDate = getDateKey(task?.dueDate);
+    if (!dueDate) return "Sin fecha";
+    if (dueDate < todayDateKey) return `Vencida · ${formatShortDate(dueDate)}`;
+    if (dueDate === todayDateKey) return "Vence hoy";
+    return `Vence ${formatShortDate(dueDate)}`;
+  }
+
+  function getWorkTypeLabel(work) {
+    if (work?.type === "half-day") return "Media jornada";
+    if (work?.type === "overtime") return `${Number(work.overtimeHours) || 0} h extra`;
+    if (work?.type === "variable") {
+      const hours = Number(work.variableHours || work.durationHours) || 0;
+      return hours > 0 ? `${hours} h variables` : "Jornada variable";
+    }
+    return "Jornada completa";
+  }
+
+  function formatTodayLabel() {
+    return new Intl.DateTimeFormat("es-ES", {
+      weekday: "long",
+      day: "2-digit",
+      month: "short",
+    }).format(new Date());
   }
 
   function getMemberRates(team, uid) {
@@ -372,6 +625,92 @@
         </a>
       </div>
     </div>
+
+    <section class="today-section" aria-labelledby="today-title">
+      <div class="today-heading">
+        <div>
+          <p>{formatTodayLabel()}</p>
+          <h2 id="today-title">Hoy</h2>
+        </div>
+        {#if isLoadingTodayPanel}
+          <span class="today-status">Actualizando</span>
+        {:else if todayActionItems.length > 0}
+          <span class="today-status active">{todayActionItems.length} pendientes</span>
+        {:else}
+          <span class="today-status calm">Al día</span>
+        {/if}
+      </div>
+
+      <div class="today-summary-grid">
+        <a href={getTodayWorkHref()} class="today-summary-card success">
+          <span class="today-summary-icon">
+            <CalendarCheck size={20} />
+          </span>
+          <span class="today-summary-copy">
+            <strong>{todayWorkAssignments.length}</strong>
+            <small>Jornadas</small>
+          </span>
+        </a>
+
+        <a href={getTasksHref()} class="today-summary-card warning">
+          <span class="today-summary-icon">
+            <ClipboardList size={20} />
+          </span>
+          <span class="today-summary-copy">
+            <strong>{urgentAssignedTasks.length}</strong>
+            <small>Tareas</small>
+          </span>
+        </a>
+
+        <a href={getRequestsHref()} class="today-summary-card info">
+          <span class="today-summary-icon">
+            <Inbox size={20} />
+          </span>
+          <span class="today-summary-copy">
+            <strong>{pendingRequestCount}</strong>
+            <small>Solicitudes</small>
+          </span>
+        </a>
+
+        <a href={getInventoryHref()} class="today-summary-card danger">
+          <span class="today-summary-icon">
+            <TriangleAlert size={20} />
+          </span>
+          <span class="today-summary-copy">
+            <strong>{lowStockProducts.length}</strong>
+            <small>Stock bajo</small>
+          </span>
+        </a>
+      </div>
+
+      {#if todayPanelError}
+        <div class="today-empty warning">
+          <TriangleAlert size={20} />
+          <span>{todayPanelError}</span>
+        </div>
+      {:else if todayActionItems.length > 0}
+        <div class="today-action-list" aria-label="Prioridades de hoy">
+          {#each todayActionItems as item (item.key)}
+            {@const ActionIcon = item.Icon}
+            <a href={item.href} class={`today-action-item ${item.tone}`}>
+              <span class="today-action-icon">
+                <ActionIcon size={18} />
+              </span>
+              <span class="today-action-copy">
+                <strong>{item.title}</strong>
+                <small>{item.subtitle}</small>
+              </span>
+              <ArrowRight size={17} />
+            </a>
+          {/each}
+        </div>
+      {:else}
+        <div class="today-empty">
+          <CheckCircle2 size={20} />
+          <span>Todo al día</span>
+        </div>
+      {/if}
+    </section>
 
     <section class="product-search-card" aria-labelledby="product-search-title">
       <div class="product-search-header">
@@ -611,7 +950,7 @@
     top: 0;
     left: 0;
     width: 100%;
-    height: 280px;
+    height: 400px;
     background-color: var(--accent-color);
     z-index: 0;
   }
@@ -714,6 +1053,229 @@
     font-weight: 900;
     line-height: 1;
     box-shadow: 0 6px 16px rgba(220, 38, 38, 0.28);
+  }
+
+  .today-section {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .today-heading {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    color: var(--accent-ink);
+  }
+
+  .today-heading p {
+    margin: 0 0 2px;
+    color: var(--accent-ink);
+    opacity: 0.72;
+    font-size: 13px;
+    font-weight: 800;
+    text-transform: capitalize;
+  }
+
+  .today-heading h2 {
+    margin: 0;
+    color: var(--accent-ink);
+    font-size: 30px;
+    line-height: 1;
+    font-weight: 900;
+    letter-spacing: 0;
+  }
+
+  .today-status {
+    min-height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 10px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--bg-card) 45%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent-ink) 12%, transparent);
+    color: var(--accent-ink);
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .today-status.active {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+    color: var(--bg-page);
+  }
+
+  .today-status.calm {
+    background: color-mix(in srgb, var(--bg-card) 62%, transparent);
+  }
+
+  .today-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .today-summary-card {
+    min-height: 94px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px;
+    background: var(--bg-card);
+    border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+  }
+
+  .today-summary-card:active,
+  .today-action-item:active {
+    transform: scale(0.98);
+  }
+
+  .today-summary-icon,
+  .today-action-icon {
+    width: 36px;
+    height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+  }
+
+  .today-summary-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .today-summary-copy strong {
+    color: var(--text-primary);
+    font-size: 24px;
+    line-height: 1;
+    font-weight: 900;
+  }
+
+  .today-summary-copy small {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1.15;
+  }
+
+  .today-summary-card.success .today-summary-icon,
+  .today-action-item.success .today-action-icon {
+    background: var(--bg-success-subtle);
+    color: var(--success-color);
+  }
+
+  .today-summary-card.warning .today-summary-icon,
+  .today-action-item.warning .today-action-icon {
+    background: var(--bg-warning-subtle);
+    color: var(--warning-color);
+  }
+
+  .today-summary-card.info .today-summary-icon,
+  .today-action-item.info .today-action-icon {
+    background: var(--bg-info-subtle);
+    color: var(--info-color);
+  }
+
+  .today-summary-card.danger .today-summary-icon,
+  .today-action-item.danger .today-action-icon {
+    background: var(--bg-danger-subtle);
+    color: var(--danger-color);
+  }
+
+  .today-action-item.neutral .today-action-icon {
+    background: var(--bg-input);
+    color: var(--text-secondary);
+  }
+
+  .today-action-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .today-action-item {
+    min-height: 66px;
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+  }
+
+  .today-action-item.danger {
+    border-color: color-mix(in srgb, var(--danger-color) 24%, var(--border-color));
+  }
+
+  .today-action-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .today-action-copy strong,
+  .today-action-copy small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .today-action-copy strong {
+    color: var(--text-primary);
+    font-size: 15px;
+    font-weight: 850;
+  }
+
+  .today-action-copy small {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 650;
+  }
+
+  .today-empty {
+    min-height: 58px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 14px;
+    background: color-mix(in srgb, var(--bg-card) 88%, transparent);
+    border: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
+    border-radius: var(--radius-md);
+    color: var(--success-color);
+    font-size: 14px;
+    font-weight: 800;
+    box-shadow: var(--shadow-card);
+  }
+
+  .today-empty.warning {
+    color: var(--warning-color);
+  }
+
+  @media (max-width: 460px) {
+    .today-summary-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
   }
 
   /* Main Card Section */
