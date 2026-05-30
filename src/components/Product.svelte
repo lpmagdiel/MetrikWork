@@ -1,8 +1,8 @@
 <script>
-  import { CircleDollarSign, Edit2, Hash, ImageOff, MapPin, TriangleAlert } from "lucide-svelte";
+  import { CircleDollarSign, Edit2, Hash, History, ImageOff, MapPin, TriangleAlert } from "lucide-svelte";
   import { optimizeCloudinary } from "../helpers/image.js";
 
-  const { product, currency = "MXN", isEditable, onEdit, onReport } = $props();
+  const { product, currency = "MXN", isEditable, onEdit, onReport, onHistory } = $props();
 
   function formatPrice(value) {
     return new Intl.NumberFormat("es-MX", {
@@ -112,6 +112,11 @@
   .warning:hover {
     background: var(--bg-warning-subtle);
     color: var(--warning-color);
+  }
+
+  .history:hover {
+    background: var(--bg-purple-subtle);
+    color: var(--purple-color);
   }
 
   .badge {
@@ -250,6 +255,17 @@
     </div>
   </div>
   <div class="product-actions">
+    {#if onHistory}
+      <button
+        class="icon-btn history"
+        type="button"
+        aria-label={`Ver historial de ${product.name}`}
+        title="Ver historial"
+        onclick={() => onHistory(product)}
+      >
+        <History size={18} />
+      </button>
+    {/if}
     {#if onReport}
       <button
         class="icon-btn warning"

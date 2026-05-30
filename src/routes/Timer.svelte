@@ -60,7 +60,6 @@
   let checkInLocation = $state(null);
   let checkOutLocation = $state(null);
   let isCapturingLocation = $state(false);
-  let locationCaptureTarget = $state("");
 
   let selectedTeam = $derived(
     $teamsStore.find((team) => team.id === activeTeamId) || null,
@@ -306,9 +305,8 @@
     };
   }
 
-  async function captureLocationSnapshot(capturedAt = new Date(), target = "") {
+  async function captureLocationSnapshot(capturedAt = new Date()) {
     isCapturingLocation = true;
-    locationCaptureTarget = target;
     try {
       const gps = await getCurrentGpsPosition();
       return createLocationSnapshot(gps, capturedAt);
@@ -317,7 +315,6 @@
       return null;
     } finally {
       isCapturingLocation = false;
-      locationCaptureTarget = "";
     }
   }
 
@@ -387,7 +384,7 @@
     startTicker();
     persistActiveTimer();
 
-    const location = await captureLocationSnapshot(startDate, "check-in");
+    const location = await captureLocationSnapshot(startDate);
     if (startedAt?.getTime() === startDate.getTime() && !endedAt) {
       checkInLocation = location;
       persistActiveTimer();
@@ -454,7 +451,7 @@
         return;
       }
 
-      const finishLocation = await captureLocationSnapshot(finishDate, "check-out");
+      const finishLocation = await captureLocationSnapshot(finishDate);
       checkOutLocation = finishLocation;
       const primaryLocation = checkInLocation || finishLocation;
       const workDayToRegister = applyWorkdayOvertimeLimit(

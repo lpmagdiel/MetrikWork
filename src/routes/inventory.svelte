@@ -19,12 +19,20 @@
     Wallet,
     MapPin,
     TriangleAlert,
+    History,
+    TrendingUp,
+    TrendingDown,
+    RefreshCcw,
+    User,
+    CalendarClock,
   } from "lucide-svelte";
   import {
     inventoryStore,
+    inventoryMovementsStore,
     addProduct,
     updateProduct,
     deleteProduct,
+    subscribeToProductMovements,
     selectedTeamId,
     selectedTeam,
     userStore,
@@ -63,6 +71,8 @@
   let reportProduct = $state(null);
   let reportDescription = $state("");
   let isReporting = $state(false);
+  let showHistoryModal = $state(false);
+  let historyProduct = $state(null);
   let selectedInventoryType = $state("material");
 
   const inventoryTypes = [
@@ -96,6 +106,13 @@
       subscribeToTeamLocations($selectedTeamId);
     }
     return () => subscribeToTeamLocations(null);
+  });
+
+  $effect(() => {
+    if (showHistoryModal && $selectedTeamId && historyProduct?.id) {
+      return subscribeToProductMovements($selectedTeamId, historyProduct.id);
+    }
+    return subscribeToProductMovements(null, null);
   });
 
   // Form Data
@@ -250,8 +267,21 @@
     isReporting = false;
   }
 
+  function openHistoryModal(product) {
+    historyProduct = product;
+    showHistoryModal = true;
+  }
+
   function getReporterName() {
     return $userStore?.name || $userStore?.displayName || $userStore?.email || "Un miembro";
+  }
+
+  function getInventoryActor() {
+    return {
+      uid: $userStore?.uid || "",
+      name: $userStore?.name || $userStore?.displayName || "",
+      email: $userStore?.email || "",
+    };
   }
 
   function getReportRecipients() {
@@ -329,9 +359,13 @@
         );
       }
       if (editingId) {
-        await updateProduct($selectedTeamId, editingId, productData);
+        await updateProduct($selectedTeamId, editingId, productData, {
+          actor: getInventoryActor(),
+        });
       } else {
-        await addProduct($selectedTeamId, productData);
+        await addProduct($selectedTeamId, productData, {
+          actor: getInventoryActor(),
+        });
       }
       selectedInventoryType = productData.productType;
       closeModal();
@@ -351,7 +385,10 @@
       danger: true,
     });
     if (!confirmed) return;
-    await deleteProduct($selectedTeamId, id);
+    await deleteProduct($selectedTeamId, id, {
+      actor: getInventoryActor(),
+    });
+    closeModal();
   }
 
   function formatCurrency(amount) {
@@ -359,6 +396,75 @@
       style: "currency",
       currency: team?.projectBudgetCurrency || "MXN",
     }).format(Number(amount) || 0);
+  }
+
+  function formatMovementDate(value) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleString("es-ES", {
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  function getMovementLabel(movement) {
+    if (movement.action === "created") return "Creado";
+    if (movement.action === "deleted") return "Eliminado";
+    if (movement.action === "stock-in") return "Entrada";
+    if (movement.action === "stock-out") return "Salida";
+    return "Actualizado";
+  }
+
+  function getMovementTone(movement) {
+    if (movement.action === "created" || movement.action === "stock-in") return "success";
+    if (movement.action === "stock-out" || movement.action === "deleted") return "warning";
+    return "info";
+  }
+
+  function getMovementIcon(movement) {
+    if (movement.action === "stock-in" || movement.action === "created") return TrendingUp;
+    if (movement.action === "stock-out" || movement.action === "deleted") return TrendingDown;
+    return RefreshCcw;
+  }
+
+  function formatQuantityDelta(movement) {
+    const delta = Number(movement.quantityDelta);
+    if (!Number.isFinite(delta)) return "";
+    if (movement.action === "created") return `${Number(movement.quantityAfter) || 0} uds.`;
+    if (movement.action === "deleted") return `${Number(movement.quantityBefore) || 0} uds.`;
+    if (delta === 0) return "";
+    return `${delta > 0 ? "+" : ""}${delta} uds.`;
+  }
+
+  function getMovementDetail(movement) {
+    if (movement.action === "created") return "Producto añadido al inventario.";
+    if (movement.action === "deleted") return "Producto eliminado del inventario.";
+    if (movement.action === "stock-in") {
+      return `Stock: ${movement.quantityBefore ?? 0} -> ${movement.quantityAfter ?? 0}`;
+    }
+    if (movement.action === "stock-out") {
+      return `Stock: ${movement.quantityBefore ?? 0} -> ${movement.quantityAfter ?? 0}`;
+    }
+
+    const fieldLabels = {
+      name: "nombre",
+      price: "precio",
+      category: "categoría",
+      minStock: "stock mínimo",
+      productType: "tipo",
+      locationId: "ubicación",
+      locationName: "ubicación",
+      imageUrl: "imagen",
+    };
+    const changedFields = (movement.changedFields || [])
+      .filter((field) => field !== "quantity")
+      .map((field) => fieldLabels[field] || field);
+
+    if (!changedFields.length) return "Datos del producto actualizados.";
+    return `Cambios en ${changedFields.slice(0, 3).join(", ")}${changedFields.length > 3 ? "..." : ""}.`;
   }
 </script>
 
@@ -436,6 +542,7 @@
             isEditable={canEditInventory}
             onEdit={(product) => openModal(product)}
             onReport={(product) => openReportModal(product)}
+            onHistory={(product) => openHistoryModal(product)}
           />
         {/each}
       {:else}
@@ -447,6 +554,60 @@
     </div>
   {/if}
 </div>
+
+<SliceContainer bind:show={showHistoryModal}>
+  <div class="slice-content">
+    <div class="slice-header">
+      <h2>Historial</h2>
+    </div>
+
+    {#if historyProduct}
+      <div class="history-product-summary">
+        <History size={22} />
+        <div>
+          <strong>{historyProduct.name}</strong>
+          <span>{historyProduct.locationName || "Sin ubicación"} · {historyProduct.quantity} uds.</span>
+        </div>
+      </div>
+
+      {#if $inventoryMovementsStore.length === 0}
+        <div class="history-empty">
+          No hay movimientos registrados para este producto.
+        </div>
+      {:else}
+        <div class="history-list">
+          {#each $inventoryMovementsStore as movement (movement.id)}
+            {@const MovementIcon = getMovementIcon(movement)}
+            <article class={`history-item ${getMovementTone(movement)}`}>
+              <span class="history-icon">
+                <MovementIcon size={18} />
+              </span>
+              <div class="history-copy">
+                <div class="history-title-row">
+                  <strong>{getMovementLabel(movement)}</strong>
+                  {#if formatQuantityDelta(movement)}
+                    <span>{formatQuantityDelta(movement)}</span>
+                  {/if}
+                </div>
+                <p>{getMovementDetail(movement)}</p>
+                <div class="history-meta">
+                  <span>
+                    <User size={13} />
+                    {movement.actorName || "Usuario"}
+                  </span>
+                  <span>
+                    <CalendarClock size={13} />
+                    {formatMovementDate(movement.createdAt)}
+                  </span>
+                </div>
+              </div>
+            </article>
+          {/each}
+        </div>
+      {/if}
+    {/if}
+  </div>
+</SliceContainer>
 
 <SliceContainer bind:show={showReportModal}>
   <div class="slice-content">
@@ -632,15 +793,18 @@
             <span>{editingId ? "Actualizar" : "Guardar"}</span>
           {/if}
         </button>
-        <div class="center">
-          <button
-          class="icon-btn delete block-btn"
-          onclick={() => handleDelete(editingId)}
-        >
-          <Trash2 size={18} />
-          <span>Eliminar</span>
-        </button>
-        </div>
+        {#if editingId && canDeleteInventory}
+          <div class="center">
+            <button
+              type="button"
+              class="icon-btn delete block-btn"
+              onclick={() => handleDelete(editingId)}
+            >
+              <Trash2 size={18} />
+              <span>Eliminar</span>
+            </button>
+          </div>
+        {/if}
       </div>
     </form>
 
@@ -912,6 +1076,149 @@
     color: var(--text-secondary);
     font-size: 13px;
     line-height: 1.25;
+  }
+
+  .history-product-summary {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 18px;
+    padding: 14px;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--bg-input);
+    color: var(--purple-color);
+  }
+
+  .history-product-summary div {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .history-product-summary strong,
+  .history-product-summary span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .history-product-summary strong {
+    color: var(--text-primary);
+    font-size: 15px;
+    line-height: 1.25;
+  }
+
+  .history-product-summary span {
+    color: var(--text-secondary);
+    font-size: 13px;
+  }
+
+  .history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .history-item {
+    min-height: 76px;
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--bg-card);
+  }
+
+  .history-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-info-subtle);
+    color: var(--info-color);
+  }
+
+  .history-item.success .history-icon {
+    background: var(--bg-success-subtle);
+    color: var(--success-color);
+  }
+
+  .history-item.warning .history-icon {
+    background: var(--bg-warning-subtle);
+    color: var(--warning-color);
+  }
+
+  .history-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .history-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .history-title-row strong {
+    color: var(--text-primary);
+    font-size: 15px;
+    font-weight: 800;
+  }
+
+  .history-title-row span {
+    min-height: 24px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 9px;
+    border-radius: 999px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .history-copy p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  .history-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .history-meta span {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .history-empty {
+    padding: 18px;
+    border: 1px dashed var(--border-color);
+    border-radius: 12px;
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    text-align: center;
+    font-size: 14px;
+    font-weight: 700;
   }
 
   .select-with-icon {

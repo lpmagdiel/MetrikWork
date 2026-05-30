@@ -1144,14 +1144,17 @@
               {/if}
             </article>
 
-            <article class="panel">
-              <div class="panel-heading">
+            <details class="panel work-accordion">
+              <summary class="panel-heading accordion-summary">
                 <div>
                   <p>Control GPS</p>
                   <h2>Jornadas recientes</h2>
                 </div>
-                <MapPin size={20} />
-              </div>
+                <span class="accordion-meta">
+                  {filteredWorks.length}
+                  <MapPin size={20} />
+                </span>
+              </summary>
               {#if filteredWorks.length}
                 <div class="work-list">
                   {#each filteredWorks.slice(0, 8) as work (work.id)}
@@ -1176,7 +1179,7 @@
               {:else}
                 <div class="empty-inline">Sin jornadas en este periodo.</div>
               {/if}
-            </article>
+            </details>
           </section>
 
           <section class="insights-grid">
@@ -1633,6 +1636,57 @@
   .panel-heading h2 {
     margin-top: 3px;
     font-size: 18px;
+  }
+
+  .work-accordion {
+    align-self: start;
+  }
+
+  .work-accordion .panel-heading {
+    margin-bottom: 0;
+  }
+
+  .work-accordion[open] .panel-heading {
+    margin-bottom: 16px;
+  }
+
+  .accordion-summary {
+    list-style: none;
+    cursor: pointer;
+  }
+
+  .accordion-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .accordion-summary::after {
+    content: "";
+    width: 9px;
+    height: 9px;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(45deg);
+    transition: transform 0.18s ease;
+    flex-shrink: 0;
+  }
+
+  .work-accordion[open] .accordion-summary::after {
+    transform: rotate(225deg);
+  }
+
+  .accordion-meta {
+    min-height: 30px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    border-radius: 999px;
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    padding: 0 10px;
+    font-size: 13px;
+    font-weight: 800;
+    white-space: nowrap;
   }
 
   .bar-list,

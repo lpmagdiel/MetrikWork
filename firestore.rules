@@ -438,6 +438,15 @@ service cloud.firestore {
         allow delete: if hasTeamPermission(teamId, "inventory", "delete");
       }
 
+      match /inventoryMovements/{movementId} {
+        allow read: if hasTeamPermission(teamId, "inventory", "view") ||
+                    hasTeamPermission(teamId, "stats", "view");
+        allow create: if hasTeamPermission(teamId, "inventory", "create") ||
+                      hasTeamPermission(teamId, "inventory", "edit") ||
+                      hasTeamPermission(teamId, "inventory", "delete");
+        allow update, delete: if false;
+      }
+
       match /locations/{locationId} {
         allow read: if isTeamMember(teamId);
         allow create: if hasTeamPermission(teamId, "locations", "create") ||
