@@ -14,6 +14,7 @@
     Edit2,
     X,
     Trash2,
+    Bookmark,
   } from "lucide-svelte";
   import {
     selectedTeam,
@@ -26,6 +27,10 @@
     addTeamTask,
     updateTeamTask,
     deleteTeamTask,
+    teamTemplatesStore,
+    subscribeToTeamTemplates,
+    addTeamTemplate,
+    deleteTeamTemplate,
     getUserProfile,
     getProfileImage,
     isProfileImage,
@@ -81,6 +86,9 @@
   let showToast = $state(false);
   let isDraggingTask = $state(false);
   let boardTasksByStatus = $state(createEmptyBoard());
+  let taskTemplateName = $state("");
+  let isSavingTemplate = $state(false);
+  let deletingTemplateId = $state("");
 
   $effect(() => {
     if (team?.id && canViewTasks) {
@@ -90,6 +98,13 @@
       });
     }
     return subscribeToTeamTasks(null);
+  });
+
+  $effect(() => {
+    if (team?.id && canViewTasks) {
+      return subscribeToTeamTemplates(team.id, "task");
+    }
+    return subscribeToTeamTemplates(null);
   });
 
   let taskForm = $state({
@@ -202,6 +217,7 @@
 
   function openAddTask() {
     editingTaskId = null;
+    taskTemplateName = "";
     taskForm = {
       title: "",
       description: "",
@@ -214,6 +230,7 @@
 
   function openEditTask(task) {
     editingTaskId = task.id;
+    taskTemplateName = "";
     taskForm = {
       title: task.title || "",
       description: task.description || "",
@@ -222,6 +239,74 @@
       dueDate: task.dueDate ? task.dueDate.split("T")[0] : "",
     };
     showAddTask = true;
+  }
+
+  function applyTaskTemplate(template) {
+    const payload = template?.payload || {};
+    taskForm = {
+      title: payload.title || "",
+      description: payload.description || "",
+      status: payload.status || "pending",
+      assignedTo: Array.isArray(payload.assignedTo) ? [...payload.assignedTo] : [],
+      dueDate: "",
+    };
+    taskTemplateName = template?.name || "";
+  }
+
+  async function handleSaveTaskTemplate() {
+    if (!team?.id || !taskForm.title.trim() || isSavingTemplate) return;
+    isSavingTemplate = true;
+
+    try {
+      await addTeamTemplate(
+        team.id,
+        {
+          type: "task",
+          name: taskTemplateName.trim() || taskForm.title.trim(),
+          payload: {
+            title: taskForm.title.trim(),
+            description: taskForm.description.trim(),
+            status: taskForm.status || "pending",
+            assignedTo: [...taskForm.assignedTo],
+          },
+        },
+        $userStore,
+      );
+      taskTemplateName = "";
+      messageToast = "Plantilla de tarea guardada.";
+      typeToast = "success";
+      showToast = true;
+    } catch (error) {
+      console.error("Error saving task template:", error);
+      messageToast = "No se pudo guardar la plantilla.";
+      typeToast = "error";
+      showToast = true;
+    } finally {
+      isSavingTemplate = false;
+    }
+  }
+
+  async function handleDeleteTaskTemplate(template) {
+    if (!team?.id || !template?.id || deletingTemplateId) return;
+    deletingTemplateId = template.id;
+
+    try {
+      await deleteTeamTemplate(team.id, template.id);
+      messageToast = "Plantilla eliminada.";
+      typeToast = "success";
+      showToast = true;
+    } catch (error) {
+      console.error("Error deleting task template:", error);
+      messageToast = "No se pudo eliminar la plantilla.";
+      typeToast = "error";
+      showToast = true;
+    } finally {
+      deletingTemplateId = "";
+    }
+  }
+
+  function canManageTemplate(template) {
+    return team?.admin === $userStore?.uid || template?.createdBy === $userStore?.uid;
   }
 
   async function handleSaveTask() {
@@ -464,6 +549,36 @@
   <div class="task-form">
     <h3>{editingTaskId ? "Editar Tarea" : "Nueva Tarea"}</h3>
 
+    {#if $teamTemplatesStore.length > 0}
+      <div class="template-strip" aria-label="Plantillas de tareas">
+        <div class="template-heading">
+          <Bookmark size={16} />
+          <span>Plantillas</span>
+        </div>
+        <div class="template-list">
+          {#each $teamTemplatesStore as template (template.id)}
+            <div class="template-chip">
+              <button type="button" onclick={() => applyTaskTemplate(template)}>
+                <strong>{template.name}</strong>
+                <small>{template.payload?.title || "Tarea"}</small>
+              </button>
+              {#if canManageTemplate(template)}
+                <button
+                  type="button"
+                  class="template-delete"
+                  onclick={() => handleDeleteTaskTemplate(template)}
+                  disabled={deletingTemplateId === template.id}
+                  aria-label={`Eliminar plantilla ${template.name}`}
+                >
+                  <Trash2 size={14} />
+                </button>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
     <div class="form-group">
       <label for="taskTitle">Título <span class="req">*</span></label>
       <div class="input-row">
@@ -557,6 +672,31 @@
         <span>{editingTaskId ? "Actualizar Tarea" : "Crear Tarea"}</span>
       {/if}
     </button>
+
+    {#if !editingTaskId}
+      <div class="template-save-box">
+        <label for="taskTemplateName">Guardar como plantilla</label>
+        <div class="template-save-row">
+          <input
+            id="taskTemplateName"
+            type="text"
+            bind:value={taskTemplateName}
+            placeholder={taskForm.title || "Nombre de plantilla"}
+          />
+          <button
+            type="button"
+            onclick={handleSaveTaskTemplate}
+            disabled={isSavingTemplate || !taskForm.title.trim()}
+          >
+            {#if isSavingTemplate}
+              <Loader size={16} />
+            {:else}
+              <Bookmark size={16} />
+            {/if}
+          </button>
+        </div>
+      </div>
+    {/if}
   </div>
 </SliceContainer>
 
@@ -913,6 +1053,85 @@
     color: var(--text-primary);
   }
 
+  .template-strip {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+
+  .template-heading {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .template-list {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .template-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .template-chip {
+    flex: 0 0 min(220px, 72vw);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: stretch;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    overflow: hidden;
+  }
+
+  .template-chip > button:first-child {
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-primary);
+    text-align: left;
+    padding: 10px 12px;
+    display: grid;
+    gap: 3px;
+    cursor: pointer;
+  }
+
+  .template-chip strong,
+  .template-chip small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .template-chip strong {
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .template-chip small {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .template-delete {
+    width: 38px;
+    border: 0;
+    border-left: 1px solid var(--border-color);
+    background: var(--bg-card);
+    color: var(--danger-color);
+    cursor: pointer;
+  }
+
   .form-group {
     margin-bottom: 18px;
   }
@@ -1092,6 +1311,53 @@
 
   .save-btn:disabled {
     opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .template-save-box {
+    margin-top: 14px;
+    display: grid;
+    gap: 8px;
+  }
+
+  .template-save-box label {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .template-save-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 46px;
+    gap: 8px;
+  }
+
+  .template-save-row input {
+    min-width: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    padding: 0 12px;
+    font-size: 14px;
+  }
+
+  .template-save-row button {
+    min-height: 44px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: var(--bg-accent-subtle);
+    color: var(--accent-ink);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+
+  .template-save-row button:disabled {
+    opacity: 0.55;
     cursor: not-allowed;
   }
 </style>

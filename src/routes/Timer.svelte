@@ -2,6 +2,7 @@
   import { onDestroy, onMount } from "svelte";
   import {
     BriefcaseBusiness,
+    Bookmark,
     Check,
     Clock,
     Coffee,
@@ -11,6 +12,7 @@
     RotateCcw,
     Save,
     Square,
+    Trash2,
     TimerReset,
   } from "lucide-svelte";
   import Toast from "../components/Toast.svelte";
@@ -27,6 +29,10 @@
     getTodayDateString,
     isNonWorkingDay,
     getNonWorkingDayMessage,
+    teamTemplatesStore,
+    subscribeToTeamTemplates,
+    addTeamTemplate,
+    deleteTeamTemplate,
   } from "../data/stores.js";
   import { getCurrentGpsPosition } from "../data/geolocation.js";
   import { showErrorAlert, showSuccessAlert } from "../data/alerts.js";
@@ -60,6 +66,9 @@
   let checkInLocation = $state(null);
   let checkOutLocation = $state(null);
   let isCapturingLocation = $state(false);
+  let workdayTemplateName = $state("");
+  let isSavingTemplate = $state(false);
+  let deletingTemplateId = $state("");
 
   let selectedTeam = $derived(
     $teamsStore.find((team) => team.id === activeTeamId) || null,
@@ -111,6 +120,13 @@
     if (!isRunning && !overtimeEnabled && timerMode === "overtime") {
       timerMode = "variable";
     }
+  });
+
+  $effect(() => {
+    if (activeTeamId) {
+      return subscribeToTeamTemplates(activeTeamId, "workday");
+    }
+    return subscribeToTeamTemplates(null);
   });
 
   $effect(() => {
@@ -194,6 +210,68 @@
   function handlePomodoroToggle(event) {
     pomodoroEnabled = event.currentTarget.checked;
     resetPomodoroProgress();
+  }
+
+  function applyWorkdayTemplate(template) {
+    if (isRunning || isSaving) return;
+    const payload = template?.payload || {};
+    taskTitle = payload.taskTitle || "";
+    note = payload.note || "";
+    timerMode =
+      payload.timerMode === "overtime" && overtimeEnabled
+        ? "overtime"
+        : "variable";
+    pomodoroEnabled = Boolean(payload.pomodoroEnabled);
+    resetPomodoroProgress();
+    workdayTemplateName = template?.name || "";
+  }
+
+  async function handleSaveWorkdayTemplate() {
+    if (!activeTeamId || !taskTitle.trim() || isSavingTemplate) return;
+    isSavingTemplate = true;
+
+    try {
+      await addTeamTemplate(
+        activeTeamId,
+        {
+          type: "workday",
+          name: workdayTemplateName.trim() || taskTitle.trim(),
+          payload: {
+            taskTitle: taskTitle.trim(),
+            note: note.trim(),
+            timerMode,
+            pomodoroEnabled,
+          },
+        },
+        $userStore,
+      );
+      workdayTemplateName = "";
+      showNotification("Plantilla de jornada guardada.");
+    } catch (error) {
+      console.error("Error saving workday template:", error);
+      showNotification("No se pudo guardar la plantilla.", "error");
+    } finally {
+      isSavingTemplate = false;
+    }
+  }
+
+  async function handleDeleteWorkdayTemplate(template) {
+    if (!activeTeamId || !template?.id || deletingTemplateId) return;
+    deletingTemplateId = template.id;
+
+    try {
+      await deleteTeamTemplate(activeTeamId, template.id);
+      showNotification("Plantilla eliminada.");
+    } catch (error) {
+      console.error("Error deleting workday template:", error);
+      showNotification("No se pudo eliminar la plantilla.", "error");
+    } finally {
+      deletingTemplateId = "";
+    }
+  }
+
+  function canManageTemplate(template) {
+    return selectedTeam?.admin === $userStore?.uid || template?.createdBy === $userStore?.uid;
   }
 
   function syncPomodoro(timestamp = Date.now()) {
@@ -571,6 +649,40 @@
         </select>
       </div>
 
+      {#if $teamTemplatesStore.length > 0}
+        <div class="template-strip" aria-label="Plantillas de jornada">
+          <div class="template-heading">
+            <Bookmark size={16} />
+            <span>Plantillas</span>
+          </div>
+          <div class="template-list">
+            {#each $teamTemplatesStore as template (template.id)}
+              <div class="template-chip">
+                <button
+                  type="button"
+                  onclick={() => applyWorkdayTemplate(template)}
+                  disabled={isRunning || isSaving}
+                >
+                  <strong>{template.name}</strong>
+                  <small>{template.payload?.timerMode === "overtime" ? "Horas extra" : "Jornada"}</small>
+                </button>
+                {#if canManageTemplate(template)}
+                  <button
+                    type="button"
+                    class="template-delete"
+                    onclick={() => handleDeleteWorkdayTemplate(template)}
+                    disabled={deletingTemplateId === template.id || isRunning || isSaving}
+                    aria-label={`Eliminar plantilla ${template.name}`}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
       <label for="task">Tarea</label>
       <input
         id="task"
@@ -626,6 +738,30 @@
         disabled={isSaving}
         placeholder="Detalle breve para el equipo"
       ></textarea>
+
+      <div class="template-save-box">
+        <label for="workdayTemplateName">Guardar como plantilla</label>
+        <div class="template-save-row">
+          <input
+            id="workdayTemplateName"
+            type="text"
+            bind:value={workdayTemplateName}
+            disabled={isRunning || isSaving}
+            placeholder={taskTitle || "Nombre de plantilla"}
+          />
+          <button
+            type="button"
+            onclick={handleSaveWorkdayTemplate}
+            disabled={isSavingTemplate || isRunning || isSaving || !taskTitle.trim()}
+          >
+            {#if isSavingTemplate}
+              <Save size={16} />
+            {:else}
+              <Bookmark size={16} />
+            {/if}
+          </button>
+        </div>
+      </div>
     </section>
 
     <section class="clock-panel">
@@ -868,6 +1004,111 @@
 
   .select-shell {
     position: relative;
+  }
+
+  .template-strip {
+    display: grid;
+    gap: 10px;
+  }
+
+  .template-heading {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .template-list {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .template-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .template-chip {
+    flex: 0 0 min(220px, 72vw);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: stretch;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    overflow: hidden;
+  }
+
+  .template-chip > button:first-child {
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-primary);
+    text-align: left;
+    padding: 10px 12px;
+    display: grid;
+    gap: 3px;
+    cursor: pointer;
+  }
+
+  .template-chip strong,
+  .template-chip small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .template-chip strong {
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .template-chip small {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .template-delete {
+    width: 38px;
+    border: 0;
+    border-left: 1px solid var(--border-color);
+    background: var(--bg-card);
+    color: var(--danger-color);
+    cursor: pointer;
+  }
+
+  .template-save-box {
+    display: grid;
+    gap: 8px;
+  }
+
+  .template-save-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 46px;
+    gap: 8px;
+  }
+
+  .template-save-row input {
+    min-width: 0;
+  }
+
+  .template-save-row button {
+    min-height: 44px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: var(--bg-accent-subtle);
+    color: var(--accent-ink);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
   }
 
   .form-note {

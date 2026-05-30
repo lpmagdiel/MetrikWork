@@ -447,6 +447,15 @@ service cloud.firestore {
         allow update, delete: if false;
       }
 
+      match /templates/{templateId} {
+        allow read: if isTeamMember(teamId);
+        allow create: if isTeamMember(teamId) &&
+                      request.resource.data.createdBy == request.auth.uid &&
+                      request.resource.data.type in ["task", "workday"];
+        allow update, delete: if isTeamAdmin(teamId) ||
+                              resource.data.createdBy == request.auth.uid;
+      }
+
       match /locations/{locationId} {
         allow read: if isTeamMember(teamId);
         allow create: if hasTeamPermission(teamId, "locations", "create") ||

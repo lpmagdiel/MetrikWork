@@ -12,6 +12,7 @@ export * from './presence.js';
 export * from './works.js';
 export * from './teamStats.js';
 export * from './teamPayments.js';
+export * from './templates.js';
 export * from './workLimits.js';
 export * from './permissions.js';
 export * from './offlineQueue.js';
