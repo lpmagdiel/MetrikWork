@@ -23,9 +23,6 @@ importers:
       lucide-svelte:
         specifier: ^0.563.0
         version: 0.563.0(svelte@5.50.1)
-      stripe:
-        specifier: ^20.3.1
-        version: 20.3.1(@types/node@25.2.3)
       svelte-dnd-action:
         specifier: ^0.9.69
         version: 0.9.69(svelte@5.50.1)
@@ -36,18 +33,12 @@ importers:
         specifier: ^11.26.24
         version: 11.26.24
     devDependencies:
-      '@stripe/stripe-js':
-        specifier: ^8.7.0
-        version: 8.7.0
       '@sveltejs/vite-plugin-svelte':
         specifier: ^6.2.1
         version: 6.2.4(svelte@5.50.1)(vite@7.3.3(@types/node@25.2.3)(lightningcss@1.31.1)(terser@5.46.0))
       svelte:
         specifier: ^5.43.8
         version: 5.50.1
-      svelte-stripe:
-        specifier: ^2.0.0
-        version: 2.0.0(@stripe/stripe-js@8.7.0)(svelte@5.50.1)
       vite:
         specifier: ^7.2.5
         version: 7.3.3(@types/node@25.2.3)(lightningcss@1.31.1)(terser@5.46.0)
@@ -1160,10 +1151,6 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@stripe/stripe-js@8.7.0':
-    resolution: {integrity: sha512-tNUerSstwNC1KuHgX4CASGO0Md3CB26IJzSXmVlSuFvhsBP4ZaEPpY4jxWOn9tfdDscuVT4Kqb8cZ2o9nLCgRQ==}
-    engines: {node: '>=12.16'}
-
   '@surma/rollup-plugin-off-main-thread@2.2.3':
     resolution: {integrity: sha512-lR8q/9W7hZpMWweNiAKU7NQerBnzQQLvi8qnTDU/fxItPhtZVMbPV3lbCwjhIlNBe9Bbr5V+KHshvWmVSG9cxQ==}
 
@@ -2167,15 +2154,6 @@ packages:
     resolution: {integrity: sha512-ZprKx+bBLXv067WTCALv8SSz5l2+XhpYCsVtSqlMnkAXMWDq+/ekVbl1ghqP9rUHTzv6sm/DwCOiYutU/yp1fw==}
     engines: {node: '>=10'}
 
-  stripe@20.3.1:
-    resolution: {integrity: sha512-k990yOT5G5rhX3XluRPw5Y8RLdJDW4dzQ29wWT66piHrbnM2KyamJ1dKgPsw4HzGHRWjDiSSdcI2WdxQUPV3aQ==}
-    engines: {node: '>=16'}
-    peerDependencies:
-      '@types/node': '>=16'
-    peerDependenciesMeta:
-      '@types/node':
-        optional: true
-
   supports-preserve-symlinks-flag@1.0.0:
     resolution: {integrity: sha512-ot0WnXS9fgdkgIcePe6RHNk1WA8+muPa6cSjeR3V8K27q9BB1rTE3R1p7Hv0z1ZyAc8s6Vvv8DIyWf681MAt0w==}
     engines: {node: '>= 0.4'}
@@ -2187,12 +2165,6 @@ packages:
 
   svelte-gestures@5.2.2:
     resolution: {integrity: sha512-Y+chXPaSx8OsPoFppUwPk8PJzgrZ7xoDJKXeiEc7JBqyKKzXer9hlf8F9O34eFuAWB4/WQEvccACvyBplESL7A==}
-
-  svelte-stripe@2.0.0:
-    resolution: {integrity: sha512-fKIufgE7Gd40j9PJh3RcQnL15XrKpJ544nWiv8CJmIzZwoF5lJjVRC0MJg6RVqJd1BEz+N9Ip731O12x2Y0PJg==}
-    peerDependencies:
-      '@stripe/stripe-js': '>=5'
-      svelte: ^5
 
   svelte@5.50.1:
     resolution: {integrity: sha512-/Jlom4ddkISyVHXpM2O5dXP9pYnaiFrVQzPbIL1/pEoOa77ZunCb6nDgUCTNCQ/X3t64z9ukrK6R+BbB3kPR3A==}
@@ -3697,8 +3669,6 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.60.4':
     optional: true
 
-  '@stripe/stripe-js@8.7.0': {}
-
   '@surma/rollup-plugin-off-main-thread@2.2.3':
     dependencies:
       ejs: 3.1.10
@@ -4798,10 +4768,6 @@ snapshots:
 
   strip-comments@2.0.1: {}
 
-  stripe@20.3.1(@types/node@25.2.3):
-    optionalDependencies:
-      '@types/node': 25.2.3
-
   supports-preserve-symlinks-flag@1.0.0: {}
 
   svelte-dnd-action@0.9.69(svelte@5.50.1):
@@ -4809,11 +4775,6 @@ snapshots:
       svelte: 5.50.1
 
   svelte-gestures@5.2.2: {}
-
-  svelte-stripe@2.0.0(@stripe/stripe-js@8.7.0)(svelte@5.50.1):
-    dependencies:
-      '@stripe/stripe-js': 8.7.0
-      svelte: 5.50.1
 
   svelte@5.50.1:
     dependencies:

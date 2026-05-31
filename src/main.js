@@ -16,6 +16,7 @@ import {
   subscribeToNotes,
   subscribeToLocations,
   subscribeToSettings,
+  subscribeToSystemAdmin,
   startOfflineActionsSync
 } from './data/index.js';
 
@@ -109,6 +110,7 @@ initAuth((uid) => {
   subscribeToNotes(uid);
   subscribeToLocations(uid);
   subscribeToSettings(uid);
+  subscribeToSystemAdmin(uid);
 });
 
 if ('serviceWorker' in navigator) {

@@ -1,6 +1,6 @@
 import { writable, get, derived } from 'svelte/store';
 import { db } from './firebase.js';
-import { doc, onSnapshot, collection, addDoc, query, where, updateDoc, getDoc, getDocs, setDoc, deleteField, deleteDoc } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, updateDoc, getDoc, getDocs, setDoc, deleteField, deleteDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { userStore, getProfileImage } from './auth.js';
 import { createNotification } from './notifications.js';
 import { createTeamPermissions, normalizeCustomTeamRoles, normalizeTeamPermissions } from './permissions.js';
@@ -77,50 +77,98 @@ export function subscribeToTeams(uid, callback) {
 /**
  * 
  * @param {string} teamName 
- * @param {Object|null} paymentData 
+ * @param {string} accessCode
  * @returns 
  */
-export async function createTeam(teamName, paymentData = null) {
+export async function createTeam(teamName, accessCode = '') {
     const user = get(userStore);
-    if (!user) return;
+    if (!user) throw new Error("Usuario no autenticado");
+
+    const normalizedName = String(teamName || '').trim();
+    const normalizedCode = normalizeAccessCode(accessCode);
+    if (!normalizedName) throw new Error("Escribe un nombre para el equipo");
+    if (!/^\d{8}$/.test(normalizedCode)) {
+        throw new Error("El código de acceso debe tener 8 dígitos");
+    }
 
     try {
-        const teamDoc = {
-            team: teamName,
-            admin: user.uid,
-            members: [user.uid],
-            membersData: [{
-                id: user.uid,
-                name: user.name || user.email,
-                avatar: getProfileImage(user),
-                photoURL: getProfileImage(user)
-            }],
-            memberPermissions: {
-                [user.uid]: createTeamPermissions(true)
-            },
-            projectBudget: 0,
-            projectBudgetCurrency: 'MXN',
-            createdAt: new Date().toISOString()
-        };
+        return await runTransaction(db, async (transaction) => {
+            const accessCodeRef = doc(db, 'team_access_codes', normalizedCode);
+            const accessCodeSnapshot = await transaction.get(accessCodeRef);
+            if (!accessCodeSnapshot.exists()) {
+                throw new Error("Código de acceso no encontrado");
+            }
 
-        if (paymentData) {
-            teamDoc.payment = {
-                transactionId: paymentData.transactionId,
-                planName: paymentData.planName,
-                planPrice: paymentData.planPrice,
-                amount: paymentData.amount,
-                cardLast4: paymentData.cardLast4 || null,
-                paymentDate: new Date().toISOString(),
-                status: paymentData.status || 'succeeded'
+            const accessCodeData = accessCodeSnapshot.data();
+            if (accessCodeData.used) {
+                throw new Error("Este código ya fue utilizado");
+            }
+
+            const expiresAt = toDate(accessCodeData.expiresAt);
+            if (expiresAt && expiresAt.getTime() < Date.now()) {
+                throw new Error("Este código de acceso caducó");
+            }
+
+            const now = new Date().toISOString();
+            const teamRef = doc(collection(db, 'teams'));
+            const profileImage = getProfileImage(user);
+            const teamDoc = {
+                team: normalizedName,
+                admin: user.uid,
+                adminEmail: user.email || '',
+                members: [user.uid],
+                membersData: [{
+                    id: user.uid,
+                    name: user.name || user.email,
+                    email: user.email || '',
+                    avatar: profileImage,
+                    photoURL: profileImage
+                }],
+                memberPermissions: {
+                    [user.uid]: createTeamPermissions(true)
+                },
+                projectBudget: 0,
+                projectBudgetCurrency: 'MXN',
+                billingDate: null,
+                teamAccessCode: {
+                    code: normalizedCode,
+                    uniqueCode: accessCodeData.uniqueCode || '',
+                    redeemedAt: now
+                },
+                createdAt: now
             };
-        }
 
-        const docRef = await addDoc(collection(db, 'teams'), teamDoc);
-        return docRef.id;
+            transaction.set(teamRef, teamDoc);
+            transaction.update(accessCodeRef, {
+                used: true,
+                usedAt: serverTimestamp(),
+                usedBy: user.uid,
+                usedByEmail: user.email || '',
+                usedTeamId: teamRef.id,
+                usedTeamName: normalizedName,
+                updatedAt: serverTimestamp()
+            });
+
+            return teamRef.id;
+        });
     } catch (error) {
         console.error("Error creating team:", error);
         throw error;
     }
+}
+
+function normalizeAccessCode(value) {
+    return String(value || '').replace(/\D/g, '').slice(0, 8);
+}
+
+function toDate(value) {
+    if (!value) return null;
+    if (value instanceof Date) return value;
+    if (typeof value.toDate === 'function') return value.toDate();
+    if (typeof value.seconds === 'number') return new Date(value.seconds * 1000);
+
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
 }
 
 /**

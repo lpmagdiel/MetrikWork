@@ -30,5 +30,5 @@ Capacidad de registrar jornadas de trabajo o notas sin conexión a internet y si
 Modo Oscuro (Dark Mode): Una característica estándar en apps modernas.
 Multi-lenguaje (i18n): Soporte para inglés/español para expandir la base de usuarios.
 Dashboard de Usuario: Pantalla inicial con un resumen de tareas pendientes y estadísticas rápidas personlizadas.
-6. Integración de Pagos Completa
-Expandir la integración de Stripe para manejar suscripciones o pagos por uso de la plataforma.
+6. Administración Interna
+Reforzar el panel de administración del sistema con auditoría de cambios y reportes de uso por equipo.

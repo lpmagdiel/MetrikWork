@@ -6,8 +6,7 @@
   import SliceContainer from "../components/SliceContainer.svelte";
   import { userStore } from "../data/stores";
   import { auth, googleProvider } from "../data/firebase";
-  import { BETA_TESTERS_MODE } from "../data/features.js";
-  import { showErrorAlert, showInfoAlert, showSuccessAlert } from "../data/alerts.js";
+  import { showErrorAlert, showSuccessAlert } from "../data/alerts.js";
   import {
     signInWithPopup,
     signInWithRedirect,
@@ -58,13 +57,6 @@
     if (provider === "mail") {
       openMailForm = true;
     } else if (provider === "google") {
-      /*if (BETA_TESTERS_MODE) {
-        showInfoAlert(
-          "No disponible",
-          "Esa opción no está disponible en la versión de pruebas.",
-        );
-        return;
-      }*/
       loadingShow = true;
       skipAutoRedirect = true;
       try {

@@ -15,7 +15,8 @@
     Save,
     Info,
     Album,
-    Settings
+    Settings,
+    ShieldCheck
   } from "lucide-svelte";
   import {
     userStore,
@@ -31,6 +32,7 @@
     normalizeNotificationPreferences,
     pushNotificationState,
     requestPushNotifications,
+    systemAdminStore,
   } from "../data/stores.js";
   import { navigateTo } from "../router.js";
 
@@ -397,6 +399,20 @@
           </div>
           <ChevronRight size={18} class="chevron" />
         </button>
+        {#if $systemAdminStore.isAdmin}
+          <a href="/system-admin">
+            <button class="settings-item actionable">
+              <div class="item-icon shield">
+                <ShieldCheck size={18} />
+              </div>
+              <div class="item-info">
+                <span>Panel admin</span>
+                <p>Códigos y fechas de cobro</p>
+              </div>
+              <ChevronRight size={18} class="chevron" />
+            </button>
+          </a>
+        {/if}
         <a href="/tour">
           <button class="settings-item actionable">
             <div class="item-icon album">
@@ -614,6 +630,10 @@
   .item-icon.album {
     background: var(--bg-success-subtle);
     color: var(--success-color);
+  }
+  .item-icon.shield {
+    background: var(--bg-accent-subtle);
+    color: var(--accent-ink);
   }
 
   .item-info {

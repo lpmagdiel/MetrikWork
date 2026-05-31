@@ -164,6 +164,7 @@
     "/login": () => import("./routes/login.svelte"),
     "/hello": () => import("./routes/hello.svelte"),
     "/settings": () => import("./routes/settings.svelte"),
+    "/system-admin": () => import("./routes/system-admin.svelte"),
     "/calendar": () => import("./routes/calendar.svelte"),
     "/requests": () => import("./routes/requests.svelte"),
     "/notifications": () => import("./routes/notifications.svelte"),

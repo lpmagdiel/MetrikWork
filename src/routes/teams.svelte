@@ -1,13 +1,11 @@
 <script>
   import { Search, Plus, Users, ChevronRight, X } from "lucide-svelte";
-  import { teamsStore, createTeam, selectedTeamId } from "../data/stores.js";
+  import { teamsStore, selectedTeamId } from "../data/stores.js";
   import { navigateTo } from "../router.js";
-  import { promptAlert, showErrorAlert } from "../data/alerts.js";
   import TitleHeader from "../components/TitleHeader.svelte";
   import { optimizeCloudinary } from "../helpers/image.js";
 
   let searchQuery = $state("");
-  let isCreating = $state(false);
 
   let filteredTeams = $derived(
     $teamsStore.filter((team) =>
@@ -22,26 +20,8 @@
     navigateTo(`/teams/${team.id}`);
   }
 
-  async function handleCreateTeam() {
-    const teamName = await promptAlert({
-      title: "Nuevo equipo",
-      inputLabel: "Nombre del nuevo equipo",
-      inputPlaceholder: "Ej. Equipo de obra",
-      confirmButtonText: "Crear equipo",
-    });
-    if (!teamName?.trim()) return;
-    isCreating = true;
-    try {
-      const id = await createTeam(teamName.trim());
-      if (id) {
-        selectedTeamId.set(id);
-        navigateTo(`/teams/${id}`);
-      }
-    } catch (error) {
-      showErrorAlert("Error", "No se pudo crear el equipo");
-    } finally {
-      isCreating = false;
-    }
+  function handleCreateTeam() {
+    navigateTo("/teams/create");
   }
 </script>
 
@@ -100,11 +80,9 @@
     {/if}
   </div>
 
-  <a href="/teams/create">
-  <button class="fab" aria-label="Crear equipo">
+  <button class="fab" aria-label="Crear equipo" onclick={handleCreateTeam}>
     <Plus size={30} />
   </button>
-  </a>
 </div>
 
 <style>

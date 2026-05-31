@@ -1,16 +1,20 @@
 <script>
+  import { ChevronLeft } from "lucide-svelte";
   import { navigateTo } from "../router.js";
-  import StripeTablePrices from "../components/StripeTablePrices.svelte";
 </script>
 
 <div class="test-page">
   <div class="nav-header">
-    <button class="back-button" onclick={() => navigateTo("/")}>
-      <span class="icon">←</span> Volver al Home
+    <button type="button" class="back-button" onclick={() => navigateTo("/")}>
+      <ChevronLeft size={18} />
+      <span>Volver al Home</span>
     </button>
   </div>
 
-  <StripeTablePrices />
+  <section class="test-content">
+    <h1>Vista de pruebas</h1>
+    <p>No hay módulos de pago externos activos.</p>
+  </section>
 </div>
 
 <style>
@@ -50,7 +54,24 @@
     background: var(--bg-accent-subtle);
   }
 
-  .icon {
-    font-size: 1.2rem;
+  .test-content {
+    max-width: 720px;
+    width: calc(100% - 40px);
+    margin: 0 auto;
+    padding: 24px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+    box-shadow: var(--shadow-card);
+  }
+
+  .test-content h1 {
+    margin: 0 0 8px;
+    font-size: 22px;
+  }
+
+  .test-content p {
+    margin: 0;
+    color: var(--text-secondary);
   }
 </style>
