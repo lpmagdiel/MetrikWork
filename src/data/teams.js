@@ -4,6 +4,7 @@ import { doc, onSnapshot, collection, query, where, updateDoc, getDoc, getDocs, 
 import { userStore, getProfileImage } from './auth.js';
 import { createNotification } from './notifications.js';
 import { createTeamPermissions, normalizeCustomTeamRoles, normalizeTeamPermissions } from './permissions.js';
+import { assertTeamMemberLimit, normalizeTeamSizeData } from './teamSizes.js';
 import { normalizeNonWorkingDays } from './workLimits.js';
 
 export const teamsStore = writable([]);
@@ -109,6 +110,7 @@ export async function createTeam(teamName, accessCode = '') {
                 throw new Error("Este código de acceso caducó");
             }
 
+            const teamSizeData = normalizeTeamSizeData(accessCodeData.size, accessCodeData.maxMembers);
             const now = new Date().toISOString();
             const billingDate = toDateInput(expiresAt);
             const teamRef = doc(collection(db, 'teams'));
@@ -131,10 +133,14 @@ export async function createTeam(teamName, accessCode = '') {
                 projectBudget: 0,
                 projectBudgetCurrency: 'MXN',
                 billingDate,
+                teamSize: teamSizeData.teamSize,
+                maxMembers: teamSizeData.maxMembers,
                 teamAccessCode: {
                     code: normalizedCode,
                     uniqueCode: accessCodeData.uniqueCode || '',
                     expiresAt: accessCodeData.expiresAt || null,
+                    size: teamSizeData.teamSize,
+                    maxMembers: teamSizeData.maxMembers,
                     redeemedAt: now
                 },
                 createdAt: now
@@ -225,12 +231,14 @@ export async function addMemberByEmail(teamId, email, permissions = {}) {
             throw new Error("Equipo no encontrado");
         }
 
-        const members = teamSnapshot.data().members || [];
+        const teamData = teamSnapshot.data();
+        const members = teamData.members || [];
         if (members.includes(memberUid)) {
             throw new Error("El usuario ya es miembro de este equipo");
         }
+        assertTeamMemberLimit(teamData, members.length + 1);
 
-        const teamName = teamSnapshot.data()?.team || "un equipo";
+        const teamName = teamData?.team || "un equipo";
         const invitationRef = doc(db, 'users', memberUid, 'teamInvitations', teamId);
         const invitationSnapshot = await getDoc(invitationRef);
         if (invitationSnapshot.exists()) {

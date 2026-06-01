@@ -13,6 +13,7 @@ export * from './works.js';
 export * from './teamStats.js';
 export * from './teamPayments.js';
 export * from './systemAdmin.js';
+export * from './teamSizes.js';
 export * from './templates.js';
 export * from './workLimits.js';
 export * from './permissions.js';

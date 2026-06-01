@@ -1,12 +1,18 @@
 <script>
   import {
     BadgeCheck,
+    BarChart3,
     CalendarDays,
     ChevronLeft,
+    ChevronDown,
+    ChevronUp,
     CircleSlash,
+    Euro,
     KeyRound,
+    List,
     Mail,
     RefreshCw,
+    Search,
     ShieldCheck,
     Users
   } from "lucide-svelte";
@@ -16,17 +22,26 @@
   import {
     adminTeamsStore,
     createTeamAccessCode,
+    getTeamMemberLimitLabel,
+    getTeamMonthlyPrice,
+    getTeamSizeValue,
     getUserProfile,
     subscribeToAdminTeams,
     subscribeToTeamAccessCodes,
     systemAdminStore,
+    TEAM_SIZE_OPTIONS,
     teamAccessCodesStore,
     updateTeamBillingDate
   } from "../data/stores.js";
 
   let expiresAt = $state(defaultExpirationDate());
+  let selectedSize = $state("S");
   let generatedCode = $state("");
+  let generatedCodeSize = $state("");
   let creatingCode = $state(false);
+  let showCodes = $state(true);
+  let revenueView = $state("list");
+  let teamSearch = $state("");
   let savingTeamId = $state("");
   let billingInputs = $state({});
   let adminProfiles = $state({});
@@ -48,6 +63,50 @@
       stats[status] += 1;
     }
     return stats;
+  });
+
+  let revenueStats = $derived.by(() => {
+    const breakdown = TEAM_SIZE_OPTIONS.map((option) => ({
+      size: option.value,
+      label: option.label,
+      price: option.priceEur,
+      count: 0,
+      revenue: 0
+    }));
+
+    for (const team of $adminTeamsStore) {
+      const size = getTeamSizeValue(team);
+      const item = breakdown.find((entry) => entry.size === size) || breakdown[0];
+      item.count += 1;
+      item.revenue += getTeamMonthlyPrice(team);
+    }
+
+    const total = breakdown.reduce((sum, item) => sum + item.revenue, 0);
+    const maxRevenue = Math.max(1, ...breakdown.map((item) => item.revenue));
+
+    return {
+      total,
+      maxRevenue,
+      teams: $adminTeamsStore.length,
+      breakdown
+    };
+  });
+
+  let filteredAdminTeams = $derived.by(() => {
+    const search = normalizeSearch(teamSearch);
+    if (!search) return $adminTeamsStore;
+
+    return $adminTeamsStore.filter((team) => {
+      const target = [
+        team.name,
+        team.team,
+        getAdminEmail(team),
+        getTeamSizeValue(team),
+        formatTeamBillingDate(team)
+      ].join(" ");
+
+      return normalizeSearch(target).includes(search);
+    });
   });
 
   $effect(() => {
@@ -105,11 +164,13 @@
   async function handleCreateCode(customExpiresAt = expiresAt) {
     creatingCode = true;
     generatedCode = "";
+    generatedCodeSize = "";
 
     try {
-      const code = await createTeamAccessCode({ expiresAt: customExpiresAt });
+      const code = await createTeamAccessCode({ expiresAt: customExpiresAt, size: selectedSize });
       expiresAt = customExpiresAt;
       generatedCode = code.code;
+      generatedCodeSize = code.size || selectedSize;
       toastType = "success";
       toastMessage = "Código creado correctamente";
       showToast = true;
@@ -211,6 +272,41 @@
     if (!team.billingDate) return "Sin fecha de cobro";
     return formatDate(team.billingDate);
   }
+
+  function formatTeamSizeLimit(value) {
+    const size = value?.teamSize || value?.size || "S";
+    const hasStoredLimit = Boolean(value?.teamSize || value?.size || value?.maxMembers);
+    return `${size} - ${getTeamMemberLimitLabel(hasStoredLimit ? value : size)}`;
+  }
+
+  function formatTeamMemberUsage(team) {
+    const currentMembers = Array.isArray(team?.members) ? team.members.length : 0;
+    return `${currentMembers} miembros - ${getTeamMemberLimitLabel(team)}`;
+  }
+
+  function formatCurrency(value) {
+    return new Intl.NumberFormat("es-ES", {
+      style: "currency",
+      currency: "EUR",
+      maximumFractionDigits: 0
+    }).format(Number(value) || 0);
+  }
+
+  function formatTeamRevenue(team) {
+    return formatCurrency(getTeamMonthlyPrice(team));
+  }
+
+  function getRevenueBarWidth(value) {
+    return Math.max(4, Math.round(((Number(value) || 0) / revenueStats.maxRevenue) * 100));
+  }
+
+  function normalizeSearch(value) {
+    return String(value || "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+  }
 </script>
 
 <div class="admin-page">
@@ -253,6 +349,10 @@
         <span>Caducados</span>
         <strong>{codeStats.expired}</strong>
       </article>
+      <article class="summary-card revenue">
+        <span>Ingresos</span>
+        <strong>{formatCurrency(revenueStats.total)}</strong>
+      </article>
     </section>
 
     <section class="admin-section">
@@ -264,6 +364,22 @@
       </div>
 
       <div class="create-code-form">
+        <span class="field-label">Tamaño del equipo</span>
+        <div class="size-options" aria-label="Tamaño del equipo">
+          {#each TEAM_SIZE_OPTIONS as option}
+            <button
+              type="button"
+              class:active={selectedSize === option.value}
+              aria-pressed={selectedSize === option.value}
+              onclick={() => (selectedSize = option.value)}
+              disabled={creatingCode}
+            >
+              <strong>{option.label}</strong>
+              <span>{option.description}</span>
+            </button>
+          {/each}
+        </div>
+
         <div class="quick-actions" aria-label="Generar códigos rápidos">
           {#each quickCodeOptions as option}
             <button
@@ -297,7 +413,7 @@
 
         {#if generatedCode}
           <div class="generated-code">
-            <span>Nuevo código</span>
+            <span>Nuevo código {generatedCodeSize}</span>
             <strong>{generatedCode}</strong>
           </div>
         {/if}
@@ -307,61 +423,155 @@
     <section class="admin-section">
       <div class="section-heading">
         <div>
-          <h2>Códigos</h2>
-          <p>{codeStats.available} disponibles, {codeStats.used} usados.</p>
+          <h2>Ingresos</h2>
+          <p>{formatCurrency(revenueStats.total)} mensuales en {revenueStats.teams} equipos.</p>
+        </div>
+        <div class="view-toggle" aria-label="Vista de ingresos">
+          <button
+            type="button"
+            class:active={revenueView === "list"}
+            onclick={() => (revenueView = "list")}
+            aria-pressed={revenueView === "list"}
+          >
+            <List size={16} />
+            <span>Lista</span>
+          </button>
+          <button
+            type="button"
+            class:active={revenueView === "chart"}
+            onclick={() => (revenueView = "chart")}
+            aria-pressed={revenueView === "chart"}
+          >
+            <BarChart3 size={16} />
+            <span>Gráfico</span>
+          </button>
         </div>
       </div>
 
-      <div class="code-list">
-        {#if $teamAccessCodesStore.length === 0}
-          <article class="empty-card">No hay códigos creados.</article>
-        {:else}
-          {#each $teamAccessCodesStore as code (code.id)}
-            {@const status = getAccessCodeStatus(code)}
-            <article class="code-card {status}">
-              <div class="code-main">
-                <span class="code-value">{code.code}</span>
-                <span class="status-pill">{getAccessCodeStatusLabel(code)}</span>
+      {#if revenueView === "chart"}
+        <div class="revenue-chart" aria-label="Gráfico de ingresos por tamaño">
+          {#each revenueStats.breakdown as item}
+            <div class="chart-row">
+              <div class="chart-label">
+                <strong>{item.label}</strong>
+                <span>{item.count} equipos</span>
               </div>
-              <dl>
-                <div>
-                  <dt>Caduca</dt>
-                  <dd>{formatDate(code.expiresAt)}</dd>
-                </div>
-                <div>
-                  <dt>Código único</dt>
-                  <dd>{code.uniqueCode || "-"}</dd>
-                </div>
-                {#if code.used}
-                  <div>
-                    <dt>Equipo</dt>
-                    <dd>{code.usedTeamName || code.usedTeamId || "-"}</dd>
-                  </div>
-                  <div>
-                    <dt>Usado por</dt>
-                    <dd>{code.usedByEmail || code.usedBy || "-"}</dd>
-                  </div>
-                {/if}
-              </dl>
+              <div class="chart-track">
+                <span style={`width: ${getRevenueBarWidth(item.revenue)}%`}></span>
+              </div>
+              <strong>{formatCurrency(item.revenue)}</strong>
+            </div>
+          {/each}
+        </div>
+      {:else}
+        <div class="revenue-grid">
+          {#each revenueStats.breakdown as item}
+            <article class="revenue-card">
+              <div>
+                <span>Plan {item.label}</span>
+                <strong>{formatCurrency(item.price)}</strong>
+              </div>
+              <div>
+                <span>{item.count} equipos</span>
+                <strong>{formatCurrency(item.revenue)}</strong>
+              </div>
             </article>
           {/each}
-        {/if}
+        </div>
+      {/if}
+    </section>
+
+    <section class="admin-section">
+      <div class="section-heading">
+        <div>
+          <h2>Códigos</h2>
+          <p>{codeStats.available} disponibles, {codeStats.used} usados.</p>
+        </div>
+        <button
+          type="button"
+          class="ghost-action"
+          onclick={() => (showCodes = !showCodes)}
+          aria-expanded={showCodes}
+          aria-controls="admin-code-list"
+        >
+          {#if showCodes}
+            <ChevronUp size={18} />
+            <span>Ocultar</span>
+          {:else}
+            <ChevronDown size={18} />
+            <span>Mostrar</span>
+          {/if}
+        </button>
       </div>
+
+      {#if showCodes}
+        <div id="admin-code-list" class="code-list">
+          {#if $teamAccessCodesStore.length === 0}
+            <article class="empty-card">No hay códigos creados.</article>
+          {:else}
+            {#each $teamAccessCodesStore as code (code.id)}
+              {@const status = getAccessCodeStatus(code)}
+              <article class="code-card {status}">
+                <div class="code-main">
+                  <span class="code-value">{code.code}</span>
+                  <span class="status-pill">{getAccessCodeStatusLabel(code)}</span>
+                </div>
+                <dl>
+                  <div>
+                    <dt>Caduca</dt>
+                    <dd>{formatDate(code.expiresAt)}</dd>
+                  </div>
+                  <div>
+                    <dt>Código único</dt>
+                    <dd>{code.uniqueCode || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt>Tamaño</dt>
+                    <dd>{formatTeamSizeLimit(code)}</dd>
+                  </div>
+                  {#if code.used}
+                    <div>
+                      <dt>Equipo</dt>
+                      <dd>{code.usedTeamName || code.usedTeamId || "-"}</dd>
+                    </div>
+                    <div>
+                      <dt>Usado por</dt>
+                      <dd>{code.usedByEmail || code.usedBy || "-"}</dd>
+                    </div>
+                  {/if}
+                </dl>
+              </article>
+            {/each}
+          {/if}
+        </div>
+      {/if}
     </section>
 
     <section class="admin-section">
       <div class="section-heading">
         <div>
           <h2>Equipos</h2>
-          <p>{$adminTeamsStore.length} equipos registrados.</p>
+          <p>{filteredAdminTeams.length} de {$adminTeamsStore.length} equipos.</p>
         </div>
+      </div>
+
+      <div class="team-search">
+        <Search size={18} />
+        <input
+          type="search"
+          bind:value={teamSearch}
+          placeholder="Buscar equipo o admin"
+          aria-label="Buscar equipo o admin"
+        />
       </div>
 
       <div class="teams-table">
         {#if $adminTeamsStore.length === 0}
           <article class="empty-card">No hay equipos registrados.</article>
+        {:else if filteredAdminTeams.length === 0}
+          <article class="empty-card">No hay equipos con esa búsqueda.</article>
         {:else}
-          {#each $adminTeamsStore as team (team.id)}
+          {#each filteredAdminTeams as team (team.id)}
             <article class="team-row">
               <div class="team-meta">
                 <div class="team-icon">
@@ -374,30 +584,41 @@
                     <span>{getAdminEmail(team)}</span>
                   </p>
                   <small>{formatTeamBillingDate(team)}</small>
+                  <small>{formatTeamMemberUsage(team)}</small>
                 </div>
               </div>
 
-              <div class="billing-editor">
-                <input
-                  type="date"
-                  value={billingInputs[team.id] || ""}
-                  disabled={savingTeamId === team.id}
-                  onchange={(event) => (billingInputs[team.id] = event.currentTarget.value)}
-                  aria-label={`Fecha de cobro de ${team.name || team.team || "equipo"}`}
-                />
-                <button
-                  type="button"
-                  class="icon-action"
-                  onclick={() => handleSaveBillingDate(team.id)}
-                  disabled={savingTeamId === team.id}
-                  aria-label="Guardar fecha de cobro"
-                >
-                  {#if savingTeamId === team.id}
-                    <RefreshCw size={18} />
-                  {:else}
-                    <BadgeCheck size={18} />
-                  {/if}
-                </button>
+              <div class="team-actions">
+                <div class="team-revenue">
+                  <Euro size={16} />
+                  <div>
+                    <span>Plan {getTeamSizeValue(team)}</span>
+                    <strong>{formatTeamRevenue(team)}</strong>
+                  </div>
+                </div>
+
+                <div class="billing-editor">
+                  <input
+                    type="date"
+                    value={billingInputs[team.id] || ""}
+                    disabled={savingTeamId === team.id}
+                    onchange={(event) => (billingInputs[team.id] = event.currentTarget.value)}
+                    aria-label={`Fecha de cobro de ${team.name || team.team || "equipo"}`}
+                  />
+                  <button
+                    type="button"
+                    class="icon-action"
+                    onclick={() => handleSaveBillingDate(team.id)}
+                    disabled={savingTeamId === team.id}
+                    aria-label="Guardar fecha de cobro"
+                  >
+                    {#if savingTeamId === team.id}
+                      <RefreshCw size={18} />
+                    {:else}
+                      <BadgeCheck size={18} />
+                    {/if}
+                  </button>
+                </div>
               </div>
             </article>
           {/each}
@@ -409,11 +630,15 @@
 
 <style>
   .admin-page {
-    min-height: 100%;
+    height: 100%;
+    box-sizing: border-box;
     padding: 22px 18px var(--bottom-nav-clearance);
     padding-top: var(--page-top-safe);
     background: var(--bg-page);
     overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .admin-header {
@@ -447,7 +672,7 @@
 
   .summary-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 10px;
     margin-bottom: 24px;
   }
@@ -487,6 +712,10 @@
     border-color: color-mix(in srgb, var(--warning-color) 25%, var(--border-color));
   }
 
+  .summary-card.revenue {
+    border-color: color-mix(in srgb, var(--accent-strong) 28%, var(--border-color));
+  }
+
   .admin-section {
     margin-bottom: 30px;
   }
@@ -511,6 +740,138 @@
     font-size: 13px;
   }
 
+  .ghost-action,
+  .view-toggle button {
+    min-height: 38px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .ghost-action {
+    padding: 0 12px;
+  }
+
+  .view-toggle {
+    display: inline-grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    padding: 4px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+  }
+
+  .view-toggle button {
+    min-width: 94px;
+    border-color: transparent;
+    background: transparent;
+  }
+
+  .view-toggle button.active {
+    background: var(--bg-card);
+    color: var(--accent-ink);
+    box-shadow: var(--shadow-card);
+  }
+
+  .revenue-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .revenue-card,
+  .revenue-chart,
+  .team-search {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+    box-shadow: var(--shadow-card);
+  }
+
+  .revenue-card {
+    min-height: 104px;
+    padding: 16px;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .revenue-card span,
+  .team-revenue span {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .revenue-card strong,
+  .team-revenue strong {
+    display: block;
+    margin-top: 4px;
+    color: var(--text-primary);
+    font-size: 20px;
+    font-weight: 900;
+  }
+
+  .revenue-chart {
+    padding: 16px;
+    display: grid;
+    gap: 14px;
+  }
+
+  .chart-row {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr) 92px;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .chart-label {
+    min-width: 0;
+  }
+
+  .chart-label strong {
+    display: block;
+    color: var(--text-primary);
+    font-size: 15px;
+    font-weight: 900;
+  }
+
+  .chart-label span {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .chart-track {
+    height: 14px;
+    border-radius: 999px;
+    background: var(--bg-input);
+    overflow: hidden;
+  }
+
+  .chart-track span {
+    height: 100%;
+    border-radius: inherit;
+    background: var(--accent-strong);
+    display: block;
+  }
+
+  .chart-row > strong {
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 900;
+    text-align: right;
+  }
+
   .create-code-form {
     padding: 18px;
     border: 1px solid var(--border-color);
@@ -519,7 +880,8 @@
     box-shadow: var(--shadow-card);
   }
 
-  .create-code-form label {
+  .create-code-form label,
+  .field-label {
     display: block;
     margin-bottom: 8px;
     color: var(--text-secondary);
@@ -532,6 +894,59 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 8px;
     margin-bottom: 16px;
+  }
+
+  .size-options {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .size-options button {
+    min-height: 58px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    cursor: pointer;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+    text-align: left;
+  }
+
+  .size-options button.active {
+    border-color: var(--accent-strong);
+    background: var(--bg-accent-subtle);
+    color: var(--accent-ink);
+  }
+
+  .size-options button:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+  }
+
+  .size-options strong {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 900;
+  }
+
+  .size-options span {
+    min-width: 0;
+    color: inherit;
+    font-size: 12px;
+    font-weight: 800;
+    overflow-wrap: anywhere;
   }
 
   .quick-action {
@@ -636,6 +1051,26 @@
   .teams-table {
     display: grid;
     gap: 10px;
+  }
+
+  .team-search {
+    min-height: 46px;
+    margin-bottom: 12px;
+    padding: 0 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-secondary);
+  }
+
+  .team-search input {
+    width: 100%;
+    min-width: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-weight: 700;
   }
 
   .code-card,
@@ -770,6 +1205,30 @@
     align-items: center;
   }
 
+  .team-actions {
+    display: grid;
+    grid-template-columns: 136px auto;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .team-revenue {
+    min-height: 44px;
+    padding: 0 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--accent-ink);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .team-revenue strong {
+    margin-top: 0;
+    font-size: 16px;
+  }
+
   .billing-editor input {
     min-height: 44px;
     padding: 0 10px;
@@ -815,12 +1274,38 @@
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
+    .section-heading {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .revenue-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .chart-row {
+      grid-template-columns: 72px minmax(0, 1fr);
+    }
+
+    .chart-row > strong {
+      grid-column: 2;
+      text-align: left;
+    }
+
     .quick-actions {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
+    .size-options {
+      grid-template-columns: 1fr;
+    }
+
     .form-row,
     .team-row {
+      grid-template-columns: 1fr;
+    }
+
+    .team-actions {
       grid-template-columns: 1fr;
     }
 

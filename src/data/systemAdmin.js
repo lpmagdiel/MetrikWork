@@ -9,6 +9,7 @@ import {
     serverTimestamp,
     updateDoc
 } from 'firebase/firestore';
+import { getTeamSizeOption } from './teamSizes.js';
 
 export const systemAdminStore = writable({
     loading: true,
@@ -115,7 +116,7 @@ export function subscribeToAdminTeams() {
     };
 }
 
-export async function createTeamAccessCode({ expiresAt }) {
+export async function createTeamAccessCode({ expiresAt, size = 'S' } = {}) {
     const user = get(userStore);
     if (!user?.uid) throw new Error('Usuario no autenticado');
 
@@ -123,6 +124,8 @@ export async function createTeamAccessCode({ expiresAt }) {
     if (!expirationDate || expirationDate.getTime() <= Date.now()) {
         throw new Error('Selecciona una fecha de caducidad futura');
     }
+
+    const sizeOption = getTeamSizeOption(size);
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
         const code = generateEightDigitCode();
@@ -137,6 +140,8 @@ export async function createTeamAccessCode({ expiresAt }) {
                 code,
                 uniqueCode,
                 expiresAt: expirationDate,
+                size: sizeOption.value,
+                maxMembers: sizeOption.maxMembers,
                 used: false,
                 createdBy: user.uid,
                 createdByEmail: user.email || '',
