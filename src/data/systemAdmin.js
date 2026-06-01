@@ -31,17 +31,44 @@ export function subscribeToSystemAdmin(uid) {
         return;
     }
 
-    systemAdminUnsubscribe = onSnapshot(doc(db, 'system_admins', uid), (snapshot) => {
-        const profile = snapshot.exists() ? snapshot.data() : null;
-        systemAdminStore.set({
-            loading: false,
-            isAdmin: Boolean(profile?.active),
-            profile
-        });
-    }, (error) => {
-        console.error('Error in system admin listener:', error);
-        systemAdminStore.set({ loading: false, isAdmin: false, profile: null });
+    const user = get(userStore);
+    const adminIds = [uid, normalizeAdminEmail(user?.email)]
+        .filter(Boolean)
+        .filter((value, index, list) => list.indexOf(value) === index);
+    const profiles = new Map();
+    const loaded = new Set();
+    const unsubscribers = adminIds.map((adminId) =>
+        onSnapshot(doc(db, 'system_admins', adminId), (snapshot) => {
+            profiles.set(adminId, snapshot.exists() ? { id: adminId, ...snapshot.data() } : null);
+            loaded.add(adminId);
+            updateSystemAdminState(adminIds, profiles, loaded);
+        }, (error) => {
+            console.error('Error in system admin listener:', error);
+            profiles.set(adminId, null);
+            loaded.add(adminId);
+            updateSystemAdminState(adminIds, profiles, loaded);
+        })
+    );
+
+    systemAdminUnsubscribe = () => {
+        unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+}
+
+function updateSystemAdminState(adminIds, profiles, loaded) {
+    const profile = adminIds
+        .map((adminId) => profiles.get(adminId))
+        .find((candidate) => isActiveSystemAdminProfile(candidate)) || null;
+
+    systemAdminStore.set({
+        loading: loaded.size < adminIds.length,
+        isAdmin: Boolean(profile),
+        profile
     });
+}
+
+function isActiveSystemAdminProfile(profile) {
+    return Boolean(profile) && profile.active !== false;
 }
 
 export function subscribeToTeamAccessCodes() {
@@ -164,6 +191,10 @@ function normalizeExpirationDate(value) {
 function normalizeBillingDate(value) {
     const date = String(value || '').trim();
     return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null;
+}
+
+function normalizeAdminEmail(value) {
+    return String(value || '').trim().toLowerCase();
 }
 
 function getTime(value) {

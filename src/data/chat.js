@@ -25,7 +25,7 @@ let incomingPrivateCallsUnsubscribe;
 const CHAT_PAGE_SIZE = 20;
 
 function normalizeMessageDoc(doc) {
-    return { id: doc.id, ...doc.data(), _snapshot: doc };
+    return { id: doc.id, ...doc.data() };
 }
 
 function sortMessages(messages) {
@@ -50,11 +50,11 @@ export function subscribeToTeamChat(teamId, pageSize = CHAT_PAGE_SIZE) {
 }
 
 export async function getOlderTeamMessages(teamId, oldestMessage, pageSize = CHAT_PAGE_SIZE) {
-    if (!teamId || !oldestMessage?._snapshot) return [];
+    if (!teamId || !oldestMessage?.createdAt) return [];
     const messagesQuery = query(
         collection(db, 'teams', teamId, 'messages'),
         orderBy('createdAt', 'desc'),
-        startAfter(oldestMessage._snapshot),
+        startAfter(oldestMessage.createdAt),
         limit(pageSize)
     );
     const snapshot = await getDocs(messagesQuery);
@@ -216,11 +216,11 @@ export async function subscribeToPrivateChat(teamId, currentUser, member, pageSi
 }
 
 export async function getOlderPrivateMessages(chatId, oldestMessage, pageSize = CHAT_PAGE_SIZE) {
-    if (!chatId || !oldestMessage?._snapshot) return [];
+    if (!chatId || !oldestMessage?.createdAt) return [];
     const messagesQuery = query(
         collection(db, 'privateChats', chatId, 'messages'),
         orderBy('createdAt', 'desc'),
-        startAfter(oldestMessage._snapshot),
+        startAfter(oldestMessage.createdAt),
         limit(pageSize)
     );
     const snapshot = await getDocs(messagesQuery);

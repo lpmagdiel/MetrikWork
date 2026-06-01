@@ -46,7 +46,7 @@ let teamTasksQueryState = {
 };
 
 function normalizeTaskDoc(taskDoc) {
-    return { id: taskDoc.id, ...taskDoc.data(), _snapshot: taskDoc };
+    return { id: taskDoc.id, ...taskDoc.data() };
 }
 
 function getTaskTime(task) {

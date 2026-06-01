@@ -110,6 +110,7 @@ export async function createTeam(teamName, accessCode = '') {
             }
 
             const now = new Date().toISOString();
+            const billingDate = toDateInput(expiresAt);
             const teamRef = doc(collection(db, 'teams'));
             const profileImage = getProfileImage(user);
             const teamDoc = {
@@ -129,10 +130,11 @@ export async function createTeam(teamName, accessCode = '') {
                 },
                 projectBudget: 0,
                 projectBudgetCurrency: 'MXN',
-                billingDate: null,
+                billingDate,
                 teamAccessCode: {
                     code: normalizedCode,
                     uniqueCode: accessCodeData.uniqueCode || '',
+                    expiresAt: accessCodeData.expiresAt || null,
                     redeemedAt: now
                 },
                 createdAt: now
@@ -169,6 +171,16 @@ function toDate(value) {
 
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function toDateInput(value) {
+    const date = toDate(value);
+    if (!date) return null;
+
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
 }
 
 /**

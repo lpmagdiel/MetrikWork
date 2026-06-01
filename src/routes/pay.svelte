@@ -62,7 +62,7 @@
   <section class="pay-intro">
     <span class="eyebrow">Acceso con código</span>
     <h1>Crear equipo</h1>
-    <p>Introduce el nombre del equipo y un código de acceso de un solo uso.</p>
+    <p>Introduce el nombre del equipo y un código vigente de un solo uso.</p>
   </section>
 
   <form class="create-team-shell" onsubmit={handleCreateTeam}>

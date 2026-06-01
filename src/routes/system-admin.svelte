@@ -33,6 +33,12 @@
   let toastMessage = $state("");
   let toastType = $state("success");
   let showToast = $state(false);
+  const quickCodeOptions = [
+    { label: "1 mes", months: 1 },
+    { label: "3 meses", months: 3 },
+    { label: "6 meses", months: 6 },
+    { label: "1 año", months: 12 }
+  ];
 
   let codeStats = $derived.by(() => {
     const stats = { total: 0, available: 0, used: 0, expired: 0 };
@@ -96,12 +102,13 @@
     adminProfiles = nextProfiles;
   }
 
-  async function handleCreateCode() {
+  async function handleCreateCode(customExpiresAt = expiresAt) {
     creatingCode = true;
     generatedCode = "";
 
     try {
-      const code = await createTeamAccessCode({ expiresAt });
+      const code = await createTeamAccessCode({ expiresAt: customExpiresAt });
+      expiresAt = customExpiresAt;
       generatedCode = code.code;
       toastType = "success";
       toastMessage = "Código creado correctamente";
@@ -113,6 +120,11 @@
     } finally {
       creatingCode = false;
     }
+  }
+
+  function handleCreateQuickCode(months) {
+    const quickExpiresAt = getExpirationDateFromMonths(months);
+    void handleCreateCode(quickExpiresAt);
   }
 
   async function handleSaveBillingDate(teamId) {
@@ -153,6 +165,12 @@
   function defaultExpirationDate() {
     const date = new Date();
     date.setDate(date.getDate() + 30);
+    return toDateInput(date);
+  }
+
+  function getExpirationDateFromMonths(months) {
+    const date = new Date();
+    date.setMonth(date.getMonth() + months);
     return toDateInput(date);
   }
 
@@ -246,13 +264,27 @@
       </div>
 
       <div class="create-code-form">
+        <div class="quick-actions" aria-label="Generar códigos rápidos">
+          {#each quickCodeOptions as option}
+            <button
+              type="button"
+              class="quick-action"
+              onclick={() => handleCreateQuickCode(option.months)}
+              disabled={creatingCode}
+            >
+              <CalendarDays size={16} />
+              <span>{option.label}</span>
+            </button>
+          {/each}
+        </div>
+
         <label for="expires-at">Fecha de caducidad</label>
         <div class="form-row">
           <div class="input-wrapper">
             <CalendarDays size={18} />
             <input id="expires-at" type="date" bind:value={expiresAt} disabled={creatingCode} />
           </div>
-          <button type="button" class="primary-action" onclick={handleCreateCode} disabled={creatingCode}>
+          <button type="button" class="primary-action" onclick={() => handleCreateCode()} disabled={creatingCode}>
             {#if creatingCode}
               <RefreshCw size={18} />
               <span>Generando</span>
@@ -493,6 +525,34 @@
     color: var(--text-secondary);
     font-size: 13px;
     font-weight: 800;
+  }
+
+  .quick-actions {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .quick-action {
+    min-height: 42px;
+    padding: 0 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .quick-action:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
   }
 
   .form-row {
@@ -752,6 +812,10 @@
 
   @media (max-width: 760px) {
     .summary-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .quick-actions {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 

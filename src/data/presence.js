@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-import { db } from './firebase.js';
+import { auth, db } from './firebase.js';
 import {
     collection,
     doc,
@@ -45,6 +45,8 @@ function isAppActive() {
 
 async function writePresence(uid, isOnline) {
     if (!uid) return;
+    if (auth.currentUser?.uid !== uid) return;
+
     const now = getNowIso();
     const data = {
         uid,
