@@ -17,6 +17,7 @@ import {
   subscribeToLocations,
   subscribeToSettings,
   subscribeToSystemAdmin,
+  initializeWorkdayReminderScheduler,
   startOfflineActionsSync
 } from './data/index.js';
 
@@ -112,6 +113,8 @@ initAuth((uid) => {
   subscribeToSettings(uid);
   subscribeToSystemAdmin(uid);
 });
+
+initializeWorkdayReminderScheduler();
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('message', (event) => {

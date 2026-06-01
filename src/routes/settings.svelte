@@ -10,6 +10,7 @@
     Landmark,
     LogOut,
     Bell,
+    AlarmClock,
     Moon,
     ChevronRight,
     Save,
@@ -30,6 +31,8 @@
     updateSettings,
     updateNotificationPreferences,
     normalizeNotificationPreferences,
+    normalizeWorkdayReminderSettings,
+    DEFAULT_WORKDAY_REMINDER_TIME,
     pushNotificationState,
     requestPushNotifications,
     systemAdminStore,
@@ -56,9 +59,11 @@
   let canUsePush = $state(false);
   let pushButtonLoading = $state(false);
   let notificationPreferenceSavingKey = $state("");
+  let workdayReminderSaving = $state(false);
   let pushState = $derived($pushNotificationState);
   let pushEnabled = $derived(pushState.status === "enabled" && Boolean(pushState.token));
   let notificationPreferences = $derived(normalizeNotificationPreferences($notificationPreferencesStore));
+  let workdayReminder = $derived(normalizeWorkdayReminderSettings($settingsStore || {}));
 
   const notificationPreferenceOptions = [
     {
@@ -230,6 +235,79 @@
       notificationPreferenceSavingKey = "";
     }
   }
+
+  function getWorkdayReminderDescription() {
+    if (!workdayReminder.enabled) return "Sin recordatorio configurado";
+    if (!canUsePush || pushState.status === "unsupported") return `Guardado a las ${workdayReminder.time}; avisos no disponibles`;
+    if (pushState.permission === "denied") return `Guardado a las ${workdayReminder.time}; permiso bloqueado`;
+    if (pushState.permission !== "granted") return `Guardado a las ${workdayReminder.time}; activa notificaciones`;
+    return `Todos los días a las ${workdayReminder.time}`;
+  }
+
+  async function saveWorkdayReminderSettings(nextReminder) {
+    if (!$userStore?.uid || workdayReminderSaving) return;
+
+    const normalizedReminder = normalizeWorkdayReminderSettings({
+      workdayReminderEnabled: nextReminder.enabled,
+      workdayReminderTime: nextReminder.time || DEFAULT_WORKDAY_REMINDER_TIME,
+    });
+
+    workdayReminderSaving = true;
+    let permissionResult = null;
+
+    try {
+      if (normalizedReminder.enabled && canUsePush && pushState.permission === "default") {
+        permissionResult = await requestPushNotifications($userStore.uid);
+      }
+
+      await updateSettings($userStore.uid, {
+        workdayReminderEnabled: normalizedReminder.enabled,
+        workdayReminderTime: normalizedReminder.time,
+      });
+
+      const permissionDenied = normalizedReminder.enabled &&
+        (permissionResult?.reason === "denied" || pushState.permission === "denied");
+      const unsupported = normalizedReminder.enabled && (!canUsePush || pushState.status === "unsupported");
+
+      if (permissionDenied) {
+        toastMessage = "Hora guardada, pero el permiso de notificaciones está bloqueado";
+        toastType = "error";
+      } else if (unsupported) {
+        toastMessage = "Hora guardada, pero este navegador no permite avisos";
+        toastType = "error";
+      } else {
+        toastMessage = normalizedReminder.enabled
+          ? "Recordatorio de jornada activado"
+          : "Recordatorio de jornada desactivado";
+        toastType = "success";
+      }
+      showToast = true;
+    } catch (error) {
+      console.error("Error updating workday reminder:", error);
+      toastMessage = "No se pudo guardar el recordatorio";
+      toastType = "error";
+      showToast = true;
+    } finally {
+      workdayReminderSaving = false;
+    }
+  }
+
+  function toggleWorkdayReminder() {
+    saveWorkdayReminderSettings({
+      enabled: !workdayReminder.enabled,
+      time: workdayReminder.time,
+    });
+  }
+
+  function handleWorkdayReminderTimeChange(event) {
+    const selectedTime = event.currentTarget.value;
+    if (!selectedTime) return;
+
+    saveWorkdayReminderSettings({
+      enabled: true,
+      time: selectedTime,
+    });
+  }
 </script>
 
 <div class="settings-page">
@@ -364,6 +442,37 @@
               </label>
             </div>
           {/each}
+        </div>
+
+        <div class="settings-item reminder-option">
+          <div class="item-icon reminder">
+            <AlarmClock size={18} />
+          </div>
+          <div class="item-info">
+            <span>Recordatorio de jornada</span>
+            <p>{getWorkdayReminderDescription()}</p>
+          </div>
+          <div class="reminder-controls">
+            <input
+              id="workday-reminder-time"
+              class="reminder-time-input"
+              type="time"
+              value={workdayReminder.time}
+              step="300"
+              disabled={workdayReminderSaving}
+              aria-label="Hora del recordatorio de jornada"
+              onchange={handleWorkdayReminderTimeChange}
+            />
+            <label class="switch" aria-label="Activar recordatorio de jornada">
+              <input
+                type="checkbox"
+                checked={workdayReminder.enabled}
+                disabled={workdayReminderSaving}
+                onchange={toggleWorkdayReminder}
+              />
+              <span class="slider"></span>
+            </label>
+          </div>
         </div>
 
         <div class="settings-item">
@@ -606,6 +715,39 @@
     padding-bottom: 12px;
   }
 
+  .reminder-option {
+    align-items: center;
+  }
+
+  .reminder-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+
+  .reminder-time-input {
+    width: 98px;
+    min-height: 38px;
+    padding: 0 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 700;
+    outline: none;
+  }
+
+  .reminder-time-input:focus {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 3px var(--bg-accent-subtle);
+  }
+
+  .reminder-time-input:disabled {
+    opacity: 0.6;
+  }
+
   .item-icon {
     width: 40px;
     height: 40px;
@@ -618,6 +760,10 @@
   .item-icon.bell {
     background: var(--bg-warning-subtle);
     color: var(--warning-color);
+  }
+  .item-icon.reminder {
+    background: var(--bg-info-subtle);
+    color: var(--info-color);
   }
   .item-icon.moon {
     background: var(--bg-purple-subtle);
@@ -638,6 +784,7 @@
 
   .item-info {
     flex: 1;
+    min-width: 0;
   }
   a {
     text-decoration: none;
@@ -654,6 +801,7 @@
     margin: 2px 0 0;
     font-size: 12px;
     color: var(--text-secondary);
+    line-height: 1.35;
   }
 
   /* Switch Toggle Styles */
@@ -723,5 +871,27 @@
 
   .logout-btn:active {
     background: var(--bg-danger-subtle);
+  }
+
+  @media (max-width: 520px) {
+    .settings-item {
+      padding: 14px 16px;
+      gap: 12px;
+    }
+
+    .reminder-option {
+      align-items: flex-start;
+    }
+
+    .reminder-controls {
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+    }
+
+    .reminder-time-input {
+      width: 92px;
+      font-size: 13px;
+    }
   }
 </style>

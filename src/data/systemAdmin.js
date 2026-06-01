@@ -9,7 +9,7 @@ import {
     serverTimestamp,
     updateDoc
 } from 'firebase/firestore';
-import { getTeamSizeOption } from './teamSizes.js';
+import { getTeamSizeOption, normalizeTeamSizeData } from './teamSizes.js';
 
 export const systemAdminStore = writable({
     loading: true,
@@ -170,6 +170,74 @@ export async function updateTeamBillingDate(teamId, billingDate) {
     });
 }
 
+export async function applyTeamAccessCodeToTeam(teamId, accessCode) {
+    const user = get(userStore);
+    if (!user?.uid || !teamId) throw new Error('No se pudo aplicar el código');
+
+    const normalizedCode = normalizeAccessCode(accessCode);
+    if (!/^\d{8}$/.test(normalizedCode)) {
+        throw new Error('El código debe tener 8 dígitos');
+    }
+
+    return runTransaction(db, async (transaction) => {
+        const teamRef = doc(db, 'teams', teamId);
+        const codeRef = doc(db, 'team_access_codes', normalizedCode);
+        const [teamSnapshot, codeSnapshot] = await Promise.all([
+            transaction.get(teamRef),
+            transaction.get(codeRef)
+        ]);
+
+        if (!teamSnapshot.exists()) throw new Error('Equipo no encontrado');
+        if (!codeSnapshot.exists()) throw new Error('Código no encontrado');
+
+        const teamData = teamSnapshot.data();
+        const codeData = codeSnapshot.data();
+        if (codeData.used) throw new Error('Este código ya fue utilizado');
+
+        const expiresAt = toDate(codeData.expiresAt);
+        if (expiresAt && expiresAt.getTime() < Date.now()) {
+            throw new Error('Este código de acceso caducó');
+        }
+
+        const teamSizeData = normalizeTeamSizeData(codeData.size, codeData.maxMembers);
+        const currentMembers = Array.isArray(teamData.members) ? teamData.members.length : 0;
+        if (currentMembers > teamSizeData.maxMembers) {
+            throw new Error(`Este equipo ya tiene ${currentMembers} miembros y el código ${teamSizeData.teamSize} permite menos.`);
+        }
+
+        const now = new Date().toISOString();
+        transaction.update(teamRef, {
+            billingDate: toDateInput(expiresAt),
+            billingUpdatedAt: serverTimestamp(),
+            billingUpdatedBy: user.uid,
+            teamSize: teamSizeData.teamSize,
+            maxMembers: teamSizeData.maxMembers,
+            teamAccessCode: {
+                code: normalizedCode,
+                uniqueCode: codeData.uniqueCode || '',
+                expiresAt: codeData.expiresAt || null,
+                size: teamSizeData.teamSize,
+                maxMembers: teamSizeData.maxMembers,
+                appliedAt: now,
+                appliedBy: user.uid
+            },
+            updatedAt: now
+        });
+
+        transaction.update(codeRef, {
+            used: true,
+            usedAt: serverTimestamp(),
+            usedBy: user.uid,
+            usedByEmail: user.email || '',
+            usedTeamId: teamId,
+            usedTeamName: teamData.team || teamData.name || '',
+            updatedAt: serverTimestamp()
+        });
+
+        return true;
+    });
+}
+
 function generateEightDigitCode() {
     return String(Math.floor(10000000 + Math.random() * 90000000));
 }
@@ -196,6 +264,30 @@ function normalizeExpirationDate(value) {
 function normalizeBillingDate(value) {
     const date = String(value || '').trim();
     return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null;
+}
+
+function normalizeAccessCode(value) {
+    return String(value || '').replace(/\D/g, '').slice(0, 8);
+}
+
+function toDate(value) {
+    if (!value) return null;
+    if (value instanceof Date) return value;
+    if (typeof value.toDate === 'function') return value.toDate();
+    if (typeof value.seconds === 'number') return new Date(value.seconds * 1000);
+
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function toDateInput(value) {
+    const date = toDate(value);
+    if (!date) return null;
+
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
 }
 
 function normalizeAdminEmail(value) {

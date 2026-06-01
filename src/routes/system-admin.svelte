@@ -21,6 +21,7 @@
   import { navigateTo } from "../router.js";
   import {
     adminTeamsStore,
+    applyTeamAccessCodeToTeam,
     createTeamAccessCode,
     getTeamMemberLimitLabel,
     getTeamMonthlyPrice,
@@ -42,8 +43,10 @@
   let showCodes = $state(true);
   let revenueView = $state("list");
   let teamSearch = $state("");
+  let applyingCodeTeamId = $state("");
   let savingTeamId = $state("");
   let billingInputs = $state({});
+  let codeInputs = $state({});
   let adminProfiles = $state({});
   let toastMessage = $state("");
   let toastType = $state("success");
@@ -91,6 +94,10 @@
       breakdown
     };
   });
+
+  let availableAccessCodes = $derived.by(() =>
+    $teamAccessCodesStore.filter((code) => getAccessCodeStatus(code) === "available")
+  );
 
   let filteredAdminTeams = $derived.by(() => {
     const search = normalizeSearch(teamSearch);
@@ -205,6 +212,27 @@
     }
   }
 
+  async function handleApplyAccessCode(team) {
+    if (!team?.id || applyingCodeTeamId) return;
+
+    const code = String(codeInputs[team.id] || "").trim();
+    applyingCodeTeamId = team.id;
+
+    try {
+      await applyTeamAccessCodeToTeam(team.id, code);
+      codeInputs[team.id] = "";
+      toastType = "success";
+      toastMessage = "Código aplicado al equipo";
+      showToast = true;
+    } catch (error) {
+      toastType = "error";
+      toastMessage = error?.message || "No se pudo aplicar el código";
+      showToast = true;
+    } finally {
+      applyingCodeTeamId = "";
+    }
+  }
+
   function getAdminEmail(team) {
     return team.adminEmail || adminProfiles[team.admin]?.email || team.admin || "Sin admin";
   }
@@ -311,6 +339,11 @@
 
 <div class="admin-page">
   <Toast message={toastMessage} type={toastType} bind:show={showToast} />
+  <datalist id="available-team-access-codes">
+    {#each availableAccessCodes as code (code.id)}
+      <option value={code.code} label={`${code.size || "S"} - ${formatDate(code.expiresAt)}`}></option>
+    {/each}
+  </datalist>
 
   <header class="admin-header">
     <button type="button" class="back-button" onclick={() => navigateTo("/settings")}>
@@ -597,6 +630,33 @@
                   </div>
                 </div>
 
+                <div class="code-applier">
+                  <input
+                    type="text"
+                    inputmode="numeric"
+                    maxlength="8"
+                    list="available-team-access-codes"
+                    value={codeInputs[team.id] || ""}
+                    disabled={applyingCodeTeamId === team.id}
+                    placeholder="Código"
+                    aria-label={`Código para ${team.name || team.team || "equipo"}`}
+                    oninput={(event) => (codeInputs[team.id] = event.currentTarget.value.replace(/\D/g, "").slice(0, 8))}
+                  />
+                  <button
+                    type="button"
+                    class="code-apply-action"
+                    onclick={() => handleApplyAccessCode(team)}
+                    disabled={applyingCodeTeamId === team.id || !(codeInputs[team.id] || "").trim()}
+                    aria-label={`Aplicar código a ${team.name || team.team || "equipo"}`}
+                  >
+                    {#if applyingCodeTeamId === team.id}
+                      <RefreshCw size={18} />
+                    {:else}
+                      <KeyRound size={18} />
+                    {/if}
+                  </button>
+                </div>
+
                 <div class="billing-editor">
                   <input
                     type="date"
@@ -673,47 +733,95 @@
   .summary-grid {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 10px;
+    gap: 12px;
     margin-bottom: 24px;
   }
 
   .summary-card {
-    min-height: 92px;
-    padding: 16px;
-    border: 1px solid var(--border-color);
+    --card-accent: var(--accent-strong);
+    --card-soft: var(--bg-accent-subtle);
+    position: relative;
+    min-height: 112px;
+    padding: 18px 16px 16px;
+    border: 1px solid color-mix(in srgb, var(--card-accent) 18%, var(--border-color));
     border-radius: var(--radius-md);
-    background: var(--bg-card);
+    background:
+      linear-gradient(135deg, color-mix(in srgb, var(--card-soft) 62%, transparent), transparent 54%),
+      linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 92%, var(--card-soft)), var(--bg-card));
     box-shadow: var(--shadow-card);
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+    overflow: hidden;
+    isolation: isolate;
+  }
+
+  .summary-card::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto;
+    height: 4px;
+    background: var(--card-accent);
+  }
+
+  .summary-card::after {
+    content: "";
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    width: 32px;
+    height: 32px;
+    border-top: 2px solid color-mix(in srgb, var(--card-accent) 42%, transparent);
+    border-right: 2px solid color-mix(in srgb, var(--card-accent) 42%, transparent);
+    border-top-right-radius: var(--radius-sm);
+    opacity: 0.8;
+    pointer-events: none;
   }
 
   .summary-card span {
+    width: fit-content;
+    max-width: 100%;
+    min-height: 28px;
+    padding: 0 9px;
+    border: 1px solid color-mix(in srgb, var(--card-accent) 14%, var(--border-color));
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--card-soft) 68%, var(--bg-card));
     color: var(--text-secondary);
-    font-size: 13px;
-    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    font-size: 12px;
+    font-weight: 800;
+    overflow-wrap: anywhere;
   }
 
   .summary-card strong {
-    font-size: 28px;
+    margin-top: 14px;
     color: var(--text-primary);
+    font-size: 30px;
+    font-weight: 900;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
   }
 
   .summary-card.available {
-    border-color: color-mix(in srgb, var(--success-color) 25%, var(--border-color));
+    --card-accent: var(--success-color);
+    --card-soft: var(--bg-success-subtle);
   }
 
   .summary-card.used {
-    border-color: color-mix(in srgb, var(--info-color) 25%, var(--border-color));
+    --card-accent: var(--info-color);
+    --card-soft: var(--bg-info-subtle);
   }
 
   .summary-card.expired {
-    border-color: color-mix(in srgb, var(--warning-color) 25%, var(--border-color));
+    --card-accent: var(--warning-color);
+    --card-soft: var(--bg-warning-subtle);
   }
 
   .summary-card.revenue {
-    border-color: color-mix(in srgb, var(--accent-strong) 28%, var(--border-color));
+    --card-accent: var(--accent-strong);
+    --card-soft: var(--bg-accent-subtle);
   }
 
   .admin-section {
@@ -1000,7 +1108,8 @@
   }
 
   .primary-action,
-  .icon-action {
+  .icon-action,
+  .code-apply-action {
     border: none;
     background: var(--accent-strong);
     color: var(--bg-card);
@@ -1019,7 +1128,8 @@
   }
 
   .primary-action:disabled,
-  .icon-action:disabled {
+  .icon-action:disabled,
+  .code-apply-action:disabled {
     opacity: 0.7;
     cursor: not-allowed;
   }
@@ -1207,7 +1317,7 @@
 
   .team-actions {
     display: grid;
-    grid-template-columns: 136px auto;
+    grid-template-columns: 136px minmax(188px, 1fr) auto;
     gap: 10px;
     align-items: center;
   }
@@ -1229,6 +1339,26 @@
     font-size: 16px;
   }
 
+  .code-applier {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .code-applier input {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font-weight: 800;
+    letter-spacing: 0;
+  }
+
   .billing-editor input {
     min-height: 44px;
     padding: 0 10px;
@@ -1237,7 +1367,8 @@
     background: var(--bg-input);
   }
 
-  .icon-action {
+  .icon-action,
+  .code-apply-action {
     width: 44px;
     height: 44px;
     border-radius: var(--radius-sm);

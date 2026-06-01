@@ -214,6 +214,66 @@ service cloud.firestore {
              request.resource.data.billingUpdatedBy == request.auth.uid;
     }
 
+    function isSystemAdminApplyingAccessCode(teamId) {
+      let code = request.resource.data.teamAccessCode.code;
+      return isSystemAdmin() &&
+             code is string &&
+             code.matches("^\\d{8}$") &&
+             exists(/databases/$(database)/documents/team_access_codes/$(code)) &&
+             get(/databases/$(database)/documents/team_access_codes/$(code)).data.used == false &&
+             get(/databases/$(database)/documents/team_access_codes/$(code)).data.expiresAt >= request.time &&
+             request.resource.data.admin == resource.data.admin &&
+             request.resource.data.members == resource.data.members &&
+             resource.data.admin in request.resource.data.members &&
+             request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+               "billingDate",
+               "billingUpdatedAt",
+               "billingUpdatedBy",
+               "teamSize",
+               "maxMembers",
+               "teamAccessCode",
+               "updatedAt"
+             ]) &&
+             (
+               request.resource.data.billingDate == null ||
+               request.resource.data.billingDate is string
+             ) &&
+             request.resource.data.billingUpdatedBy == request.auth.uid &&
+             isValidTeamSize(request.resource.data.teamSize, request.resource.data.maxMembers) &&
+             request.resource.data.members.size() <= request.resource.data.maxMembers &&
+             request.resource.data.teamAccessCode is map &&
+             request.resource.data.teamAccessCode.keys().hasOnly([
+               "code",
+               "uniqueCode",
+               "expiresAt",
+               "size",
+               "maxMembers",
+               "appliedAt",
+               "appliedBy"
+             ]) &&
+             request.resource.data.teamAccessCode.keys().hasAll([
+               "code",
+               "uniqueCode",
+               "expiresAt",
+               "size",
+               "maxMembers",
+               "appliedAt",
+               "appliedBy"
+             ]) &&
+             request.resource.data.teamAccessCode.uniqueCode ==
+               get(/databases/$(database)/documents/team_access_codes/$(code)).data.uniqueCode &&
+             request.resource.data.teamAccessCode.expiresAt ==
+               get(/databases/$(database)/documents/team_access_codes/$(code)).data.expiresAt &&
+             request.resource.data.teamAccessCode.size == request.resource.data.teamSize &&
+             request.resource.data.teamAccessCode.maxMembers == request.resource.data.maxMembers &&
+             request.resource.data.teamAccessCode.appliedAt is string &&
+             request.resource.data.teamAccessCode.appliedBy == request.auth.uid &&
+             accessCodeSizeMatchesTeam(code) &&
+             getAfter(/databases/$(database)/documents/team_access_codes/$(code)).data.used == true &&
+             getAfter(/databases/$(database)/documents/team_access_codes/$(code)).data.usedBy == request.auth.uid &&
+             getAfter(/databases/$(database)/documents/team_access_codes/$(code)).data.usedTeamId == teamId;
+    }
+
     function isValidAccessCodeCreate(code) {
       return isSystemAdmin() &&
              code.matches("^\\d{8}$") &&
@@ -663,19 +723,24 @@ service cloud.firestore {
       // El admin siempre puede actualizar. Miembros con permisos de ajustes
       // pueden agregar/editar configuración del equipo, pero no cambiar el admin.
       allow update: if request.auth != null &&
-                    isAllowedTeamUpdateShape() &&
                     (
-                      request.auth.uid == resource.data.admin ||
-                      hasTeamPermission(teamId, "settings", "create") ||
-                      hasTeamPermission(teamId, "settings", "edit") ||
-                      hasTeamPermission(teamId, "settings", "delete") ||
-                      isSystemAdminTeamBillingUpdate() ||
                       (
-                        hasTeamPermission(teamId, "stats", "edit") &&
-                        isStatsBudgetUpdate()
+                        isAllowedTeamUpdateShape() &&
+                        (
+                          request.auth.uid == resource.data.admin ||
+                          hasTeamPermission(teamId, "settings", "create") ||
+                          hasTeamPermission(teamId, "settings", "edit") ||
+                          hasTeamPermission(teamId, "settings", "delete") ||
+                          isSystemAdminTeamBillingUpdate() ||
+                          (
+                            hasTeamPermission(teamId, "stats", "edit") &&
+                            isStatsBudgetUpdate()
+                          ) ||
+                          isAcceptingTeamInvitation(teamId) ||
+                          isSelfLeavingTeam(teamId)
+                        )
                       ) ||
-                      isAcceptingTeamInvitation(teamId) ||
-                      isSelfLeavingTeam(teamId)
+                      isSystemAdminApplyingAccessCode(teamId)
                     );
 
       // Solo el administrador puede eliminar el equipo.
