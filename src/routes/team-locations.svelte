@@ -4,6 +4,7 @@
     DollarSign,
     Edit2,
     MapPinned,
+    Navigation,
     Plus,
     Save,
     Trash2,
@@ -195,6 +196,20 @@
     return distanceInfo(userCoordinates, locationCoordinates);
   }
 
+  function getLocationMapsUrl(location) {
+    const locationCoordinates = normalizeCoordinates(location?.gps);
+
+    if (locationCoordinates) {
+      const destination = `${locationCoordinates.lat},${locationCoordinates.lon}`;
+      return `https://www.google.com/maps/dir/?api=1&destination=${destination}`;
+    }
+
+    const query = [location?.name, location?.description].filter(Boolean).join(" ");
+    return query
+      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`
+      : "";
+  }
+
   async function useCurrentLocation() {
     isLocating = true;
     locationError = "";
@@ -312,6 +327,7 @@
       {:else}
         <div class="locations-list">
           {#each $teamLocationsStore as location (location.id)}
+            {@const mapsUrl = getLocationMapsUrl(location)}
             <article class="location-item">
               <div class="location-icon">
                 <MapPinned size={20} />
@@ -339,8 +355,21 @@
                   </div>
                 {/if}
               </div>
-              {#if canEditLocations || canDeleteLocations}
+              {#if mapsUrl || canEditLocations || canDeleteLocations}
                 <div class="location-actions">
+                  {#if mapsUrl}
+                    <a
+                      class="location-action-btn navigation-action-btn"
+                      href={mapsUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`Abrir ${location.name || "ubicación"} en Maps`}
+                      title="Abrir en Maps"
+                    >
+                      <Navigation size={18} />
+                      <span>Maps</span>
+                    </a>
+                  {/if}
                   {#if canEditLocations}
                     <button
                       class="location-action-btn"
@@ -580,24 +609,49 @@
     display: flex;
     align-items: center;
     gap: 4px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
   .location-action-btn {
-    background: none;
-    border: none;
+    min-height: 36px;
+    background: var(--button-secondary-bg);
+    border: 1px solid var(--control-border);
     color: var(--text-secondary);
-    padding: 8px;
+    padding: 8px 9px;
     cursor: pointer;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
+    gap: 6px;
     border-radius: 8px;
-    transition: all 0.2s;
+    text-decoration: none;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
   }
 
   .location-action-btn:hover {
-    background: var(--bg-input);
-    color: var(--accent-color);
+    border-color: var(--control-border-strong);
+    background: var(--button-secondary-bg-hover);
+    color: var(--text-primary);
+    transform: translateY(-1px);
+    box-shadow: var(--interactive-shadow);
+  }
+
+  .navigation-action-btn {
+    border-color: transparent;
+    background: var(--button-primary-bg);
+    color: var(--button-primary-ink);
+    box-shadow: 0 8px 18px rgba(20, 20, 20, 0.08);
+  }
+
+  .navigation-action-btn:hover {
+    border-color: transparent;
+    background: var(--button-primary-bg);
+    color: var(--button-primary-ink);
+    box-shadow: var(--interactive-shadow);
+    filter: saturate(1.08);
   }
 
   .assigned-members {
@@ -833,6 +887,10 @@
     .location-actions {
       grid-column: 2;
       justify-content: flex-start;
+    }
+
+    .navigation-action-btn {
+      min-width: 96px;
     }
 
     .form-row {
