@@ -66,6 +66,39 @@ function cloudinaryApiPlugin() {
 }
 
 function pushNotificationApiPlugin() {
+  async function readJsonBody(req, res) {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+
+    try {
+      req.body = body ? JSON.parse(body) : {};
+      return true;
+    } catch {
+      res.statusCode = 400;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      return false;
+    }
+  }
+
+  function mountApiHandler(server, route, modulePath, label) {
+    server.middlewares.use(route, async (req, res) => {
+      if (!(await readJsonBody(req, res))) return;
+
+      try {
+        const { default: handler } = await import(modulePath);
+        await handler(req, res);
+      } catch (error) {
+        console.error(`${label} API error:`, error);
+        if (!res.headersSent) {
+          res.statusCode = 500;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ error: error.message || 'Internal server error' }));
+        }
+      }
+    });
+  }
+
   return {
     name: 'push-notification-api',
     configResolved(config) {
@@ -77,31 +110,8 @@ function pushNotificationApiPlugin() {
       });
     },
     configureServer(server) {
-      server.middlewares.use('/api/send-push-notification', async (req, res) => {
-        let body = '';
-        for await (const chunk of req) body += chunk;
-
-        try {
-          req.body = body ? JSON.parse(body) : {};
-        } catch {
-          res.statusCode = 400;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ error: 'Invalid JSON' }));
-          return;
-        }
-
-        try {
-          const { default: handler } = await import('./api/send-push-notification.js');
-          await handler(req, res);
-        } catch (error) {
-          console.error('Push notification API error:', error);
-          if (!res.headersSent) {
-            res.statusCode = 500;
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({ error: error.message || 'Internal server error' }));
-          }
-        }
-      });
+      mountApiHandler(server, '/api/send-push-notification', './api/send-push-notification.js', 'Push notification');
+      mountApiHandler(server, '/api/send-reminders', './api/send-reminders.js', 'Reminder');
     },
   };
 }

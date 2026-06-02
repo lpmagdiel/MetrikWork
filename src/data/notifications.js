@@ -27,6 +27,10 @@ export const DEFAULT_NOTIFICATION_PREFERENCES = {
     payments: true,
 };
 
+export function getReminderNotificationId(uid, dateKey) {
+    return `reminder_${encodeURIComponent(uid || 'user')}_${dateKey}`;
+}
+
 export const notificationsStore = writable([]);
 export const notificationPreferencesStore = writable(DEFAULT_NOTIFICATION_PREFERENCES);
 let notificationsUnsubscribe;
@@ -228,7 +232,53 @@ export async function createNotification(uid, title, message, options = {}) {
     }
 }
 
-async function sendPushNotification(notificationId) {
+export async function createReminderNotification(uid, options = {}) {
+    try {
+        if (!uid || !options.dateKey) return null;
+
+        const notificationId = getReminderNotificationId(uid, options.dateKey);
+        const notificationRef = doc(db, 'notifications', notificationId);
+        let alreadyExists = false;
+
+        try {
+            const snapshot = await getDoc(notificationRef);
+            alreadyExists = snapshot.exists();
+        } catch {
+            // Missing documents can be blocked by rules; creation is still allowed below.
+        }
+
+        if (alreadyExists) {
+            return { id: notificationId, created: false };
+        }
+
+        await setDoc(notificationRef, {
+            title: 'Recordatorio',
+            message: String(options.message || '').trim() || 'Tienes un recordatorio pendiente.',
+            date: new Date().toISOString(),
+            notificationFor: uid,
+            opened: false,
+            url: options.url || '/notifications',
+            type: 'personal_reminder',
+            sourceId: options.dateKey,
+            showInForeground: true,
+            reminderDateKey: options.dateKey,
+            reminderTime: options.time || '',
+            reminderTimeZone: options.timeZone || '',
+            reminderSource: options.source || 'client',
+        }, { merge: true });
+
+        sendPushNotification(notificationId).catch((error) => {
+            console.warn("Reminder was saved, but push delivery failed:", error);
+        });
+
+        return { id: notificationId, created: true };
+    } catch (error) {
+        console.error("Error creating reminder notification:", error);
+        return null;
+    }
+}
+
+export async function sendPushNotification(notificationId) {
     if (typeof fetch === 'undefined') return;
     const response = await fetch('/api/send-push-notification', {
         method: 'POST',

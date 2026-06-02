@@ -31,8 +31,10 @@
     updateSettings,
     updateNotificationPreferences,
     normalizeNotificationPreferences,
-    normalizeWorkdayReminderSettings,
-    DEFAULT_WORKDAY_REMINDER_TIME,
+    normalizeReminderSettings,
+    DEFAULT_REMINDER_TIME,
+    DEFAULT_REMINDER_MESSAGE,
+    getLocalReminderTimeZone,
     pushNotificationState,
     requestPushNotifications,
     systemAdminStore,
@@ -59,11 +61,11 @@
   let canUsePush = $state(false);
   let pushButtonLoading = $state(false);
   let notificationPreferenceSavingKey = $state("");
-  let workdayReminderSaving = $state(false);
+  let reminderSaving = $state(false);
   let pushState = $derived($pushNotificationState);
   let pushEnabled = $derived(pushState.status === "enabled" && Boolean(pushState.token));
   let notificationPreferences = $derived(normalizeNotificationPreferences($notificationPreferencesStore));
-  let workdayReminder = $derived(normalizeWorkdayReminderSettings($settingsStore || {}));
+  let reminder = $derived(normalizeReminderSettings($settingsStore || {}));
 
   const notificationPreferenceOptions = [
     {
@@ -236,23 +238,26 @@
     }
   }
 
-  function getWorkdayReminderDescription() {
-    if (!workdayReminder.enabled) return "Sin recordatorio configurado";
-    if (!canUsePush || pushState.status === "unsupported") return `Guardado a las ${workdayReminder.time}; avisos no disponibles`;
-    if (pushState.permission === "denied") return `Guardado a las ${workdayReminder.time}; permiso bloqueado`;
-    if (pushState.permission !== "granted") return `Guardado a las ${workdayReminder.time}; activa notificaciones`;
-    return `Todos los días a las ${workdayReminder.time}`;
+  function getReminderDescription() {
+    if (!reminder.enabled) return "Sin recordatorio configurado";
+    if (!canUsePush || pushState.status === "unsupported") return `Guardado a las ${reminder.time}; avisos no disponibles`;
+    if (pushState.permission === "denied") return `Guardado a las ${reminder.time}; permiso bloqueado`;
+    if (pushState.permission !== "granted") return `Guardado a las ${reminder.time}; activa notificaciones`;
+    return `Todos los días a las ${reminder.time}`;
   }
 
-  async function saveWorkdayReminderSettings(nextReminder) {
-    if (!$userStore?.uid || workdayReminderSaving) return;
+  async function saveReminderSettings(nextReminder) {
+    if (!$userStore?.uid || reminderSaving) return;
+    const wasEnabled = reminder.enabled;
 
-    const normalizedReminder = normalizeWorkdayReminderSettings({
-      workdayReminderEnabled: nextReminder.enabled,
-      workdayReminderTime: nextReminder.time || DEFAULT_WORKDAY_REMINDER_TIME,
+    const normalizedReminder = normalizeReminderSettings({
+      reminderEnabled: nextReminder.enabled,
+      reminderTime: nextReminder.time || DEFAULT_REMINDER_TIME,
+      reminderMessage: nextReminder.message || DEFAULT_REMINDER_MESSAGE,
+      reminderTimeZone: getLocalReminderTimeZone(),
     });
 
-    workdayReminderSaving = true;
+    reminderSaving = true;
     let permissionResult = null;
 
     try {
@@ -261,6 +266,10 @@
       }
 
       await updateSettings($userStore.uid, {
+        reminderEnabled: normalizedReminder.enabled,
+        reminderTime: normalizedReminder.time,
+        reminderMessage: normalizedReminder.message,
+        reminderTimeZone: normalizedReminder.timeZone,
         workdayReminderEnabled: normalizedReminder.enabled,
         workdayReminderTime: normalizedReminder.time,
       });
@@ -277,35 +286,47 @@
         toastType = "error";
       } else {
         toastMessage = normalizedReminder.enabled
-          ? "Recordatorio de jornada activado"
-          : "Recordatorio de jornada desactivado";
+          ? "Recordatorio activado"
+          : wasEnabled
+            ? "Recordatorio desactivado"
+            : "Recordatorio guardado";
         toastType = "success";
       }
       showToast = true;
     } catch (error) {
-      console.error("Error updating workday reminder:", error);
+      console.error("Error updating reminder:", error);
       toastMessage = "No se pudo guardar el recordatorio";
       toastType = "error";
       showToast = true;
     } finally {
-      workdayReminderSaving = false;
+      reminderSaving = false;
     }
   }
 
-  function toggleWorkdayReminder() {
-    saveWorkdayReminderSettings({
-      enabled: !workdayReminder.enabled,
-      time: workdayReminder.time,
+  function toggleReminder() {
+    saveReminderSettings({
+      enabled: !reminder.enabled,
+      time: reminder.time,
+      message: reminder.message,
     });
   }
 
-  function handleWorkdayReminderTimeChange(event) {
+  function handleReminderTimeChange(event) {
     const selectedTime = event.currentTarget.value;
     if (!selectedTime) return;
 
-    saveWorkdayReminderSettings({
+    saveReminderSettings({
       enabled: true,
       time: selectedTime,
+      message: reminder.message,
+    });
+  }
+
+  function handleReminderMessageChange(event) {
+    saveReminderSettings({
+      enabled: reminder.enabled,
+      time: reminder.time,
+      message: event.currentTarget.value,
     });
   }
 </script>
@@ -449,26 +470,37 @@
             <AlarmClock size={18} />
           </div>
           <div class="item-info">
-            <span>Recordatorio de jornada</span>
-            <p>{getWorkdayReminderDescription()}</p>
+            <span>Recordatorio</span>
+            <p>{getReminderDescription()}</p>
+            <input
+              id="reminder-message"
+              class="reminder-message-input"
+              type="text"
+              value={reminder.message}
+              maxlength="180"
+              disabled={reminderSaving}
+              placeholder="Qué quieres recordar"
+              aria-label="Qué quieres recordar"
+              onchange={handleReminderMessageChange}
+            />
           </div>
           <div class="reminder-controls">
             <input
-              id="workday-reminder-time"
+              id="reminder-time"
               class="reminder-time-input"
               type="time"
-              value={workdayReminder.time}
+              value={reminder.time}
               step="300"
-              disabled={workdayReminderSaving}
-              aria-label="Hora del recordatorio de jornada"
-              onchange={handleWorkdayReminderTimeChange}
+              disabled={reminderSaving}
+              aria-label="Hora del recordatorio"
+              onchange={handleReminderTimeChange}
             />
-            <label class="switch" aria-label="Activar recordatorio de jornada">
+            <label class="switch" aria-label="Activar recordatorio">
               <input
                 type="checkbox"
-                checked={workdayReminder.enabled}
-                disabled={workdayReminderSaving}
-                onchange={toggleWorkdayReminder}
+                checked={reminder.enabled}
+                disabled={reminderSaving}
+                onchange={toggleReminder}
               />
               <span class="slider"></span>
             </label>
@@ -745,6 +777,30 @@
   }
 
   .reminder-time-input:disabled {
+    opacity: 0.6;
+  }
+
+  .reminder-message-input {
+    width: min(100%, 360px);
+    min-height: 38px;
+    margin-top: 10px;
+    padding: 0 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 600;
+    outline: none;
+    box-sizing: border-box;
+  }
+
+  .reminder-message-input:focus {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 3px var(--bg-accent-subtle);
+  }
+
+  .reminder-message-input:disabled {
     opacity: 0.6;
   }
 
