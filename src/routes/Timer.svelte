@@ -14,6 +14,7 @@
     Square,
     Trash2,
     TimerReset,
+    Briefcase,
   } from "lucide-svelte";
   import Toast from "../components/Toast.svelte";
   import {
@@ -38,6 +39,7 @@
   import { showErrorAlert, showSuccessAlert } from "../data/alerts.js";
   import { normalizeCoordinates } from "../helpers/navigation.js";
   import TitleHeader from "../components/TitleHeader.svelte";
+  import SelectiveButton from "../components/SelectiveButton.svelte";
 
   const ACTIVE_TIMER_KEY = "metricwork.activeVariableTimer";
   const POMODORO_FOCUS_SECONDS = 25 * 60;
@@ -79,6 +81,7 @@
   let isTodayNonWorkingDay = $derived(isNonWorkingDay(selectedTeam, todayDate));
   let todayNonWorkingMessage = $derived(getNonWorkingDayMessage(selectedTeam, todayDate));
   let isRunning = $derived(Boolean(startedAt && !endedAt));
+  const allMyTeams = $derived($teamsStore.map((team) => team.name || team.team || "Equipo"));
   let elapsedSeconds = $derived.by(() => {
     if (!startedAt) return 0;
     const end = endedAt || now;
@@ -850,6 +853,10 @@
       </div>
     </section>
   </div>
+  <SelectiveButton
+    options={allMyTeams}
+    icon={Briefcase}
+  />
 
   {#if lastEntry}
     <section class="last-entry">

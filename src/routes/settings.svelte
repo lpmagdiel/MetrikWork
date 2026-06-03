@@ -47,6 +47,12 @@
   import {updateData} from "../data/updateFeatures.js";
   import { showErrorAlert } from "../data/alerts.js";
   import TitleHeader from "../components/TitleHeader.svelte";
+  import {
+    clearCurrentUserLocation,
+    getCurrentGpsPosition,
+    getLocationPermissionState,
+    normalizeLocationSettings,
+  } from "../data/geolocation.js";
 
   let name = $state("");
   let email = $state("");
@@ -60,12 +66,15 @@
   let showUpdateModal = $state(false);
   let canUsePush = $state(false);
   let pushButtonLoading = $state(false);
+  let locationButtonLoading = $state(false);
+  let locationPermissionState = $state("unknown");
   let notificationPreferenceSavingKey = $state("");
   let reminderSaving = $state(false);
   let pushState = $derived($pushNotificationState);
   let pushEnabled = $derived(pushState.status === "enabled" && Boolean(pushState.token));
   let notificationPreferences = $derived(normalizeNotificationPreferences($notificationPreferencesStore));
   let reminder = $derived(normalizeReminderSettings($settingsStore || {}));
+  let locationSettings = $derived(normalizeLocationSettings($settingsStore || {}));
 
   const notificationPreferenceOptions = [
     {
@@ -112,6 +121,7 @@
 
   onMount(async () => {
     canUsePush = "Notification" in window && "serviceWorker" in navigator;
+    await refreshLocationPermissionState();
 
     if ($userStore) {
       email = $userStore.email;
@@ -192,6 +202,68 @@
     return "Activar avisos de tareas y equipos";
   }
 
+  async function refreshLocationPermissionState() {
+    locationPermissionState = (await getLocationPermissionState()) || "unknown";
+  }
+
+  function getLocationDescription() {
+    if (!locationSettings.enabled) return "La app no capturará GPS al fichar o guardar ubicaciones";
+    if (locationPermissionState === "granted") return "GPS disponible para fichajes y ubicaciones";
+    if (locationPermissionState === "denied") return "Permiso bloqueado en el navegador";
+    return "Permiso pendiente del navegador";
+  }
+
+  async function toggleLocationPermission(event) {
+    if (!$userStore?.uid || locationButtonLoading) return;
+    const enabled = event.currentTarget.checked;
+    locationButtonLoading = true;
+
+    try {
+      await updateSettings($userStore.uid, {
+        locationEnabled: enabled,
+      });
+
+      if (!enabled) {
+        clearCurrentUserLocation();
+      }
+
+      await refreshLocationPermissionState();
+      toastMessage = enabled ? "Ubicación permitida en la app" : "Ubicación desactivada";
+      toastType = "success";
+      showToast = true;
+    } catch (error) {
+      console.error("Error updating location permission setting:", error);
+      toastMessage = "No se pudo guardar la preferencia de ubicación";
+      toastType = "error";
+      showToast = true;
+    } finally {
+      locationButtonLoading = false;
+    }
+  }
+
+  async function requestLocationPermission() {
+    if (!$userStore?.uid || locationButtonLoading || !locationSettings.enabled) return;
+    locationButtonLoading = true;
+
+    try {
+      await getCurrentGpsPosition({
+        prompt: true,
+        settings: { locationEnabled: true },
+      });
+      locationPermissionState = (await getLocationPermissionState()) || "granted";
+      toastMessage = "Permiso de ubicación activado";
+      toastType = "success";
+      showToast = true;
+    } catch (error) {
+      await refreshLocationPermissionState();
+      toastMessage = error?.message || "No se pudo activar la ubicación";
+      toastType = locationPermissionState === "denied" ? "error" : "warning";
+      showToast = true;
+    } finally {
+      locationButtonLoading = false;
+    }
+  }
+
   async function handleEnablePush() {
     if (!$userStore?.uid || pushButtonLoading || pushEnabled) return;
     pushButtonLoading = true;
@@ -258,13 +330,8 @@
     });
 
     reminderSaving = true;
-    let permissionResult = null;
 
     try {
-      if (normalizedReminder.enabled && canUsePush && pushState.permission === "default") {
-        permissionResult = await requestPushNotifications($userStore.uid);
-      }
-
       await updateSettings($userStore.uid, {
         reminderEnabled: normalizedReminder.enabled,
         reminderTime: normalizedReminder.time,
@@ -275,8 +342,11 @@
       });
 
       const permissionDenied = normalizedReminder.enabled &&
-        (permissionResult?.reason === "denied" || pushState.permission === "denied");
+        pushState.permission === "denied";
       const unsupported = normalizedReminder.enabled && (!canUsePush || pushState.status === "unsupported");
+      const needsPushPermission = normalizedReminder.enabled &&
+        canUsePush &&
+        pushState.permission !== "granted";
 
       if (permissionDenied) {
         toastMessage = "Hora guardada, pero el permiso de notificaciones está bloqueado";
@@ -284,6 +354,9 @@
       } else if (unsupported) {
         toastMessage = "Hora guardada, pero este navegador no permite avisos";
         toastType = "error";
+      } else if (needsPushPermission) {
+        toastMessage = "Recordatorio guardado. Activa notificaciones para recibir avisos.";
+        toastType = "warning";
       } else {
         toastMessage = normalizedReminder.enabled
           ? "Recordatorio activado"
@@ -421,6 +494,37 @@
     <section class="settings-group">
       <h3>Preferencias</h3>
       <div class="settings-list">
+        <div class="settings-item">
+          <div class="item-icon location">
+            <MapPin size={18} />
+          </div>
+          <div class="item-info">
+            <span>Permitir ubicación</span>
+            <p>{getLocationDescription()}</p>
+          </div>
+          <div class="setting-actions">
+            {#if locationSettings.enabled && locationPermissionState !== "granted"}
+              <button
+                type="button"
+                class="permission-btn"
+                disabled={locationButtonLoading || locationPermissionState === "denied"}
+                onclick={requestLocationPermission}
+              >
+                {locationButtonLoading ? "..." : locationPermissionState === "denied" ? "Bloqueado" : "Permitir"}
+              </button>
+            {/if}
+            <label class="switch">
+              <input
+                type="checkbox"
+                checked={locationSettings.enabled}
+                disabled={locationButtonLoading}
+                onchange={toggleLocationPermission}
+              />
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
         <div class="settings-item">
           <div class="item-icon bell">
             <Bell size={18} />
@@ -817,6 +921,10 @@
     background: var(--bg-warning-subtle);
     color: var(--warning-color);
   }
+  .item-icon.location {
+    background: var(--bg-success-subtle);
+    color: var(--success-color);
+  }
   .item-icon.reminder {
     background: var(--bg-info-subtle);
     color: var(--info-color);
@@ -858,6 +966,30 @@
     font-size: 12px;
     color: var(--text-secondary);
     line-height: 1.35;
+  }
+
+  .setting-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+
+  .permission-btn {
+    min-height: 34px;
+    padding: 0 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+
+  .permission-btn:disabled {
+    cursor: default;
+    opacity: 0.58;
   }
 
   /* Switch Toggle Styles */
@@ -941,6 +1073,12 @@
 
     .reminder-controls {
       flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+    }
+
+    .setting-actions {
+      flex-direction: column-reverse;
       align-items: flex-end;
       gap: 8px;
     }

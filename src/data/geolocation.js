@@ -1,4 +1,5 @@
-import { writable } from "svelte/store";
+import { get, writable } from "svelte/store";
+import { settingsStore } from "./auth.js";
 
 const USER_LOCATION_STORAGE_KEY = "metricwork:user-location";
 
@@ -13,8 +14,22 @@ export const GEOLOCATION_ERRORS = {
   timeout: "La solicitud de ubicación tardó demasiado. Inténtalo de nuevo.",
   blocked:
     "El navegador bloqueó el acceso a la ubicación. Revisa los permisos del sitio o del dispositivo.",
+  disabled:
+    "La ubicación está desactivada en tus ajustes. Activa Permitir ubicación para usar GPS.",
+  permissionNeeded:
+    "El permiso de ubicación está pendiente. Actívalo desde Ajustes para usar GPS.",
   unknown: "No se pudo obtener tu ubicación actual.",
 };
+
+export function normalizeLocationSettings(settings = {}) {
+  return {
+    enabled: settings?.locationEnabled !== false,
+  };
+}
+
+export function isLocationEnabled(settings = get(settingsStore) || {}) {
+  return normalizeLocationSettings(settings).enabled;
+}
 
 function normalizeGpsPosition(value) {
   const lat = Number(value?.lat);
@@ -57,6 +72,16 @@ export function storeCurrentUserLocation(gps) {
   return normalizedLocation;
 }
 
+export function clearCurrentUserLocation() {
+  currentUserLocation.set(null);
+
+  try {
+    localStorage.removeItem(USER_LOCATION_STORAGE_KEY);
+  } catch {
+    // Local storage can be unavailable in private mode; clearing the store is enough.
+  }
+}
+
 function getGeolocationErrorMessage(error) {
   if (!error) return GEOLOCATION_ERRORS.unknown;
 
@@ -69,7 +94,8 @@ function getGeolocationErrorMessage(error) {
   return messages[error.code] || error.message || GEOLOCATION_ERRORS.unknown;
 }
 
-async function getLocationPermissionState() {
+export async function getLocationPermissionState() {
+  if (typeof navigator === "undefined") return null;
   if (!navigator.permissions?.query) return null;
 
   try {
@@ -80,9 +106,13 @@ async function getLocationPermissionState() {
   }
 }
 
-export async function getCurrentGpsPosition() {
+export async function getCurrentGpsPosition({ prompt = false, settings = null } = {}) {
   if (typeof window === "undefined" || typeof navigator === "undefined") {
     throw new Error(GEOLOCATION_ERRORS.unsupported);
+  }
+
+  if (!isLocationEnabled(settings || get(settingsStore) || {})) {
+    throw new Error(GEOLOCATION_ERRORS.disabled);
   }
 
   if (!navigator.geolocation) {
@@ -96,6 +126,10 @@ export async function getCurrentGpsPosition() {
   const permissionState = await getLocationPermissionState();
   if (permissionState === "denied") {
     throw new Error(GEOLOCATION_ERRORS.denied);
+  }
+
+  if (!prompt && permissionState !== "granted") {
+    throw new Error(GEOLOCATION_ERRORS.permissionNeeded);
   }
 
   return new Promise((resolve, reject) => {
@@ -121,11 +155,17 @@ export async function getCurrentGpsPosition() {
   });
 }
 
-export async function captureCurrentUserLocation({ silent = true } = {}) {
+export async function captureCurrentUserLocation({ silent = true, prompt = false } = {}) {
   try {
-    return await getCurrentGpsPosition();
+    return await getCurrentGpsPosition({ prompt });
   } catch (error) {
     if (!silent) throw error;
+    if (
+      error?.message === GEOLOCATION_ERRORS.disabled ||
+      error?.message === GEOLOCATION_ERRORS.permissionNeeded
+    ) {
+      return null;
+    }
     console.warn("No se pudo capturar la ubicación del usuario:", error?.message || error);
     return null;
   }

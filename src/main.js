@@ -97,7 +97,7 @@ initAuth((uid) => {
   if (uid) {
     startOfflineActionsSync();
     startUserPresence(uid);
-    captureCurrentUserLocation();
+    captureCurrentUserLocation({ prompt: false });
     incomingCallUnsubscribe = subscribeToIncomingPrivateCalls(uid, bringIncomingCallToFront);
   } else {
     stopUserPresence();
