@@ -1,7 +1,6 @@
 <script>
   import { onDestroy, onMount } from "svelte";
   import {
-    BriefcaseBusiness,
     Bookmark,
     Check,
     Clock,
@@ -11,6 +10,7 @@
     Play,
     RotateCcw,
     Save,
+    SlidersHorizontal,
     Square,
     Trash2,
     TimerReset,
@@ -38,8 +38,9 @@
   import { getCurrentGpsPosition } from "../data/geolocation.js";
   import { showErrorAlert, showSuccessAlert } from "../data/alerts.js";
   import { normalizeCoordinates } from "../helpers/navigation.js";
-  import TitleHeader from "../components/TitleHeader.svelte";
   import SelectiveButton from "../components/SelectiveButton.svelte";
+  import SliceContainer from "../components/SliceContainer.svelte";
+  import TitleHeader from "../components/TitleHeader.svelte";
 
   const ACTIVE_TIMER_KEY = "metricwork.activeVariableTimer";
   const POMODORO_FOCUS_SECONDS = 25 * 60;
@@ -71,6 +72,7 @@
   let workdayTemplateName = $state("");
   let isSavingTemplate = $state(false);
   let deletingTemplateId = $state("");
+  let showTimerDetails = $state(false);
 
   let selectedTeam = $derived(
     $teamsStore.find((team) => team.id === activeTeamId) || null,
@@ -81,7 +83,30 @@
   let isTodayNonWorkingDay = $derived(isNonWorkingDay(selectedTeam, todayDate));
   let todayNonWorkingMessage = $derived(getNonWorkingDayMessage(selectedTeam, todayDate));
   let isRunning = $derived(Boolean(startedAt && !endedAt));
-  const allMyTeams = $derived($teamsStore.map((team) => team.name || team.team || "Equipo"));
+  let selectedTeamName = $derived(selectedTeam?.name || selectedTeam?.team || "Selecciona equipo");
+  let teamOptions = $derived(
+    $teamsStore.map((team) => ({
+      label: team.name || team.team || "Equipo sin nombre",
+      value: team.id,
+      description: `${team.members?.length || 0} miembros`,
+      icon: Briefcase,
+    })),
+  );
+  let timerModeOptions = $derived([
+    {
+      label: "Jornada",
+      value: "variable",
+      description: "Tiempo normal",
+      icon: Clock,
+    },
+    {
+      label: "Extra",
+      value: "overtime",
+      description: overtimeEnabled ? "Horas extra" : "Desactivado",
+      icon: TimerReset,
+      disabled: isTodayNonWorkingDay || !overtimeEnabled,
+    },
+  ]);
   let elapsedSeconds = $derived.by(() => {
     if (!startedAt) return 0;
     const end = endedAt || now;
@@ -623,33 +648,161 @@
   <Toast message={messageToast} type={typeToast} show={showToast} />
 
   <header class="timer-header">
-    <TitleHeader title="Jornada variable" icon={Clock} iconPosition="right" description="Registra tu tiempo trabajando."/>
-    <div class="status-pill" class:active={isRunning}>
-      {#if isRunning}
-        <Hourglass size={18} />
-        <span>En curso</span>
-      {:else}
-        <Clock size={18} />
-        <span>Disponible</span>
-      {/if}
-    </div>
+    <TitleHeader title="Timer" description="Jornada variable" icon={Clock} iconPosition="right" />
   </header>
 
-  <div class="timer-layout">
-    <section class="work-panel">
-      <div class="section-heading">
-        <BriefcaseBusiness size={20} />
-        <h2>Datos de la jornada</h2>
+  <main class="timer-content">
+    <section class="timer-hero" class:running={isRunning}>
+      <div class="hero-status">
+        <div class="status-pill" class:active={isRunning}>
+          {#if isRunning}
+            <Hourglass size={18} />
+            <span>En curso</span>
+          {:else}
+            <Clock size={18} />
+            <span>Disponible</span>
+          {/if}
+        </div>
       </div>
 
-      <label for="team">Equipo de trabajo</label>
-      <div class="select-shell">
-        <select id="team" bind:value={activeTeamId} disabled={isRunning || isSaving}>
-          <option value="" disabled>Selecciona un equipo</option>
-          {#each $teamsStore as team (team.id)}
-            <option value={team.id}>{team.name || team.team || "Equipo sin nombre"}</option>
-          {/each}
-        </select>
+      <div class="hero-selectors">
+        <SelectiveButton
+          options={teamOptions}
+          bind:value={activeTeamId}
+          icon={Briefcase}
+          label="Equipo"
+          disabled={isRunning || isSaving || teamOptions.length === 0}
+          ariaLabel="Cambiar equipo"
+        />
+        <SelectiveButton
+          options={timerModeOptions}
+          bind:value={timerMode}
+          label="Tipo"
+          compact={true}
+          disabled={isRunning || isSaving}
+          ariaLabel="Cambiar tipo de jornada"
+        />
+      </div>
+
+      {#if teamOptions.length === 0}
+        <p class="notice">Necesitas un equipo para registrar una jornada.</p>
+      {/if}
+
+      <div class="timer-mark" aria-hidden="true">
+        <span></span>
+      </div>
+
+      <div class="time-block">
+        {#if pomodoroEnabled}
+          <span>{pomodoroPhaseLabel} · bloque {pomodoroCycle}</span>
+          <strong>{formatTime(pomodoroRemainingSeconds)}</strong>
+          <p>{formatTime(trackedWorkSeconds)} de enfoque acumulado</p>
+        {:else}
+          <span>{timerMode === "overtime" ? "Horas extra" : "Jornada"}</span>
+          <strong>{formatTime(elapsedSeconds)}</strong>
+          <p>{formatHours(elapsedSeconds)} h registradas</p>
+        {/if}
+      </div>
+
+      {#if pomodoroEnabled}
+        <div class="pomodoro-progress" aria-hidden="true">
+          <span style={`width: ${pomodoroProgress}%`}></span>
+        </div>
+      {/if}
+
+      <div class="timer-meta">
+        <div>
+          <Flag size={16} />
+          <span>Inicio</span>
+          <strong>{formatHour(startedAt)}</strong>
+        </div>
+        <div>
+          <Square size={16} />
+          <span>Final</span>
+          <strong>{formatHour(endedAt)}</strong>
+        </div>
+        <div>
+          <Clock size={16} />
+          <span>Máximo</span>
+          <strong>{overtimeEnabled ? `${overtimeLimitHours} h` : "Sin extra"}</strong>
+        </div>
+      </div>
+
+      {#if pomodoroEnabled}
+        <div class="pomodoro-stats">
+          <div>
+            <Coffee size={16} />
+            <span>Bloques</span>
+            <strong>{completedPomodoros}</strong>
+          </div>
+          <div>
+            <Clock size={16} />
+            <span>Enfoque</span>
+            <strong>{formatHours(trackedWorkSeconds)} h</strong>
+          </div>
+        </div>
+      {/if}
+
+      {#if isTodayNonWorkingDay}
+        <p class="notice error">{todayNonWorkingMessage}</p>
+      {/if}
+
+      <label class="field quick-task" for="task">
+        <span>Tarea</span>
+        <input
+          id="task"
+          type="text"
+          bind:value={taskTitle}
+          disabled={isRunning || isSaving}
+          placeholder="Instalación, soporte, revisión..."
+        />
+      </label>
+
+      <div class="actions">
+        {#if isRunning || isSaving}
+          <button class="main-action stop" onclick={finishTimer} disabled={!canFinish || isSaving || isCapturingLocation}>
+            {#if isCapturingLocation}
+              <Save size={18} />
+              Finalizando
+            {:else if isSaving}
+              <Save size={18} />
+              Guardando
+            {:else}
+              <Check size={18} />
+              Registrar salida
+            {/if}
+          </button>
+          <button class="icon-action" onclick={cancelTimer} disabled={isSaving || isCapturingLocation} aria-label="Cancelar registro">
+            <RotateCcw size={18} />
+          </button>
+        {:else}
+          <button class="main-action" onclick={startTimer} disabled={!canStart || isSaving || isCapturingLocation}>
+            {#if isCapturingLocation}
+              <Save size={18} />
+              Iniciando
+            {:else}
+              <Play size={18} />
+              Registrar entrada
+            {/if}
+          </button>
+        {/if}
+        <button
+          class="icon-action"
+          type="button"
+          onclick={() => (showTimerDetails = true)}
+          aria-label="Opciones de jornada"
+        >
+          <SlidersHorizontal size={18} />
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <SliceContainer bind:show={showTimerDetails}>
+    <section class="timer-details-panel">
+      <div class="panel-heading">
+        <span>Detalles de jornada</span>
+        <strong>{selectedTeamName}</strong>
       </div>
 
       {#if $teamTemplatesStore.length > 0}
@@ -686,36 +839,16 @@
         </div>
       {/if}
 
-      <label for="task">Tarea</label>
-      <input
-        id="task"
-        type="text"
-        bind:value={taskTitle}
-        disabled={isRunning || isSaving}
-        placeholder="Ej. Instalación, soporte, revisión..."
-      />
-
-      <div class="mode-tabs" aria-label="Tipo de registro">
-        <button
-          type="button"
-          class:active={timerMode === "variable"}
-          disabled={isRunning || isSaving}
-          onclick={() => (timerMode = "variable")}
-        >
-          <Clock size={16} />
-          Jornada
-        </button>
-        <button
-          type="button"
-          class:active={timerMode === "overtime"}
-          disabled={isRunning || isSaving || isTodayNonWorkingDay || !overtimeEnabled}
-          onclick={() => {
-            if (!isTodayNonWorkingDay && overtimeEnabled) timerMode = "overtime";
-          }}
-        >
-          <TimerReset size={16} />
-          Extra
-        </button>
+      <div class="field-stack">
+        <label class="field" for="timer-note">
+          <span>Nota opcional</span>
+          <textarea
+            id="timer-note"
+            bind:value={note}
+            disabled={isSaving}
+            placeholder="Detalle breve para el equipo"
+          ></textarea>
+        </label>
       </div>
 
       <label class="pomodoro-toggle">
@@ -734,14 +867,6 @@
         </span>
       </label>
 
-      <label for="note">Nota opcional</label>
-      <textarea
-        id="note"
-        bind:value={note}
-        disabled={isSaving}
-        placeholder="Detalle breve para el equipo"
-      ></textarea>
-
       <div class="template-save-box">
         <label for="workdayTemplateName">Guardar como plantilla</label>
         <div class="template-save-row">
@@ -756,6 +881,7 @@
             type="button"
             onclick={handleSaveWorkdayTemplate}
             disabled={isSavingTemplate || isRunning || isSaving || !taskTitle.trim()}
+            aria-label="Guardar plantilla"
           >
             {#if isSavingTemplate}
               <Save size={16} />
@@ -766,97 +892,7 @@
         </div>
       </div>
     </section>
-
-    <section class="clock-panel">
-      <div class="timer-face" class:running={isRunning}>
-        <div class="face-content">
-          {#if pomodoroEnabled}
-            <span>Pomodoro · {pomodoroPhaseLabel} {pomodoroCycle}</span>
-            <strong>{formatTime(pomodoroRemainingSeconds)}</strong>
-            <small>{formatTime(trackedWorkSeconds)} de enfoque</small>
-            <div class="pomodoro-progress" aria-hidden="true">
-              <span style={`width: ${pomodoroProgress}%`}></span>
-            </div>
-          {:else}
-            <span>Tipo de jornada: {timerMode === "overtime" ? "Horas extra" : "Variable"}</span>
-            <strong>{formatTime(elapsedSeconds)}</strong>
-            <small>{formatHours(elapsedSeconds)} h</small>
-          {/if}
-          {#if overtimeEnabled}
-            <small>Máximo: {overtimeLimitHours} h</small>
-          {:else}
-            <small>Horas extra desactivadas</small>
-          {/if}
-        </div>
-      </div>
-
-      <div class="timeline">
-        <div>
-          <Flag size={16} />
-          <span>Inicio</span>
-          <strong>{formatHour(startedAt)}</strong>
-        </div>
-        <div>
-          <Square size={16} />
-          <span>Final</span>
-          <strong>{formatHour(endedAt)}</strong>
-        </div>
-      </div>
-
-      {#if pomodoroEnabled}
-        <div class="pomodoro-stats">
-          <div>
-            <Clock size={16} />
-            <span>Enfoque</span>
-            <strong>{formatHours(trackedWorkSeconds)} h</strong>
-          </div>
-          <div>
-            <Coffee size={16} />
-            <span>Bloques</span>
-            <strong>{completedPomodoros}</strong>
-          </div>
-        </div>
-      {/if}
-
-      {#if isTodayNonWorkingDay}
-        <p class="form-note error">{todayNonWorkingMessage}</p>
-      {/if}
-
-      <div class="actions">
-        {#if isRunning || isSaving}
-          <button class="finish-btn" onclick={finishTimer} disabled={!canFinish || isSaving || isCapturingLocation}>
-            {#if isCapturingLocation}
-              <Save size={18} />
-              Finalizando
-            {:else if isSaving}
-              <Save size={18} />
-              Guardando
-            {:else}
-              <Check size={18} />
-              Registrar salida
-            {/if}
-          </button>
-          <button class="ghost-btn icon-only" onclick={cancelTimer} disabled={isSaving || isCapturingLocation} aria-label="Cancelar registro">
-            <RotateCcw size={18} />
-          </button>
-        {:else}
-          <button class="start-btn" onclick={startTimer} disabled={!canStart || isSaving || isCapturingLocation}>
-            {#if isCapturingLocation}
-              <Save size={18} />
-              Iniciando
-            {:else}
-              <Play size={18} />
-              Registrar entrada
-            {/if}
-          </button>
-        {/if}
-      </div>
-    </section>
-  </div>
-  <SelectiveButton
-    options={allMyTeams}
-    icon={Briefcase}
-  />
+  </SliceContainer>
 
   {#if lastEntry}
     <section class="last-entry">
@@ -875,6 +911,15 @@
 
 <style>
   .timer-page {
+    --timer-bg: var(--bg-page);
+    --timer-panel: var(--bg-card);
+    --timer-panel-solid: var(--bg-card);
+    --timer-control: var(--bg-input);
+    --timer-border: var(--border-color);
+    --timer-shadow: var(--shadow-card);
+    --timer-accent: var(--accent-color);
+    --timer-accent-ink: var(--accent-ink);
+    --timer-ring: var(--accent-color);
     height: 100%;
     box-sizing: border-box;
     overflow-y: auto;
@@ -885,45 +930,54 @@
     display: flex;
     flex-direction: column;
     gap: 16px;
-    background: var(--bg-page);
+    background: var(--timer-bg);
     color: var(--text-primary);
   }
 
+  :global(:root.dark) .timer-page {
+    --timer-bg: var(--bg-page);
+    --timer-panel: var(--bg-card);
+    --timer-panel-solid: var(--bg-card);
+    --timer-control: var(--bg-input);
+    --timer-border: var(--border-color);
+    --timer-shadow: var(--shadow-card);
+    --timer-accent: var(--accent-color);
+    --timer-accent-ink: var(--accent-ink);
+    --timer-ring: var(--accent-color);
+    background: var(--timer-bg);
+  }
+
   .timer-header,
-  .timer-layout,
+  .timer-content,
   .last-entry {
-    width: min(100%, 980px);
+    width: min(100%, 720px);
     margin: 0 auto;
   }
 
   .timer-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding-bottom: 4px;
-    flex-shrink: 0;
+    margin-bottom: 8px;
   }
 
-  h2,
-  p {
-    margin: 0;
+  .hero-status {
+    display: flex;
+    justify-content: flex-end;
   }
 
   .status-pill {
-    min-height: 38px;
+    min-height: 32px;
     display: inline-flex;
     align-items: center;
-    gap: 7px;
-    padding: 0 12px;
-    border: none;
+    gap: 6px;
+    padding: 0 10px;
+    border: 1px solid var(--timer-border);
     border-radius: 999px;
-    background: var(--bg-card);
+    background: var(--timer-control);
     color: var(--text-secondary);
-    box-shadow: var(--shadow-soft);
-    font-size: 13px;
+    font-size: 11px;
     font-weight: 700;
     white-space: nowrap;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
   }
 
   .status-pill.active {
@@ -931,109 +985,387 @@
     background: var(--bg-success-subtle);
   }
 
-  .timer-layout {
-    display: grid;
-    grid-template-columns: minmax(280px, 0.95fr) minmax(300px, 1.05fr);
-    gap: 14px;
-    align-items: start;
+  .timer-content {
+    display: block;
   }
 
-  .work-panel,
-  .clock-panel,
+  .timer-hero,
   .last-entry {
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    background: var(--bg-card);
-    box-shadow: var(--shadow-card);
+    border: 1px solid var(--timer-border);
+    border-radius: 28px;
+    background: var(--timer-panel);
+    box-shadow: var(--timer-shadow);
+    backdrop-filter: blur(18px);
   }
 
-  .work-panel {
-    padding: 16px;
+  .timer-hero {
+    min-height: 640px;
+    padding: 24px;
     display: flex;
     flex-direction: column;
+    gap: 22px;
+    overflow: hidden;
+    position: relative;
+    border-radius: var(--radius-lg);
+  }
+
+  .timer-hero::before {
+    display: none;
+  }
+
+  .timer-hero > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .hero-selectors {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 12px;
   }
 
-  .section-heading {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 2px;
-    color: var(--text-primary);
+  .timer-hero :global(.selective-button) {
+    background: var(--timer-control);
+    border-color: var(--timer-border);
+    box-shadow: none;
+    border-radius: var(--radius-md);
   }
 
-  .section-heading h2 {
-    font-size: 17px;
+  .timer-hero :global(.selective-button:focus),
+  .timer-hero :global(.selective-button:focus-visible),
+  .timer-hero :global(.selective-button:active) {
+    border-color: var(--accent-color);
+    box-shadow: none;
+    outline: none;
+  }
+
+  .timer-mark {
+    width: min(140px, 35vw);
+    aspect-ratio: 1;
+    margin: 32px auto 0;
+    display: grid;
+    place-items: center;
+  }
+
+  .timer-mark span {
+    width: 100%;
+    height: 100%;
+    display: block;
+    border-radius: 50%;
+    border: 2px solid var(--timer-accent);
+    background: transparent;
+    position: relative;
+    transition: border-color 0.25s ease, box-shadow 0.25s ease;
+  }
+
+  .timer-mark span::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 12%;
+    width: 2px;
+    height: 38%;
+    border-radius: 999px;
+    background: var(--timer-accent);
+    opacity: 0.36;
+    transform: translateX(-50%) rotate(0deg);
+    transform-origin: 50% 100%;
+  }
+
+  .timer-mark span::after {
+    content: "";
+    position: absolute;
+    inset: -8px;
+    border-radius: 50%;
+    border: 1px solid var(--timer-accent);
+    opacity: 0.2;
+  }
+
+  .timer-hero.running .timer-mark span {
+    border-color: var(--success-color);
+    box-shadow: inset 0 0 0 8px rgba(5, 150, 105, 0.08);
+  }
+
+  .timer-hero.running .timer-mark span::before {
+    background: var(--success-color);
+    opacity: 1;
+    animation: timer-sweep 6s linear infinite;
+  }
+
+  .timer-hero.running .timer-mark span::after {
+    border-color: var(--success-color);
+    animation: timer-ring-pulse 2.4s ease-in-out infinite;
+  }
+
+  @keyframes timer-sweep {
+    to {
+      transform: translateX(-50%) rotate(360deg);
+    }
+  }
+
+  @keyframes timer-ring-pulse {
+    0%,
+    100% {
+      opacity: 0.18;
+      transform: scale(1);
+    }
+
+    50% {
+      opacity: 0.34;
+      transform: scale(1.06);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .timer-hero.running .timer-mark span::before,
+    .timer-hero.running .timer-mark span::after {
+      animation: none;
+    }
+  }
+
+  .time-block {
+    display: grid;
+    justify-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    text-align: center;
+  }
+
+  .time-block span {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 850;
+    text-transform: uppercase;
+  }
+
+  .time-block strong {
+    color: var(--text-primary);
+    font-size: clamp(3.5rem, 10vw, 6rem);
+    line-height: 1;
     font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
   }
 
-  label {
+  .time-block p {
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .pomodoro-progress {
+    width: min(100%, 300px);
+    height: 6px;
+    margin: 0 auto;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--timer-control);
+  }
+
+  .pomodoro-progress span {
+    height: 100%;
+    display: block;
+    border-radius: inherit;
+    background: var(--timer-accent);
+    transition: width 0.25s linear;
+  }
+
+  .timer-meta,
+  .pomodoro-stats {
+    display: grid;
+    gap: 12px;
+  }
+
+  .timer-meta {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-top: auto;
+  }
+
+  .pomodoro-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .timer-meta div,
+  .pomodoro-stats div {
+    min-height: 64px;
+    padding: 12px;
+    display: grid;
+    align-content: center;
+    gap: 2px;
+    border: 1px solid var(--timer-border);
+    border-radius: var(--radius-md);
+    background: var(--timer-control);
+  }
+
+  .timer-meta span,
+  .pomodoro-stats span,
+  .last-entry p,
+  .entry-meta span {
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+
+  .timer-meta strong,
+  .pomodoro-stats strong,
+  .entry-meta strong {
     color: var(--text-primary);
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .actions {
+    display: flex;
+    gap: 12px;
+  }
+
+  .main-action,
+  .icon-action,
+  .template-save-row button,
+  .template-delete {
+    min-height: 52px;
+    border: none;
+    border-radius: var(--radius-md);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 700;
+    transition: all 0.3s ease;
+  }
+
+  .main-action {
+    flex: 1;
+    min-width: 0;
+    color: var(--accent-ink);
+    background: var(--accent-color);
+    box-shadow: none;
+  }
+
+  .main-action.stop {
+    color: #ffffff;
+    background: var(--success-color);
+    box-shadow: none;
+  }
+
+  .icon-action {
+    width: 52px;
+    background: var(--timer-control);
+    color: var(--text-primary);
+    border: 1px solid var(--timer-border);
+  }
+
+  .timer-details-panel {
+    width: min(100%, 640px);
+    margin: 0 auto;
+    padding: 2px 8px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .panel-heading {
+    display: grid;
+    gap: 4px;
+  }
+
+  .panel-heading span,
+  .template-heading {
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+  .template-heading {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .panel-heading strong {
+    color: var(--text-primary);
+    font-size: 20px;
+    font-weight: 800;
+    overflow-wrap: anywhere;
+  }
+
+  .field-stack,
+  .field,
+  .template-strip,
+  .template-save-box {
+    display: grid;
+    gap: 12px;
+  }
+
+  .field span,
+  .template-save-box > label {
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
   }
 
   input,
-  select,
   textarea {
     width: 100%;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    background: var(--bg-input);
+    border: 1px solid var(--timer-border);
+    border-radius: var(--radius-md);
+    background: var(--timer-control);
     color: var(--text-primary);
     font: inherit;
     font-size: 15px;
     font-weight: 500;
     outline: none;
     box-sizing: border-box;
-    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+    transition: all 0.3s ease;
   }
 
-  input,
-  select {
-    min-height: 46px;
-    padding: 0 12px;
+  input {
+    min-height: 52px;
+    padding: 0 16px;
   }
 
   textarea {
-    min-height: 88px;
-    padding: 12px;
+    min-height: 100px;
+    padding: 16px;
     resize: vertical;
-    line-height: 1.45;
+    line-height: 1.5;
   }
 
   input:focus,
-  select:focus,
-  textarea:focus {
+  input:focus-visible,
+  input:active,
+  textarea:focus,
+  textarea:focus-visible,
+  textarea:active {
     border-color: var(--accent-color);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 22%, transparent);
+    background: var(--timer-control);
+    box-shadow: none;
+    outline: none;
   }
 
-  .select-shell {
-    position: relative;
-  }
-
-  .template-strip {
+  .template-chip {
+    flex: 0 0 auto;
     display: grid;
-    gap: 10px;
-  }
-
-  .template-heading {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: stretch;
+    border: 1px solid var(--timer-border);
+    border-radius: var(--radius-md);
+    background: var(--timer-control);
+    overflow: hidden;
   }
 
   .template-list {
     display: flex;
-    gap: 8px;
+    gap: 10px;
     overflow-x: auto;
-    padding-bottom: 2px;
+    padding-bottom: 4px;
     scrollbar-width: none;
   }
 
@@ -1041,104 +1373,70 @@
     display: none;
   }
 
-  .template-chip {
-    flex: 0 0 min(220px, 72vw);
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: stretch;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    background: var(--bg-input);
-    overflow: hidden;
-  }
-
   .template-chip > button:first-child {
-    min-width: 0;
+    min-width: 120px;
     border: 0;
     background: transparent;
     color: var(--text-primary);
     text-align: left;
-    padding: 10px 12px;
+    padding: 10px 14px;
     display: grid;
-    gap: 3px;
+    gap: 2px;
     cursor: pointer;
-  }
-
-  .template-chip strong,
-  .template-chip small {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .template-chip strong {
     font-size: 13px;
-    font-weight: 800;
+    font-weight: 700;
   }
 
   .template-chip small {
     color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 700;
+    font-size: 11px;
+    font-weight: 500;
   }
 
   .template-delete {
-    width: 38px;
-    border: 0;
-    border-left: 1px solid var(--border-color);
-    background: var(--bg-card);
-    color: var(--danger-color);
-    cursor: pointer;
+    width: 40px;
+    min-height: 100%;
+    border-radius: 0;
+    border-left: 1px solid var(--timer-border);
+    background: transparent;
+    color: var(--text-muted);
   }
 
-  .template-save-box {
-    display: grid;
-    gap: 8px;
+  .template-save-row button {
+    min-height: 52px;
+    border-radius: var(--radius-md);
+    background: var(--accent-color);
+    color: var(--accent-ink);
   }
 
   .template-save-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 46px;
-    gap: 8px;
+    grid-template-columns: 1fr 52px;
+    gap: 10px;
   }
 
   .template-save-row input {
     min-width: 0;
   }
 
-  .template-save-row button {
-    min-height: 44px;
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: var(--bg-accent-subtle);
-    color: var(--accent-ink);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-  }
-
-  .form-note {
-    margin: 0;
-    border-radius: var(--radius-sm);
-    padding: 10px 12px;
-    background: var(--bg-input);
+  .notice {
+    border-radius: var(--radius-md);
+    padding: 12px 16px;
+    background: var(--timer-control);
     color: var(--text-secondary);
     font-size: 13px;
-    font-weight: 700;
-    line-height: 1.35;
+    font-weight: 500;
+    line-height: 1.4;
+    border: 1px solid var(--timer-border);
   }
 
-  .form-note.error {
+  .notice.error {
     background: var(--bg-danger-subtle);
     color: var(--danger-color);
-  }
-
-  .mode-tabs {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-    margin: 0 0 2px;
+    border-color: transparent;
   }
 
   .pomodoro-toggle {
@@ -1146,12 +1444,18 @@
     display: grid;
     grid-template-columns: auto 1fr;
     align-items: center;
-    gap: 12px;
-    padding: 10px 12px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    background: var(--bg-input);
+    gap: 14px;
+    padding: 0 16px;
+    border: 1px solid var(--timer-border);
+    border-radius: var(--radius-md);
+    background: var(--timer-control);
     cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .pomodoro-toggle:focus-within,
+  .pomodoro-toggle:active {
+    border-color: var(--accent-color);
   }
 
   .pomodoro-toggle input {
@@ -1161,326 +1465,130 @@
   }
 
   .switch-track {
-    width: 46px;
-    height: 26px;
-    padding: 3px;
+    width: 40px;
+    height: 22px;
+    padding: 2px;
     border-radius: 999px;
     background: var(--border-color);
     box-sizing: border-box;
-    transition: background-color 0.18s ease;
+    transition: all 0.2s ease;
   }
 
   .switch-track span {
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
     display: block;
     border-radius: 50%;
-    background: var(--bg-card);
-    box-shadow: var(--shadow-soft);
-    transition: transform 0.18s ease;
+    background: #ffffff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .pomodoro-toggle input:checked + .switch-track {
-    background: var(--accent-color);
+    background: var(--success-color);
   }
 
   .pomodoro-toggle input:checked + .switch-track span {
-    transform: translateX(20px);
-  }
-
-  .pomodoro-toggle input:focus-visible + .switch-track {
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 22%, transparent);
+    transform: translateX(18px);
   }
 
   .toggle-copy {
     display: grid;
-    gap: 3px;
+    gap: 1px;
     min-width: 0;
   }
 
   .toggle-copy strong {
     color: var(--text-primary);
     font-size: 14px;
-    font-weight: 800;
+    font-weight: 700;
   }
 
   .toggle-copy small {
     color: var(--text-secondary);
     font-size: 12px;
-    font-weight: 700;
-  }
-
-  .mode-tabs button,
-  .start-btn,
-  .finish-btn,
-  .ghost-btn {
-    min-height: 44px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 9px;
-    border-radius: var(--radius-sm);
-    border: none;
-    cursor: pointer;
-    font: inherit;
-    font-weight: 800;
-    transition: transform 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
-  }
-
-  .mode-tabs button {
-    background: var(--bg-input);
-    color: var(--text-secondary);
-    border: 1px solid var(--border-color);
-    box-shadow: none;
-  }
-
-  .mode-tabs button.active {
-    border-color: var(--accent-color);
-    background: var(--bg-accent-subtle);
-    color: var(--accent-ink);
-  }
-
-  .clock-panel {
-    padding: 16px;
-    display: grid;
-    grid-template-rows: 1fr auto auto;
-    gap: 12px;
-  }
-
-  .timer-face {
-    min-height: 246px;
-    display: grid;
-    place-items: center;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--border-color);
-    background: var(--bg-input);
-    position: relative;
-    overflow: hidden;
-  }
-
-
-  .timer-face.running {
-    background: var(--bg-card);
-  }
-
-  .face-content {
-    width: min(82%, 360px);
-    min-height: 170px;
-    display: grid;
-    place-items: center;
-    align-content: center;
-    gap: 8px;
-    z-index: 1;
-  }
-
-  .face-content span {
-    color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .face-content strong {
-    color: var(--text-primary);
-    font-size: clamp(2.45rem, 6vw, 4.3rem);
-    font-weight: 800;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .face-content small {
-    color: var(--text-muted);
-    font-size: 14px;
-    font-weight: 700;
-  }
-
-  .pomodoro-progress {
-    width: min(100%, 250px);
-    height: 8px;
-    overflow: hidden;
-    border-radius: 999px;
-    background: var(--border-color);
-  }
-
-  .pomodoro-progress span {
-    height: 100%;
-    display: block;
-    border-radius: inherit;
-    background: var(--accent-color);
-    transition: width 0.25s linear;
-  }
-
-  .timeline {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-  }
-
-  .timeline div,
-  .last-entry {
-    padding: 12px;
-  }
-
-  .timeline div {
-    min-height: 70px;
-    display: grid;
-    gap: 5px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    background: var(--bg-input);
-  }
-
-  .pomodoro-stats {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-  }
-
-  .pomodoro-stats div {
-    min-height: 64px;
-    display: grid;
-    gap: 5px;
-    padding: 12px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    background: var(--bg-input);
-  }
-
-  .timeline span,
-  .pomodoro-stats span,
-  .last-entry p,
-  .entry-meta span {
-    color: var(--text-secondary);
-    font-size: 13px;
-    font-weight: 600;
-  }
-
-  .timeline strong,
-  .pomodoro-stats strong,
-  .entry-meta strong {
-    color: var(--text-primary);
-    font-size: 17px;
-    font-weight: 800;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .actions {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 10px;
-  }
-
-  .start-btn,
-  .finish-btn {
-    border: none;
-    color: #fff;
-    background: var(--accent-color);
-    box-shadow: var(--shadow-button);
-  }
-
-  .finish-btn {
-    color: white;
-    background: var(--success-color);
-  }
-
-  .ghost-btn {
-    width: 44px;
-    background: var(--bg-input);
-    color: var(--text-primary);
-  }
-
-  button:hover:not(:disabled) {
-    transform: translateY(-1px);
-  }
-
-  button:disabled,
-  input:disabled,
-  select:disabled,
-  textarea:disabled {
-    opacity: 0.58;
-    cursor: not-allowed;
-  }
-
-  .pomodoro-toggle:has(input:disabled) {
-    opacity: 0.58;
-    cursor: not-allowed;
+    font-weight: 500;
   }
 
   .last-entry {
+    padding: 16px 20px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 14px;
+    gap: 16px;
+    border-radius: var(--radius-lg);
   }
 
   .last-entry h2 {
-    margin-top: 4px;
+    margin-top: 2px;
     color: var(--text-primary);
-    font-size: 1.08rem;
+    font-size: 1rem;
+    font-weight: 700;
   }
 
   .entry-meta {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 14px;
     flex-wrap: wrap;
     justify-content: flex-end;
   }
 
+  button:hover:not(:disabled) {
+    opacity: 0.9;
+  }
+
+  button:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+
+  button:disabled,
+  input:disabled,
+  textarea:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .pomodoro-toggle:has(input:disabled) {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   @media (max-width: 860px) {
-    .timer-layout {
-      grid-template-columns: 1fr;
-    }
-
-    .clock-panel {
-      order: -1;
-    }
-
-    .timer-face {
-      min-height: 230px;
+    .timer-hero {
+      min-height: auto;
     }
   }
 
   @media (max-width: 560px) {
     .timer-page {
-      padding: 20px 16px var(--bottom-nav-clearance);
+      padding: 18px 14px var(--bottom-nav-clearance);
       padding-top: var(--page-top-safe);
       gap: 14px;
     }
 
-    .timer-header,
     .last-entry {
       align-items: flex-start;
       flex-direction: column;
     }
 
-    .status-pill {
-      width: 100%;
-      justify-content: center;
+    .timer-hero {
+      border-radius: 24px;
+      padding: 14px;
     }
 
-    .work-panel,
-    .clock-panel {
-      padding: 16px;
+    .timer-details-panel {
+      padding: 0 6px 20px;
     }
 
-    .timer-face {
-      min-height: 214px;
+
+    .timer-mark {
+      width: 118px;
+      margin-top: 22px;
     }
 
-    .face-content strong {
-      font-size: clamp(2.25rem, 12vw, 3.2rem);
-    }
-
-    .timeline,
-    .pomodoro-stats,
-    .mode-tabs {
-      grid-template-columns: 1fr;
-    }
-
-    .entry-meta {
-      justify-content: flex-start;
+    .time-block strong {
+      font-size: clamp(2.7rem, 15vw, 4.25rem);
     }
   }
 </style>
