@@ -39,6 +39,7 @@
   let selectedSize = $state("S");
   let generatedCode = $state("");
   let generatedCodeSize = $state("");
+  let generatedCodeRevenue = $state(0);
   let creatingCode = $state(false);
   let showCodes = $state(true);
   let revenueView = $state("list");
@@ -172,12 +173,14 @@
     creatingCode = true;
     generatedCode = "";
     generatedCodeSize = "";
+    generatedCodeRevenue = 0;
 
     try {
       const code = await createTeamAccessCode({ expiresAt: customExpiresAt, size: selectedSize });
       expiresAt = customExpiresAt;
       generatedCode = code.code;
       generatedCodeSize = code.size || selectedSize;
+      generatedCodeRevenue = getCodeRevenue(code);
       toastType = "success";
       toastMessage = "Código creado correctamente";
       showToast = true;
@@ -301,12 +304,6 @@
     return formatDate(team.billingDate);
   }
 
-  function formatTeamSizeLimit(value) {
-    const size = value?.teamSize || value?.size || "S";
-    const hasStoredLimit = Boolean(value?.teamSize || value?.size || value?.maxMembers);
-    return `${size} - ${getTeamMemberLimitLabel(hasStoredLimit ? value : size)}`;
-  }
-
   function formatTeamMemberUsage(team) {
     const currentMembers = Array.isArray(team?.members) ? team.members.length : 0;
     return `${currentMembers} miembros - ${getTeamMemberLimitLabel(team)}`;
@@ -322,6 +319,14 @@
 
   function formatTeamRevenue(team) {
     return formatCurrency(getTeamMonthlyPrice(team));
+  }
+
+  function getCodeRevenue(code) {
+    return getTeamMonthlyPrice(code);
+  }
+
+  function formatCodeRevenue(code) {
+    return formatCurrency(getCodeRevenue(code));
   }
 
   function getRevenueBarWidth(value) {
@@ -341,7 +346,7 @@
   <Toast message={toastMessage} type={toastType} bind:show={showToast} />
   <datalist id="available-team-access-codes">
     {#each availableAccessCodes as code (code.id)}
-      <option value={code.code} label={`${code.size || "S"} - ${formatDate(code.expiresAt)}`}></option>
+      <option value={code.code} label={`${code.size || "S"} - ${formatCodeRevenue(code)} - ${formatDate(code.expiresAt)}`}></option>
     {/each}
   </datalist>
 
@@ -397,7 +402,7 @@
       </div>
 
       <div class="create-code-form">
-        <span class="field-label">Tamaño del equipo</span>
+        <span class="field-label">Plan del equipo</span>
         <div class="size-options" aria-label="Tamaño del equipo">
           {#each TEAM_SIZE_OPTIONS as option}
             <button
@@ -446,7 +451,7 @@
 
         {#if generatedCode}
           <div class="generated-code">
-            <span>Nuevo código {generatedCodeSize}</span>
+            <span>Nuevo código {generatedCodeSize} · {formatCurrency(generatedCodeRevenue)}</span>
             <strong>{generatedCode}</strong>
           </div>
         {/if}
@@ -545,22 +550,35 @@
             {#each $teamAccessCodesStore as code (code.id)}
               {@const status = getAccessCodeStatus(code)}
               <article class="code-card {status}">
-                <div class="code-main">
-                  <span class="code-value">{code.code}</span>
+                <div class="code-card-top">
+                  <div class="code-identity">
+                    <span>Código</span>
+                    <strong class="code-value">{code.code}</strong>
+                  </div>
                   <span class="status-pill">{getAccessCodeStatusLabel(code)}</span>
                 </div>
-                <dl>
-                  <div>
-                    <dt>Caduca</dt>
-                    <dd>{formatDate(code.expiresAt)}</dd>
+
+                <div class="code-metrics">
+                  <div class="code-metric plan">
+                    <span>Plan</span>
+                    <strong>{code.size || "S"}</strong>
+                    <small>{getTeamMemberLimitLabel(code)}</small>
                   </div>
+                  <div class="code-metric">
+                    <span>Ingreso</span>
+                    <strong>{formatCodeRevenue(code)}</strong>
+                    <small>al mes</small>
+                  </div>
+                  <div class="code-metric">
+                    <span>Caduca</span>
+                    <strong>{formatDate(code.expiresAt)}</strong>
+                  </div>
+                </div>
+
+                <dl class="code-details">
                   <div>
-                    <dt>Código único</dt>
+                    <dt>Identificador</dt>
                     <dd>{code.uniqueCode || "-"}</dd>
-                  </div>
-                  <div>
-                    <dt>Tamaño</dt>
-                    <dd>{formatTeamSizeLimit(code)}</dd>
                   </div>
                   {#if code.used}
                     <div>
@@ -733,75 +751,74 @@
   .summary-grid {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 12px;
-    margin-bottom: 24px;
+    gap: 8px;
+    margin-bottom: 20px;
   }
 
   .summary-card {
     --card-accent: var(--accent-strong);
     --card-soft: var(--bg-accent-subtle);
     position: relative;
-    min-height: 112px;
-    padding: 18px 16px 16px;
-    border: 1px solid color-mix(in srgb, var(--card-accent) 18%, var(--border-color));
-    border-radius: var(--radius-md);
-    background:
-      linear-gradient(135deg, color-mix(in srgb, var(--card-soft) 62%, transparent), transparent 54%),
-      linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 92%, var(--card-soft)), var(--bg-card));
+    min-width: 0;
+    min-height: 70px;
+    padding: 12px 12px 11px;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--bg-card);
     box-shadow: var(--shadow-card);
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "label accent"
+      "value value";
+    align-content: space-between;
+    gap: 8px;
     overflow: hidden;
-    isolation: isolate;
   }
 
   .summary-card::before {
     content: "";
-    position: absolute;
-    inset: 0 0 auto;
-    height: 4px;
+    grid-area: accent;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
     background: var(--card-accent);
-  }
-
-  .summary-card::after {
-    content: "";
-    position: absolute;
-    top: 14px;
-    right: 14px;
-    width: 32px;
-    height: 32px;
-    border-top: 2px solid color-mix(in srgb, var(--card-accent) 42%, transparent);
-    border-right: 2px solid color-mix(in srgb, var(--card-accent) 42%, transparent);
-    border-top-right-radius: var(--radius-sm);
-    opacity: 0.8;
-    pointer-events: none;
+    align-self: center;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--card-accent) 12%, transparent);
   }
 
   .summary-card span {
-    width: fit-content;
-    max-width: 100%;
-    min-height: 28px;
-    padding: 0 9px;
-    border: 1px solid color-mix(in srgb, var(--card-accent) 14%, var(--border-color));
-    border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--card-soft) 68%, var(--bg-card));
+    grid-area: label;
+    min-width: 0;
     color: var(--text-secondary);
-    display: inline-flex;
-    align-items: center;
-    font-size: 12px;
-    font-weight: 800;
-    overflow-wrap: anywhere;
+    font-size: 11px;
+    font-weight: 900;
+    line-height: 1.1;
+    text-transform: uppercase;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .summary-card strong {
-    margin-top: 14px;
+    grid-area: value;
+    min-width: 0;
     color: var(--text-primary);
-    font-size: 30px;
+    font-size: 24px;
     font-weight: 900;
     line-height: 1;
     font-variant-numeric: tabular-nums;
-    overflow-wrap: anywhere;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .summary-card.revenue {
+    background: color-mix(in srgb, var(--card-soft) 18%, var(--bg-card));
+  }
+
+  .summary-card.revenue strong {
+    font-size: 21px;
   }
 
   .summary-card.available {
@@ -817,11 +834,6 @@
   .summary-card.expired {
     --card-accent: var(--warning-color);
     --card-soft: var(--bg-warning-subtle);
-  }
-
-  .summary-card.revenue {
-    --card-accent: var(--accent-strong);
-    --card-soft: var(--bg-accent-subtle);
   }
 
   .admin-section {
@@ -892,7 +904,7 @@
 
   .revenue-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 10px;
   }
 
@@ -1006,7 +1018,7 @@
 
   .size-options {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 8px;
     margin-bottom: 16px;
   }
@@ -1163,6 +1175,14 @@
     gap: 10px;
   }
 
+  .code-list {
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
+
+  .teams-table {
+    grid-template-columns: 1fr;
+  }
+
   .team-search {
     min-height: 46px;
     margin-bottom: 12px;
@@ -1194,34 +1214,79 @@
   }
 
   .code-card {
-    padding: 16px;
+    --status-accent: var(--text-muted);
+    --status-soft: var(--bg-input);
+    min-width: 0;
+    padding: 12px;
+    border-left: 4px solid var(--status-accent);
+    background:
+      linear-gradient(135deg, color-mix(in srgb, var(--status-soft) 62%, transparent), transparent 52%),
+      var(--bg-card);
+    display: grid;
+    gap: 10px;
+    overflow: hidden;
   }
 
-  .code-main {
+  .code-card.available {
+    --status-accent: var(--success-color);
+    --status-soft: var(--bg-success-subtle);
+  }
+
+  .code-card.used {
+    --status-accent: var(--info-color);
+    --status-soft: var(--bg-info-subtle);
+  }
+
+  .code-card.expired {
+    --status-accent: var(--warning-color);
+    --status-soft: var(--bg-warning-subtle);
+  }
+
+  .code-card-top {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 14px;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .code-identity {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+  }
+
+  .code-identity > span,
+  .code-metric span {
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
   }
 
   .code-value {
     color: var(--text-primary);
-    font-size: 24px;
+    font-size: 22px;
     font-weight: 900;
     letter-spacing: 0;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
   }
 
   .status-pill {
-    min-height: 28px;
-    padding: 0 10px;
+    min-height: 26px;
+    padding: 0 9px;
     border-radius: 999px;
     background: var(--bg-input);
     color: var(--text-secondary);
     display: inline-flex;
     align-items: center;
-    font-size: 12px;
+    justify-content: center;
+    font-size: 11px;
     font-weight: 800;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
 
   .code-card.available .status-pill {
@@ -1239,26 +1304,81 @@
     color: var(--warning-color);
   }
 
-  dl {
+  .code-metrics {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    grid-template-columns: 0.8fr 1fr 1.1fr;
+    gap: 7px;
+  }
+
+  .code-metric {
+    min-width: 0;
+    min-height: 60px;
+    padding: 9px;
+    border: 1px solid color-mix(in srgb, var(--status-accent) 16%, var(--border-color));
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--bg-card) 80%, var(--status-soft));
+    display: grid;
+    align-content: start;
+    gap: 2px;
+  }
+
+  .code-metric.plan {
+    background: var(--status-soft);
+  }
+
+  .code-metric strong {
+    min-width: 0;
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 900;
+    line-height: 1.15;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .code-metric.plan strong {
+    font-size: 22px;
+  }
+
+  .code-metric small {
+    min-width: 0;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .code-details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 12px;
     margin: 0;
   }
 
-  dt {
+  .code-details div {
+    min-width: 0;
+    flex: 1 1 calc(50% - 12px);
+  }
+
+  .code-details dt {
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 800;
     text-transform: uppercase;
   }
 
-  dd {
-    margin: 3px 0 0;
+  .code-details dd {
+    margin: 2px 0 0;
     color: var(--text-primary);
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
-    overflow-wrap: anywhere;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .team-row {
@@ -1405,6 +1525,10 @@
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
+    .summary-card.revenue {
+      grid-column: 1 / -1;
+    }
+
     .section-heading {
       align-items: stretch;
       flex-direction: column;
@@ -1436,6 +1560,10 @@
       grid-template-columns: 1fr;
     }
 
+    .code-list {
+      grid-template-columns: 1fr;
+    }
+
     .team-actions {
       grid-template-columns: 1fr;
     }
@@ -1447,11 +1575,66 @@
 
   @media (max-width: 460px) {
     .summary-grid {
-      grid-template-columns: 1fr;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    dl {
+    .code-card {
+      padding: 10px;
+      border-radius: 12px;
+      gap: 8px;
+    }
+
+    .code-value {
+      font-size: 20px;
+    }
+
+    .status-pill {
+      min-height: 24px;
+      padding: 0 8px;
+      font-size: 10px;
+    }
+
+    .code-metrics {
+      gap: 6px;
+    }
+
+    .code-metric {
+      min-height: 54px;
+      padding: 8px;
+      border-radius: 9px;
+    }
+
+    .code-metric strong {
+      font-size: 13px;
+    }
+
+    .code-metric.plan strong {
+      font-size: 20px;
+    }
+
+    .code-metric span,
+    .code-metric small,
+    .code-details dt {
+      font-size: 10px;
+    }
+
+    .code-details {
       grid-template-columns: 1fr;
+      display: grid;
+      gap: 5px;
+    }
+
+    .code-details div {
+      display: grid;
+      grid-template-columns: 82px minmax(0, 1fr);
+      gap: 8px;
+      align-items: center;
+      flex-basis: auto;
+    }
+
+    .code-details dd {
+      margin: 0;
+      font-size: 12px;
     }
   }
 </style>

@@ -34,7 +34,7 @@
   --status-progress-bg: var(--bg-info-subtle);
   --status-completed-color: var(--success-color);
   --status-completed-bg: var(--bg-success-subtle);
-  --nav-bg: #ffffff;
+  --nav-bg: rgba(255, 255, 255, 0.9);
   --shadow-button: 0 4px 14px rgba(0, 0, 0, 0.2);
   --shadow-soft: 0 8px 30px rgba(0, 0, 0, 0.04);
   --shadow-card: 0 2px 10px rgba(0, 0, 0, 0.03);
@@ -76,7 +76,7 @@
   --status-progress-bg: var(--bg-info-subtle);
   --status-completed-color: var(--success-color);
   --status-completed-bg: var(--bg-success-subtle);
-  --nav-bg: #000000;
+  --nav-bg: rgba(0, 0, 0, 0.9);
   --shadow-button: 0 4px 14px rgba(255, 255, 255, 0.08);
   --shadow-soft: 0 8px 30px rgba(0, 0, 0, 0.5);
   --shadow-card: 0 2px 10px rgba(0, 0, 0, 0.3);

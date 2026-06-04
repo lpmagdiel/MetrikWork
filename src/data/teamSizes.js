@@ -1,5 +1,12 @@
 export const TEAM_SIZE_OPTIONS = Object.freeze([
     {
+        value: 'G',
+        label: 'G',
+        description: 'Gratuito, 1 usuario',
+        maxMembers: 1,
+        priceEur: 0
+    },
+    {
         value: 'S',
         label: 'S',
         description: 'Menos de 5 usuarios',
@@ -48,6 +55,16 @@ export function getTeamSizeValue(teamOrSize) {
 }
 
 export function getTeamMonthlyPrice(teamOrSize) {
+    if (typeof teamOrSize === 'object' && teamOrSize !== null) {
+        const storedPrice = Number(
+            teamOrSize.billingAmountEur ??
+            teamOrSize.priceEur ??
+            teamOrSize.monthlyPriceEur ??
+            teamOrSize.teamAccessCode?.priceEur
+        );
+        if (Number.isFinite(storedPrice) && storedPrice >= 0) return storedPrice;
+    }
+
     return getTeamSizeOption(getTeamSizeValue(teamOrSize)).priceEur;
 }
 
@@ -74,6 +91,7 @@ export function getTeamMemberLimitLabel(teamOrSize, maxMembers) {
 
     const option = getTeamSizeOption(size);
     if (option.value === 'L') return '11+ usuarios';
+    if (limit === 1) return '1 usuario maximo';
 
     return `${limit} usuarios maximo`;
 }

@@ -9,7 +9,7 @@ import {
     serverTimestamp,
     updateDoc
 } from 'firebase/firestore';
-import { getTeamSizeOption, normalizeTeamSizeData } from './teamSizes.js';
+import { getTeamMonthlyPrice, getTeamSizeOption, normalizeTeamSizeData } from './teamSizes.js';
 
 export const systemAdminStore = writable({
     loading: true,
@@ -136,12 +136,15 @@ export async function createTeamAccessCode({ expiresAt, size = 'S' } = {}) {
             if (snapshot.exists()) return null;
 
             const uniqueCode = createUniqueCode();
+            const priceEur = getTeamMonthlyPrice(sizeOption.value);
             const data = {
                 code,
                 uniqueCode,
                 expiresAt: expirationDate,
                 size: sizeOption.value,
                 maxMembers: sizeOption.maxMembers,
+                priceEur,
+                billingAmountEur: priceEur,
                 used: false,
                 createdBy: user.uid,
                 createdByEmail: user.email || '',
@@ -200,6 +203,7 @@ export async function applyTeamAccessCodeToTeam(teamId, accessCode) {
         }
 
         const teamSizeData = normalizeTeamSizeData(codeData.size, codeData.maxMembers);
+        const codePriceEur = getTeamMonthlyPrice(codeData);
         const currentMembers = Array.isArray(teamData.members) ? teamData.members.length : 0;
         if (currentMembers > teamSizeData.maxMembers) {
             throw new Error(`Este equipo ya tiene ${currentMembers} miembros y el código ${teamSizeData.teamSize} permite menos.`);
@@ -212,12 +216,14 @@ export async function applyTeamAccessCodeToTeam(teamId, accessCode) {
             billingUpdatedBy: user.uid,
             teamSize: teamSizeData.teamSize,
             maxMembers: teamSizeData.maxMembers,
+            billingAmountEur: codePriceEur,
             teamAccessCode: {
                 code: normalizedCode,
                 uniqueCode: codeData.uniqueCode || '',
                 expiresAt: codeData.expiresAt || null,
                 size: teamSizeData.teamSize,
                 maxMembers: teamSizeData.maxMembers,
+                priceEur: codePriceEur,
                 appliedAt: now,
                 appliedBy: user.uid
             },

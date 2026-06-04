@@ -2,7 +2,9 @@
   import {
     AlertCircle,
     Camera,
+    CalendarDays,
     ChevronDown,
+    CreditCard,
     Mail,
     Palette,
     Pencil,
@@ -21,6 +23,7 @@
     getProfileImage,
     isProfileImage,
     addMemberByEmail,
+    createNotification,
     updateMemberPermissions,
     updateTeamProfile,
     updateTeamCustomRoles,
@@ -34,6 +37,10 @@
     normalizeCustomTeamRoles,
     normalizeTeamPermissions,
     hasTeamPermission,
+    getTeamMemberLimitLabel,
+    getTeamMonthlyPrice,
+    getTeamSizeOption,
+    getTeamSizeValue,
     TEAM_PERMISSION_LABELS,
     TEAM_PERMISSION_ACTION_LABELS,
     WEEKDAY_OPTIONS,
@@ -81,6 +88,11 @@
   let showNewMemberPermissions = $state(false);
   let openPermissionMemberId = $state(null);
   let roleTemplates = $derived(getTeamRoleTemplates({ customRoles }));
+  let teamPlanSize = $derived(team ? getTeamSizeValue(team) : "S");
+  let teamPlanOption = $derived(getTeamSizeOption(teamPlanSize));
+  let teamPaymentAmount = $derived(team ? getTeamMonthlyPrice(team) : 0);
+  let teamPaymentDate = $derived(formatPaymentDate(team?.billingDate || team?.teamAccessCode?.expiresAt));
+  let teamMemberLimit = $derived(getTeamMemberLimitLabel(team || teamPlanSize));
 
   const currencyOptions = [
     { code: "MXN", label: "Peso mexicano" },
@@ -227,6 +239,43 @@
     return enabledModules.length > 0 ? enabledModules : ["Sin permisos"];
   }
 
+  function formatPaymentDate(value) {
+    const date = toDisplayDate(value);
+    if (!date) return "Sin fecha";
+
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }).format(date);
+  }
+
+  function formatPaymentAmount(value) {
+    return new Intl.NumberFormat("es-ES", {
+      style: "currency",
+      currency: "EUR",
+      maximumFractionDigits: 0,
+    }).format(Number(value) || 0);
+  }
+
+  function toDisplayDate(value) {
+    if (!value) return null;
+    if (value instanceof Date) return value;
+    if (typeof value.toDate === "function") return value.toDate();
+    if (typeof value.seconds === "number") return new Date(value.seconds * 1000);
+
+    if (typeof value === "string") {
+      const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (match) {
+        const [, year, month, day] = match.map(Number);
+        return new Date(year, month - 1, day);
+      }
+    }
+
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
   async function handleSaveCustomRole() {
     if (!team?.id || !canEditSettings || !customRoleName.trim()) return;
 
@@ -313,6 +362,10 @@
     if (!team?.id || !canEditSettings || !teamName.trim()) return;
     isSavingProfile = true;
     try {
+      const previousOvertimeLimitHours = normalizeOvertimeLimitHours(team.overtimeLimitHours);
+      const previousNonWorkingDays = normalizeComparableDays(team.nonWorkingDays);
+      const nextOvertimeLimitHours = normalizeOvertimeLimitHours(overtimeLimitHours);
+      const nextNonWorkingDays = normalizeComparableDays(nonWorkingDays);
       let photoURL = team.photoURL || "";
       if (pendingPhoto) {
         photoURL = await uploader(pendingPhoto, CLOUDINARY_PRESET_TEAM);
@@ -321,9 +374,15 @@
         name: teamName,
         photoURL,
         projectBudgetCurrency: teamCurrency,
-        overtimeLimitHours,
-        nonWorkingDays,
+        overtimeLimitHours: nextOvertimeLimitHours,
+        nonWorkingDays: nextNonWorkingDays,
         themePrimaryColor,
+      });
+      await notifyWorkSettingsChanges({
+        overtimeChanged: previousOvertimeLimitHours !== nextOvertimeLimitHours,
+        nonWorkingDaysChanged: !areNumberListsEqual(previousNonWorkingDays, nextNonWorkingDays),
+        overtimeLimitHours: nextOvertimeLimitHours,
+        nonWorkingDays: nextNonWorkingDays,
       });
       pendingPhoto = "";
       await showSuccessAlert(
@@ -338,6 +397,77 @@
     } finally {
       isSavingProfile = false;
     }
+  }
+
+  async function notifyWorkSettingsChanges({
+    overtimeChanged,
+    nonWorkingDaysChanged,
+    overtimeLimitHours,
+    nonWorkingDays,
+  }) {
+    if (!team?.id || (!overtimeChanged && !nonWorkingDaysChanged)) return;
+
+    const recipients = [...new Set(team.members || [])].filter(
+      (memberId) => memberId && memberId !== $userStore?.uid,
+    );
+    if (!recipients.length) return;
+
+    const teamLabel = teamName.trim() || team.team || team.name || "tu equipo";
+    const changes = [];
+    if (overtimeChanged) {
+      changes.push(
+        overtimeLimitHours > 0
+          ? `Horas extra disponibles: hasta ${overtimeLimitHours}h.`
+          : "Las horas extra quedaron desactivadas.",
+      );
+    }
+    if (nonWorkingDaysChanged) {
+      changes.push(`Días laborables: ${formatWorkingDaysSummary(nonWorkingDays)}.`);
+    }
+
+    const message = `Se actualizaron los ajustes de jornada de ${teamLabel}. ${changes.join(" ")}`;
+    const results = await Promise.allSettled(
+      recipients.map((memberId) =>
+        createNotification(
+          memberId,
+          "Ajustes de jornada actualizados",
+          message,
+          {
+            url: `/teams/${team.id}`,
+            type: "team_work_settings",
+            teamId: team.id,
+          },
+        ),
+      ),
+    );
+
+    const failed = results.filter((result) => result.status === "rejected");
+    if (failed.length) {
+      console.warn("No se pudieron enviar algunas notificaciones de ajustes de jornada:", failed);
+    }
+  }
+
+  function normalizeOvertimeLimitHours(value) {
+    return Math.max(0, Number(value) || 0);
+  }
+
+  function normalizeComparableDays(days) {
+    return normalizeNonWorkingDays(days).sort((a, b) => a - b);
+  }
+
+  function areNumberListsEqual(left = [], right = []) {
+    if (left.length !== right.length) return false;
+    return left.every((value, index) => value === right[index]);
+  }
+
+  function formatWorkingDaysSummary(nonWorkingDays = []) {
+    const nonWorkingDaySet = new Set(nonWorkingDays);
+    const workingDays = WEEKDAY_OPTIONS.filter((day) => !nonWorkingDaySet.has(day.value));
+
+    if (workingDays.length === WEEKDAY_OPTIONS.length) return "todos los días";
+    if (workingDays.length === 0) return "ninguno configurado";
+
+    return workingDays.map((day) => day.label).join(", ");
   }
 
   async function handleAddMember() {
@@ -535,6 +665,26 @@
             <input id="teamName" bind:value={teamName} disabled={!canEditSettings} />
           </div>
         </div>
+
+        <div class="billing-summary" aria-label="Plan y pago del equipo">
+          <article class="billing-card plan">
+            <span>Plan actual</span>
+            <strong>{teamPlanSize}</strong>
+            <small>{teamPlanOption.description} · {teamMemberLimit}</small>
+          </article>
+          <article class="billing-card">
+            <CalendarDays size={18} />
+            <span>Fecha de pago</span>
+            <strong>{teamPaymentDate}</strong>
+          </article>
+          <article class="billing-card">
+            <CreditCard size={18} />
+            <span>Cantidad a pagar</span>
+            <strong>{formatPaymentAmount(teamPaymentAmount)}</strong>
+            <small>al mes</small>
+          </article>
+        </div>
+
         <div class="profile-fields settings-field">
           <label for="teamCurrency">Moneda del equipo</label>
           <select
@@ -964,6 +1114,68 @@
     align-items: center;
     gap: 16px;
     margin-bottom: 14px;
+  }
+
+  .billing-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .billing-card {
+    min-width: 0;
+    min-height: 106px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    padding: 13px;
+    display: grid;
+    align-content: start;
+    gap: 5px;
+  }
+
+  .billing-card.plan {
+    background: var(--bg-accent-subtle);
+    color: var(--accent-ink);
+  }
+
+  .billing-card :global(svg) {
+    color: var(--text-secondary);
+  }
+
+  .billing-card span {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .billing-card.plan span,
+  .billing-card.plan small {
+    color: inherit;
+  }
+
+  .billing-card strong {
+    min-width: 0;
+    color: inherit;
+    font-size: 20px;
+    font-weight: 900;
+    line-height: 1.1;
+    overflow-wrap: anywhere;
+  }
+
+  .billing-card.plan strong {
+    font-size: 30px;
+  }
+
+  .billing-card small {
+    min-width: 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
   }
 
   .team-photo {

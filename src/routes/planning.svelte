@@ -524,7 +524,10 @@
                   <h3>{getMemberName(work.userId)}</h3>
                   <p>{workTypeLabels[getWorkType(work)] || "Jornada"}</p>
                   {#if work.note}
-                    <small><StickyNote size={13} /> {work.note}</small>
+                    <small class="note-line">
+                      <StickyNote size={13} />
+                      <span>{work.note}</span>
+                    </small>
                   {/if}
                   {#if getWorkMemberLocationLabel(work)}
                     <a class="work-location-link" href={getWorkMemberLocationUrl(work)} target="_blank" rel="noopener noreferrer">
@@ -707,6 +710,11 @@
     gap: 12px;
     padding: 24px 20px 16px;
     flex-shrink: 0;
+    min-width: 0;
+  }
+
+  header > :global(.header-container) {
+    min-width: 0;
   }
 
   .icon-btn {
@@ -765,6 +773,7 @@
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-card);
     padding: 16px;
+    min-width: 0;
   }
 
   .section-heading {
@@ -773,6 +782,11 @@
     justify-content: space-between;
     gap: 12px;
     margin-bottom: 16px;
+    min-width: 0;
+  }
+
+  .section-heading > div {
+    min-width: 0;
   }
 
   .section-heading.compact {
@@ -783,6 +797,8 @@
     font-size: 18px;
     font-weight: 800;
     margin-top: 3px;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
   }
 
   .calendar-actions {
@@ -854,6 +870,9 @@
     justify-content: center;
     gap: 3px;
     position: relative;
+    line-height: 1;
+    overflow: hidden;
+    touch-action: manipulation;
   }
 
   .calendar-day.empty {
@@ -943,6 +962,7 @@
     background:
       linear-gradient(90deg, color-mix(in srgb, var(--work-color, var(--accent-color)) 12%, transparent), transparent 52%),
       var(--bg-card);
+    min-width: 0;
   }
 
   .avatar {
@@ -963,6 +983,9 @@
   .record-main h3 {
     font-size: 14px;
     margin: 0 0 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .assignment-card p,
@@ -981,6 +1004,27 @@
     gap: 4px;
     margin-top: 6px;
     min-width: 0;
+  }
+
+  .assignment-card > div:last-child {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .note-line {
+    max-width: 100%;
+  }
+
+  .note-line :global(svg),
+  .work-location-link :global(svg) {
+    flex-shrink: 0;
+  }
+
+  .note-line span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .work-location-link {
@@ -1004,17 +1048,20 @@
     gap: 10px;
     align-items: end;
     margin-bottom: 14px;
+    min-width: 0;
   }
 
   label {
     display: grid;
     gap: 7px;
+    min-width: 0;
   }
 
   select,
   input,
   textarea {
     width: 100%;
+    min-width: 0;
     border: 1px solid var(--border-color);
     background: var(--bg-input);
     color: var(--text-primary);
@@ -1125,23 +1172,126 @@
 
   @media (max-width: 640px) {
     header {
-      padding-inline: 16px;
+      padding: 18px 12px 12px;
     }
 
     .planning-content {
-      padding-inline: 16px;
+      gap: 12px;
+      padding: 4px 12px var(--bottom-nav-clearance);
+    }
+
+    .calendar-panel,
+    .day-panel,
+    .records-panel {
+      border-radius: 12px;
+      padding: 12px;
+    }
+
+    .section-heading {
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .section-heading h2 {
+      font-size: 16px;
+    }
+
+    .calendar-actions {
+      gap: 6px;
+    }
+
+    .icon-btn {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+    }
+
+    .work-legend {
+      gap: 7px 10px;
+      margin-bottom: 10px;
+    }
+
+    .weekdays,
+    .calendar-grid {
+      gap: 5px;
+    }
+
+    .calendar-day {
+      aspect-ratio: auto;
+      min-height: 42px;
+      border-radius: 9px;
+      gap: 2px;
+      padding: 4px 2px;
+    }
+
+    .day-number {
+      font-size: 12px;
+    }
+
+    .assignment-count {
+      font-size: 9px;
+    }
+
+    .assignment-dots i {
+      width: 4px;
+      height: 4px;
+    }
+
+    .assign-btn {
+      min-height: 40px;
+      padding: 9px 10px;
+      flex-shrink: 0;
     }
 
     .filters-row {
       grid-template-columns: 1fr;
     }
 
-    .record-item {
-      display: grid;
+    .clear-btn {
+      width: 100%;
     }
 
+    .assignment-card,
+    .record-item {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .assignment-card {
+      grid-template-columns: 40px minmax(0, 1fr);
+      align-items: center;
+    }
+
+    .record-date,
     .record-meta {
       white-space: normal;
+    }
+  }
+
+  @media (max-width: 380px) {
+    .planning-content {
+      padding-inline: 10px;
+    }
+
+    .calendar-panel,
+    .day-panel,
+    .records-panel {
+      padding: 10px;
+    }
+
+    .weekdays,
+    .calendar-grid {
+      gap: 4px;
+    }
+
+    .calendar-day {
+      min-height: 40px;
+    }
+
+    .work-legend span {
+      font-size: 10px;
     }
   }
 </style>

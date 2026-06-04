@@ -113,7 +113,7 @@
     padding: 0 20px;
     pointer-events: none;
     opacity: 1;
-    transform: translate3d(0, 0, 0);
+    transform: none;
     transition:
       transform 0.34s cubic-bezier(0.3, 0.8, 0.2, 1),
       opacity 0.22s ease,
@@ -149,21 +149,36 @@
     margin: 0 auto;
     justify-content: space-around;
     gap: 4px;
-    background: var(--nav-bg);
-    border: 1px solid var(--border-color);
+    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
     border-radius: 40px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    box-shadow:
+      0 18px 44px rgba(0, 0, 0, 0.18),
+      inset 0 1px 0 rgba(255, 255, 255, 0.22);
     pointer-events: auto;
     position: relative;
     overflow: hidden;
+    isolation: isolate;
+    backdrop-filter: blur(18px) saturate(165%);
+    -webkit-backdrop-filter: blur(18px) saturate(165%);
+  }
+
+  .navbar ul::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: inherit;
+    background: var(--nav-bg);
+    backdrop-filter: blur(18px) saturate(165%);
+    -webkit-backdrop-filter: blur(18px) saturate(165%);
+    pointer-events: none;
   }
 
   .navbar ul::before {
     content: "";
     position: absolute;
-    z-index: 0;
+    z-index: 1;
     top: 6px;
     bottom: 6px;
     left: 0;
@@ -184,7 +199,7 @@
     justify-content: center;
     min-width: 0;
     position: relative;
-    z-index: 1;
+    z-index: 2;
   }
 
   .navbar li.active-item {

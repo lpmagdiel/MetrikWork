@@ -4,7 +4,7 @@ import { doc, onSnapshot, collection, query, where, updateDoc, getDoc, getDocs, 
 import { userStore, getProfileImage } from './auth.js';
 import { createNotification } from './notifications.js';
 import { createTeamPermissions, normalizeCustomTeamRoles, normalizeTeamPermissions } from './permissions.js';
-import { assertTeamMemberLimit, normalizeTeamSizeData } from './teamSizes.js';
+import { assertTeamMemberLimit, getTeamMonthlyPrice, normalizeTeamSizeData } from './teamSizes.js';
 import { normalizeNonWorkingDays } from './workLimits.js';
 
 export const teamsStore = writable([]);
@@ -111,6 +111,7 @@ export async function createTeam(teamName, accessCode = '') {
             }
 
             const teamSizeData = normalizeTeamSizeData(accessCodeData.size, accessCodeData.maxMembers);
+            const accessCodePriceEur = getTeamMonthlyPrice(accessCodeData);
             const now = new Date().toISOString();
             const billingDate = toDateInput(expiresAt);
             const teamRef = doc(collection(db, 'teams'));
@@ -133,6 +134,7 @@ export async function createTeam(teamName, accessCode = '') {
                 projectBudget: 0,
                 projectBudgetCurrency: 'MXN',
                 billingDate,
+                billingAmountEur: accessCodePriceEur,
                 teamSize: teamSizeData.teamSize,
                 maxMembers: teamSizeData.maxMembers,
                 teamAccessCode: {
@@ -141,6 +143,7 @@ export async function createTeam(teamName, accessCode = '') {
                     expiresAt: accessCodeData.expiresAt || null,
                     size: teamSizeData.teamSize,
                     maxMembers: teamSizeData.maxMembers,
+                    priceEur: accessCodePriceEur,
                     redeemedAt: now
                 },
                 createdAt: now
