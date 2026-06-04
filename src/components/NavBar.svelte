@@ -107,12 +107,16 @@
     position: fixed;
     bottom: calc(var(--bottom-nav-gap) + env(safe-area-inset-bottom, 0px));
     left: 0;
-    width: 100%;
+    width: calc(100% - 20px);
+    margin-left: 10px;
     height: var(--bottom-nav-height);
     z-index: 100;
-    padding: 0 20px;
     pointer-events: none;
     opacity: 1;
+    backdrop-filter: blur(18px) saturate(165%);
+    -webkit-backdrop-filter: blur(18px) saturate(165%);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    border-radius: 40px;
     transform: none;
     transition:
       transform 0.34s cubic-bezier(0.3, 0.8, 0.2, 1),
@@ -257,5 +261,10 @@
 
   :global(:root.dark) .navbar a.active {
     color: #000000;
+  }
+
+  :global(:root.dark) .navbar,
+  :global(:root.dark) .navbar ul {
+    border-color: rgba(0,0,0,0.5);
   }
 </style>
