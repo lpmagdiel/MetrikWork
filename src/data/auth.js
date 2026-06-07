@@ -3,6 +3,7 @@ import { auth, db } from './firebase.js';
 import { onAuthStateChanged, signOut, updateProfile } from 'firebase/auth';
 import { deleteField, doc, setDoc, getDoc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { uploader } from './fileHelper.js';
+import { getBankName } from '../helpers/banks.js';
 
 export const userStore = writable(null);
 export const authReady = writable(false);
@@ -301,6 +302,9 @@ export async function updateUserProfile(uid, data, options = {}) {
                 ...getPrivateProfileData(privateData),
                 updatedAt: now
             };
+            if (!privateProfileData.bankName && privateProfileData.iban) {
+                privateProfileData.bankName = getBankName(privateProfileData.iban);
+            }
             await setDoc(doc(db, 'users', uid, 'private', 'profile'), privateProfileData, { merge: true });
 
             const teamIds = Array.isArray(options.teamIds) ? options.teamIds.filter(Boolean) : [];

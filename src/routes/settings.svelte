@@ -53,6 +53,7 @@
     getLocationPermissionState,
     normalizeLocationSettings,
   } from "../data/geolocation.js";
+  import { getBankName } from "../helpers/banks.js";
 
   let name = $state("");
   let email = $state("");
@@ -140,7 +141,7 @@
         phone = privateProfile.phone || "";
         address = privateProfile.address || "";
         iban = privateProfile.iban || "";
-        bankName = privateProfile.bankName || "";
+        bankName = privateProfile.bankName || getBankName(privateProfile.iban);
       }
     }
   });
@@ -154,7 +155,7 @@
         phone: phone.trim(),
         address: address.trim(),
         iban: iban.trim().toUpperCase(),
-        bankName: bankName.trim(),
+        bankName: bankName.trim() || getBankName(iban),
       }, {
         teamIds: ($teamsStore || []).map((team) => team.id),
       });

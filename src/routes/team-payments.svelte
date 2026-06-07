@@ -1,7 +1,8 @@
 <script>
-    import { ChevronDown, ChevronLeft, DollarSign, Filter, CheckCircle, AlertCircle, Eye, History, Printer, Download, MapPin } from "lucide-svelte";
+    import { Banknote, ChevronDown, ChevronLeft, Copy, DollarSign, Filter, CheckCircle, AlertCircle, Eye, History, Landmark, Printer, Download, MapPin, Smartphone } from "lucide-svelte";
     import { selectedTeam, selectedTeamId, userStore, hasTeamPermission } from "../data/stores.js";
     import { getTeamPaymentsData, registerTeamPayment } from "../data/teamPayments.js";
+    import { getBankName } from "../helpers/banks.js";
     import { createNotification } from "../data/notifications.js";
     import { navigateTo } from "../router.js";
     import Toast from "../components/Toast.svelte";
@@ -26,7 +27,9 @@
     // Payment Modal
     let showPaymentModal = $state(false);
     let selectedMember = $state(null);
+    let selectedPrivateProfile = $derived(selectedMember?.privateProfile || {});
     let paymentType = $state("total"); // 'total' or 'partial'
+    let paymentMethod = $state("cash");
     let paymentAmount = $state(0);
     let isSaving = $state(false);
     
@@ -37,6 +40,11 @@
     let showAdditionalPaymentInfo = $state(false);
     let workLocationAddresses = $state({});
     const resolvingLocationAddressIds = new Set();
+    const paymentMethodLabels = {
+        cash: "Efectivo",
+        transfer: "Transferencia",
+        bizum: "Bizum",
+    };
 
     let filteredMembers = $derived.by(() => {
         if (filterStatus === 'paid') return memberBalances.filter(m => m.balance <= 0.01);
@@ -101,6 +109,7 @@
     function openPaymentModal(member) {
         selectedMember = member;
         paymentType = "total";
+        paymentMethod = "cash";
         paymentAmount = member.balance;
         showPaymentModal = true;
     }
@@ -132,6 +141,7 @@
                 amountToPay,
                 paymentType,
                 $userStore,
+                paymentMethod,
             );
             
             // Notificar al usuario
@@ -203,6 +213,39 @@
         if (work.type === "variable") return "Jornada variable";
         if (work.type === "overtime") return "Horas extra";
         return "Jornada";
+    }
+
+    function getPaymentMethodLabel(method) {
+        return paymentMethodLabels[method] || "No indicado";
+    }
+
+    async function copyPaymentValue(value, label) {
+        const text = String(value || "").trim();
+        if (!text) {
+            showNotification(`${label} no disponible`, "error");
+            return;
+        }
+
+        try {
+            if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(text);
+            } else if (typeof document !== "undefined") {
+                const textarea = document.createElement("textarea");
+                textarea.value = text;
+                textarea.setAttribute("readonly", "");
+                textarea.style.position = "fixed";
+                textarea.style.opacity = "0";
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand("copy");
+                textarea.remove();
+            } else {
+                throw new Error("Clipboard unavailable");
+            }
+            showNotification(`${label} copiado`);
+        } catch (error) {
+            showNotification(`No se pudo copiar ${label.toLowerCase()}`, "error");
+        }
     }
 
     function getWorkUnits(work) {
@@ -297,6 +340,7 @@
         const companyName = company.name || teamName;
         const memberName = member?.name || member?.email || "Usuario";
         const registeredBy = payment?.registeredByName || $userStore?.name || $userStore?.email || "Usuario";
+        const paymentMethodLabel = getPaymentMethodLabel(payment?.method);
         const generatedAt = new Date().toISOString();
 
         const workRows = works.map((work) => `
@@ -315,6 +359,7 @@
             <tr>
                 <td>${escapeHtml(formatDate(item.date))}</td>
                 <td>${escapeHtml(item.type === "total" ? "Pago total" : "Pago parcial")}</td>
+                <td>${escapeHtml(getPaymentMethodLabel(item.method))}</td>
                 <td>${escapeHtml(item.registeredByName || "-")}</td>
                 <td class="money">${escapeHtml(formatMoney(item.amount))}</td>
             </tr>
@@ -485,6 +530,10 @@
                 <span class="label">Fecha del pago</span>
                 <span class="value">${escapeHtml(formatDateTime(payment?.date))}</span>
             </div>
+            <div class="box">
+                <span class="label">Forma de pago</span>
+                <span class="value">${escapeHtml(paymentMethodLabel)}</span>
+            </div>
         </section>
 
         <section class="summary">
@@ -513,6 +562,7 @@
                 <tr><td>Pagado anteriormente</td><td class="money">${escapeHtml(formatMoney(paymentsBeforeThis))}</td></tr>
                 <tr><td>Saldo antes de este pago</td><td class="money">${escapeHtml(formatMoney(balanceBefore))}</td></tr>
                 <tr><td>Tipo de pago</td><td class="money">${escapeHtml(payment?.type === "total" ? "Pago total" : "Pago parcial")}</td></tr>
+                <tr><td>Forma de pago</td><td class="money">${escapeHtml(paymentMethodLabel)}</td></tr>
                 <tr class="total-row"><td>Monto pagado</td><td class="money">${escapeHtml(formatMoney(paymentAmountValue))}</td></tr>
                 <tr class="total-row"><td>Saldo posterior</td><td class="money">${escapeHtml(formatMoney(balanceAfter))}</td></tr>
             </tbody>
@@ -542,12 +592,13 @@
                 <tr>
                     <th>Fecha</th>
                     <th>Tipo</th>
+                    <th>Forma de pago</th>
                     <th>Registrado por</th>
                     <th class="money">Importe</th>
                 </tr>
             </thead>
             <tbody>
-                ${paymentRows || `<tr><td colspan="4">No hay pagos previos registrados.</td></tr>`}
+                ${paymentRows || `<tr><td colspan="5">No hay pagos previos registrados.</td></tr>`}
             </tbody>
         </table>
 
@@ -640,12 +691,13 @@
                 },
                 {
                     title: "Detalle de pagos",
-                    headers: ["Integrante", "Fecha", "Tipo", "Registrado por", "Monto"],
+                    headers: ["Integrante", "Fecha", "Tipo", "Forma de pago", "Registrado por", "Monto"],
                     rows: filteredMembers.flatMap((member) =>
                         (member.payments || []).map((payment) => [
                             member?.name || member?.email || "Usuario",
                             formatDateTime(payment.date),
                             payment.type === "total" ? "Pago total" : "Pago parcial",
+                            getPaymentMethodLabel(payment.method),
                             payment.registeredByName || "-",
                             formatMoney(payment.amount),
                         ]),
@@ -921,6 +973,94 @@
                     </div>
                 </div>
 
+                <div class="form-group">
+                    <span class="form-label">Forma de pago</span>
+                    <div class="payment-options method-options" aria-label="Forma de pago">
+                        <button
+                            type="button"
+                            class="payment-option {paymentMethod === 'cash' ? 'active' : ''}"
+                            onclick={() => paymentMethod = 'cash'}
+                        >
+                            <Banknote size={16} />
+                            Efectivo
+                        </button>
+                        <button
+                            type="button"
+                            class="payment-option {paymentMethod === 'transfer' ? 'active' : ''}"
+                            onclick={() => paymentMethod = 'transfer'}
+                        >
+                            <Landmark size={16} />
+                            Transferencia
+                        </button>
+                        <button
+                            type="button"
+                            class="payment-option {paymentMethod === 'bizum' ? 'active' : ''}"
+                            onclick={() => paymentMethod = 'bizum'}
+                        >
+                            <Smartphone size={16} />
+                            Bizum
+                        </button>
+                    </div>
+                </div>
+
+                {#if paymentMethod === "cash"}
+                    <div class="payment-method-card">
+                        <div>
+                            <span>Pago en efectivo</span>
+                            <strong>No requiere datos bancarios</strong>
+                        </div>
+                    </div>
+                {:else if paymentMethod === "bizum"}
+                    <div class="payment-method-card">
+                        <div>
+                            <span>Teléfono Bizum</span>
+                            <strong>{selectedPrivateProfile.phone || "Sin teléfono guardado"}</strong>
+                        </div>
+                        <button
+                            type="button"
+                            class="copy-payment-btn"
+                            onclick={() => copyPaymentValue(selectedPrivateProfile.phone, "Teléfono Bizum")}
+                            disabled={!selectedPrivateProfile.phone}
+                        >
+                            <Copy size={16} />
+                            Copiar
+                        </button>
+                    </div>
+                {:else if paymentMethod === "transfer"}
+                    <div class="payment-method-card stacked">
+                        <div class="payment-data-row">
+                            <div>
+                                <span>Banco</span>
+                                <strong>{selectedPrivateProfile.bankName || getBankName(selectedPrivateProfile.iban? selectedPrivateProfile.iban : "")}</strong>
+                            </div>
+                            <button
+                                type="button"
+                                class="copy-payment-btn"
+                                onclick={() => copyPaymentValue(selectedPrivateProfile.bankName || getBankName(selectedPrivateProfile.iban), "Banco")}
+                                disabled={! (selectedPrivateProfile.bankName || getBankName(selectedPrivateProfile.iban))}
+                            >
+                                <Copy size={16} />
+                                Copiar
+                            </button>
+                        </div>
+                        <div class="payment-data-row">
+                            <div>
+                                <span>IBAN</span>
+                                <strong>{selectedPrivateProfile.iban || "Sin IBAN guardado"}</strong>
+                            </div>
+                            <button
+                                type="button"
+                                class="copy-payment-btn"
+                                onclick={() => copyPaymentValue(selectedPrivateProfile.iban, "IBAN")}
+                                disabled={!selectedPrivateProfile.iban}
+                            >
+                                <Copy size={16} />
+                                Copiar
+                            </button>
+                        </div>
+                    </div>
+                {/if}
+
                 <div class="payment-actions">
                     <button 
                         class="submit-payment-btn secondary" 
@@ -997,6 +1137,7 @@
                                     <div class="item-info">
                                         <span class="item-date">{new Date(payment.date).toLocaleDateString()}</span>
                                         <span class="item-type">{payment.type === 'total' ? 'Pago Total' : 'Pago Parcial'}</span>
+                                        <span class="item-type">{getPaymentMethodLabel(payment.method)}</span>
                                     </div>
                                     <div class="item-values">
                                         <span class="item-price">{formatMoney(payment.amount)}</span>
@@ -1432,6 +1573,11 @@
         color: var(--text-secondary);
         cursor: pointer;
         transition: all 0.2s;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        min-width: 0;
     }
 
     .payment-option.active {
@@ -1440,13 +1586,87 @@
         box-shadow: var(--shadow-card);
     }
 
+    .method-options {
+        gap: 4px;
+    }
+
+    .payment-method-card {
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        background: var(--bg-card);
+        padding: 14px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .payment-method-card.stacked {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .payment-method-card span,
+    .payment-data-row span {
+        display: block;
+        margin-bottom: 4px;
+        color: var(--text-secondary);
+        font-size: 12px;
+        font-weight: 800;
+    }
+
+    .payment-method-card strong,
+    .payment-data-row strong {
+        color: var(--text-primary);
+        font-size: 14px;
+        font-weight: 850;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+    }
+
+    .payment-data-row {
+        width: 100%;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .payment-data-row + .payment-data-row {
+        padding-top: 12px;
+        border-top: 1px solid var(--border-color);
+    }
+
+    .copy-payment-btn {
+        min-height: 36px;
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        background: var(--bg-input);
+        color: var(--text-primary);
+        padding: 0 10px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        font-size: 13px;
+        font-weight: 800;
+        cursor: pointer;
+    }
+
+    .copy-payment-btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+    }
+
     .form-group {
         display: flex;
         flex-direction: column;
         gap: 8px;
     }
 
-    .form-group label {
+    .form-group label,
+    .form-label {
         font-size: 14px;
         font-weight: 500;
         color: var(--text-secondary);

@@ -56,8 +56,9 @@
   let workDaysThisMonth = $state(0);
   let totalTeams = $state(0);
   let estimatedEarnings = $state(0);
-  let messagesSent = $state(0);
-  let totalStats = $state(null);
+  let workEntriesThisMonth = $state(0);
+  let overtimeHoursThisMonth = $state(0);
+  let earningsTrend = $state([]);
   let earningsBreakdown = $state([]);
   let showEarningsDetails = $state(false);
   let statsRequestId = 0;
@@ -110,6 +111,10 @@
       hasTeamPermission(team, $userStore?.uid, "payments", "view"),
     ),
   );
+  let averageEarningsPerWorkDay = $derived(
+    workDaysThisMonth > 0 ? estimatedEarnings / workDaysThisMonth : 0,
+  );
+  let earningsTrendChart = $derived.by(() => buildEarningsTrendChart(earningsTrend));
 
   let filteredProducts = $derived.by(() => {
     const term = normalizeSearch(productSearchTerm);
@@ -143,14 +148,11 @@
       if (!uid || teams.length === 0) {
         workDaysThisMonth = 0;
         estimatedEarnings = 0;
+        workEntriesThisMonth = 0;
+        overtimeHoursThisMonth = 0;
+        earningsTrend = [];
         earningsBreakdown = [];
         todayWorkAssignments = [];
-        totalStats = {
-          workDaysThisMonth,
-          totalTeams,
-          estimatedEarnings,
-          messagesSent,
-        };
         return;
       }
 
@@ -178,7 +180,12 @@
 
       let totalWorkDays = 0;
       let totalEarnings = 0;
+      let totalEntries = 0;
+      let totalOvertimeHours = 0;
       const breakdown = [];
+      const trendEnd = todayKey < end ? todayKey : end;
+      const trendBuckets = createMonthlyTrendBuckets(start, trendEnd);
+      const trendMap = new Map(trendBuckets.map((bucket) => [bucket.date, bucket]));
 
       teamWorks.forEach(({ team, works }) => {
         const { dailyRate, extraHourRate } = getMemberRates(team, uid);
@@ -193,13 +200,25 @@
           const baseEarnings = getBaseWorkEarnings(work, dailyRate);
           const overtimeHours = Number(work.overtimeHours) || 0;
           const overtimeEarnings = overtimeHours * extraHourRate;
+          const earnings = baseEarnings + overtimeEarnings;
+          const dateKey = getDateKey(work.date);
+          const trendBucket = trendMap.get(dateKey);
 
           teamWorkDays += workDayValue;
           teamBaseEarnings += baseEarnings;
           teamOvertimeHours += overtimeHours;
           teamOvertimeEarnings += overtimeEarnings;
           totalWorkDays += workDayValue;
-          totalEarnings += baseEarnings + overtimeEarnings;
+          totalEarnings += earnings;
+          totalEntries += 1;
+          totalOvertimeHours += overtimeHours;
+
+          if (trendBucket) {
+            trendBucket.earnings += earnings;
+            trendBucket.workDays += workDayValue;
+            trendBucket.entries += 1;
+            trendBucket.overtimeHours += overtimeHours;
+          }
         });
 
         if (monthWorks.length > 0) {
@@ -220,21 +239,10 @@
 
       workDaysThisMonth = totalWorkDays;
       estimatedEarnings = totalEarnings;
+      workEntriesThisMonth = totalEntries;
+      overtimeHoursThisMonth = totalOvertimeHours;
+      earningsTrend = addCumulativeTrend(trendBuckets);
       earningsBreakdown = breakdown.sort((a, b) => b.total - a.total);
-
-      // Mensajes enviados
-      const chatStats = localStorage.getItem("chatStats");
-      if (chatStats) {
-        const stats = JSON.parse(chatStats);
-        messagesSent = stats.totalMessages || 0;
-      }
-
-      totalStats = {
-        workDaysThisMonth,
-        totalTeams,
-        estimatedEarnings,
-        messagesSent,
-      };
     } catch (error) {
       console.error("Error calculating stats:", error);
       todayWorkAssignments = [];
@@ -502,6 +510,98 @@
     return teamId ? `/teams/${teamId}/inventory` : "/teams";
   }
 
+  function createMonthlyTrendBuckets(startDate, endDate) {
+    const start = parseDateKey(startDate);
+    const end = parseDateKey(endDate);
+    if (!start || !end || start > end) return [];
+
+    const buckets = [];
+    const cursor = new Date(start);
+
+    while (cursor <= end) {
+      const date = toDateString(cursor);
+      buckets.push({
+        date,
+        label: formatShortDate(date),
+        earnings: 0,
+        cumulative: 0,
+        workDays: 0,
+        entries: 0,
+        overtimeHours: 0,
+      });
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    return buckets;
+  }
+
+  function parseDateKey(dateKey) {
+    const match = String(dateKey || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return null;
+    const [, year, month, day] = match.map(Number);
+    const date = new Date(year, month - 1, day);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  function addCumulativeTrend(buckets = []) {
+    let cumulative = 0;
+    return buckets.map((bucket) => {
+      cumulative += Number(bucket.earnings) || 0;
+      return { ...bucket, cumulative };
+    });
+  }
+
+  function buildEarningsTrendChart(trend = []) {
+    const width = 320;
+    const height = 132;
+    const padding = 12;
+    const baseline = height - padding;
+    const values = trend.map((item) => Number(item.cumulative) || 0);
+    const maxValue = Math.max(...values, 1);
+
+    if (trend.length === 0) {
+      return {
+        width,
+        height,
+        linePath: "",
+        areaPath: "",
+        points: [],
+        lastPoint: null,
+        maxValue,
+      };
+    }
+
+    const points = trend.map((item, index) => {
+      const x = trend.length === 1
+        ? width / 2
+        : padding + (index * (width - padding * 2)) / (trend.length - 1);
+      const y = baseline - ((Number(item.cumulative) || 0) / maxValue) * (height - padding * 2);
+      return {
+        x,
+        y,
+        item,
+      };
+    });
+    const linePath = points
+      .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+      .join(" ");
+    const areaPath = points.length
+      ? `M ${points[0].x.toFixed(2)} ${baseline} ${points
+          .map((point) => `L ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+          .join(" ")} L ${points[points.length - 1].x.toFixed(2)} ${baseline} Z`
+      : "";
+
+    return {
+      width,
+      height,
+      linePath,
+      areaPath,
+      points,
+      lastPoint: points[points.length - 1],
+      maxValue,
+    };
+  }
+
   function getCurrentMonthRange() {
     const today = new Date();
     const year = today.getFullYear();
@@ -600,6 +700,11 @@
 
   function formatWorkDays(days) {
     return `${days} ${Number(days) === 1 ? "día" : "días"}`;
+  }
+
+  function formatHours(hours) {
+    const numericHours = Number(hours) || 0;
+    return `${Number.isInteger(numericHours) ? numericHours : numericHours.toFixed(1)} h`;
   }
 
   function getEarningsMonthLabel() {
@@ -789,13 +894,13 @@
     <!-- Quick Actions Row -->
     <div class="quick-actions-row">
       <a href="/teams" class="action-btn">
-        <div class="action-icon-box">
+        <div class="action-icon-box teams">
           <Users size={28} />
         </div>
         <span class="action-label">Equipos</span>
       </a>
       <button type="button" class="action-btn" onclick={openMyStats}>
-        <div class="action-icon-box">
+        <div class="action-icon-box stats">
           <TrendingUp size={28} />
         </div>
         <span class="action-label">Estadísticas</span>
@@ -809,25 +914,25 @@
         </button>
       {/if}
       <a href="/calendar" class="action-btn">
-        <div class="action-icon-box">
+        <div class="action-icon-box calendar">
           <Calendar size={28} />
         </div>
         <span class="action-label">Agenda</span>
       </a>
       <a href="/calculator" class="action-btn">
-        <div class="action-icon-box">
+        <div class="action-icon-box calculator">
           <Calculator size={28} />
         </div>
         <span class="action-label">Calculadora</span>
       </a>
       <a href="/locations" class="action-btn">
-        <div class="action-icon-box">
+        <div class="action-icon-box locations">
           <MapPinned size={28} />
         </div>
         <span class="action-label">Ubicaciones</span>
       </a>
       <a href="/notes" class="action-btn">
-        <div class="action-icon-box">
+        <div class="action-icon-box notes">
           <StickyNote size={28} />
         </div>
         <span class="action-label">Notas</span>
@@ -835,30 +940,72 @@
     </div>
 
     <!-- Secondary Stats Section -->
-    <div class="secondary-section">
+    <section class="secondary-section monthly-insight" aria-labelledby="month-insight-title">
       <div class="section-header">
-        <h2 class="section-title">Estadísticas</h2>
-        <span class="status-badge">{totalTeams} equipos activos</span>
+        <h2 class="section-title" id="month-insight-title">Ritmo del mes</h2>
+        <span class="status-badge">{getEarningsMonthLabel()}</span>
       </div>
-      
-      <div class="stats-list">
-        <div class="stat-row">
-          <div class="stat-info">
-            <span class="stat-title">Días Trabajados</span>
-            <span class="stat-subtitle">Total este mes</span>
+
+      {#if workEntriesThisMonth > 0}
+        <div class="trend-overview">
+          <div class="trend-copy">
+            <span>Ingresos acumulados</span>
+            <strong>{formatCurrency(estimatedEarnings)}</strong>
+            <small>{formatCurrency(averageEarningsPerWorkDay)} por día trabajado</small>
           </div>
-          <button class="stat-value-btn">{workDaysThisMonth} días</button>
+          <div class="trend-chart" role="img" aria-label="Gráfico de ingresos acumulados del mes">
+            <svg viewBox={`0 0 ${earningsTrendChart.width} ${earningsTrendChart.height}`} preserveAspectRatio="none">
+              <line class="chart-grid-line" x1="12" y1="24" x2="308" y2="24" />
+              <line class="chart-grid-line" x1="12" y1="72" x2="308" y2="72" />
+              <line class="chart-grid-line" x1="12" y1="120" x2="308" y2="120" />
+              {#if earningsTrendChart.areaPath}
+                <path class="chart-area" d={earningsTrendChart.areaPath} />
+              {/if}
+              {#if earningsTrendChart.linePath}
+                <path class="chart-line" d={earningsTrendChart.linePath} />
+              {/if}
+              {#if earningsTrendChart.lastPoint}
+                <circle
+                  class="chart-point"
+                  cx={earningsTrendChart.lastPoint.x}
+                  cy={earningsTrendChart.lastPoint.y}
+                  r="4"
+                />
+              {/if}
+            </svg>
+            <div class="trend-axis">
+              <span>{earningsTrend[0]?.label || ""}</span>
+              <span>{earningsTrend[earningsTrend.length - 1]?.label || ""}</span>
+            </div>
+          </div>
         </div>
 
-        <div class="stat-row">
-          <div class="stat-info">
-            <span class="stat-title">Mensajes</span>
-            <span class="stat-subtitle">Enviados en total</span>
+        <div class="insight-metrics">
+          <div>
+            <span>Jornadas</span>
+            <strong>{formatWorkDays(workDaysThisMonth)}</strong>
           </div>
-          <button class="stat-value-btn" style="background: var(--bg-input); color: var(--text-primary);">{messagesSent}</button>
+          <div>
+            <span>Registros</span>
+            <strong>{workEntriesThisMonth}</strong>
+          </div>
+          <div>
+            <span>Horas extra</span>
+            <strong>{formatHours(overtimeHoursThisMonth)}</strong>
+          </div>
+          <div>
+            <span>Equipos activos</span>
+            <strong>{earningsBreakdown.length}/{totalTeams}</strong>
+          </div>
         </div>
-      </div>
-    </div>
+      {:else}
+        <div class="stats-empty-state">
+          <TrendingUp size={22} />
+          <span>Sin jornadas registradas este mes</span>
+          <small>Cuando fiches o registres trabajo, aquí verás la tendencia de ingresos.</small>
+        </div>
+      {/if}
+    </section>
 
     <!-- Main Earnings Card -->
     <button
@@ -1816,6 +1963,36 @@
     color: var(--text-primary);
   }
 
+  .action-icon-box.teams {
+    background: var(--bg-purple-subtle);
+    color: var(--purple-color);
+  }
+
+  .action-icon-box.stats {
+    background: var(--bg-success-subtle);
+    color: var(--success-color);
+  }
+
+  .action-icon-box.calendar {
+    background: var(--bg-info-subtle);
+    color: var(--info-color);
+  }
+
+  .action-icon-box.calculator {
+    background: var(--bg-danger-subtle);
+    color: var(--danger-color);
+  }
+
+  .action-icon-box.locations {
+    background: var(--bg-accent-subtle);
+    color: var(--success-color);
+  }
+
+  .action-icon-box.notes {
+    background: color-mix(in srgb, var(--bg-purple-subtle) 72%, var(--bg-card));
+    color: var(--purple-color);
+  }
+
   .action-icon-box.charges,
   .team-picker-icon.charges {
     background: var(--bg-warning-subtle);
@@ -1952,53 +2129,154 @@
     border-radius: 100px;
     font-size: 12px;
     font-weight: 700;
+    white-space: nowrap;
   }
 
-  .stats-list {
+  .monthly-insight {
+    gap: 18px;
+  }
+
+  .trend-overview {
+    display: grid;
+    grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
+    align-items: center;
+    gap: 18px;
+  }
+
+  .trend-copy {
+    min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 5px;
   }
 
-  .stat-row {
+  .trend-copy span,
+  .insight-metrics span {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .trend-copy strong {
+    color: var(--text-primary);
+    font-size: 28px;
+    font-weight: 900;
+    line-height: 1.05;
+    overflow-wrap: anywhere;
+  }
+
+  .trend-copy small {
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  .trend-chart {
+    min-width: 0;
+    display: grid;
+    gap: 6px;
+  }
+
+  .trend-chart svg {
+    width: 100%;
+    height: 132px;
+    overflow: visible;
+  }
+
+  .chart-grid-line {
+    stroke: color-mix(in srgb, var(--border-color) 76%, transparent);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .chart-area {
+    fill: color-mix(in srgb, var(--success-color) 18%, transparent);
+  }
+
+  .chart-line {
+    fill: none;
+    stroke: var(--success-color);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 4;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .chart-point {
+    fill: var(--bg-card);
+    stroke: var(--success-color);
+    stroke-width: 3;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .trend-axis {
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    padding-bottom: 16px;
-    border-bottom: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 700;
   }
 
-  .stat-row:last-child {
-    border-bottom: none;
-    padding-bottom: 0;
+  .insight-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border-top: 1px solid var(--border-color);
+    padding-top: 14px;
+    gap: 12px;
   }
 
-  .stat-info {
+  .insight-metrics div {
+    min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 5px;
   }
 
-  .stat-title {
+  .insight-metrics strong {
+    min-width: 0;
+    color: var(--text-primary);
     font-size: 15px;
-    font-weight: 600;
+    font-weight: 850;
+    overflow-wrap: anywhere;
+  }
+
+  .stats-empty-state {
+    min-height: 150px;
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius-md);
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 8px;
+    padding: 18px;
+    text-align: center;
     color: var(--text-primary);
   }
 
-  .stat-subtitle {
+  .stats-empty-state :global(svg) {
+    color: var(--success-color);
+  }
+
+  .stats-empty-state span {
+    font-size: 15px;
+    font-weight: 800;
+  }
+
+  .stats-empty-state small {
+    max-width: 300px;
     font-size: 13px;
+    line-height: 1.4;
     color: var(--text-secondary);
   }
 
-  .stat-value-btn {
-    background: var(--accent-strong);
-    color: var(--bg-page);
-    border: none;
-    padding: 10px 16px;
-    border-radius: var(--radius-sm);
-    font-weight: 600;
-    font-size: 14px;
-    cursor: pointer;
+  @media (max-width: 680px) {
+    .trend-overview {
+      grid-template-columns: 1fr;
+    }
+
+    .insight-metrics {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
   }
 
 </style>

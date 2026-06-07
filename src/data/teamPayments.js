@@ -1,6 +1,7 @@
 import { db } from './firebase.js';
 import { collection, addDoc, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 import { getWorksByTeamId } from './works.js';
+import { getBankName } from '../helpers/banks.js';
 
 export async function getTeamPaymentsData(teamId) {
     try {
@@ -8,9 +9,23 @@ export async function getTeamPaymentsData(teamId) {
         const works = await getWorksByTeamId(teamId);
         // 2. Get registered payments for the team
         const paymentsQuery = query(collection(db, 'team_payments'), where('teamId', '==', teamId));
-        const paymentsSnapshot = await getDocs(paymentsQuery);
+        const [paymentsSnapshot, privateProfilesSnapshot] = await Promise.all([
+            getDocs(paymentsQuery),
+            getDocs(collection(db, 'teams', teamId, 'privateMemberProfiles'))
+        ]);
         const payments = [];
         paymentsSnapshot.forEach(doc => payments.push({ id: doc.id, ...doc.data() }));
+        const privateProfiles = new Map();
+        privateProfilesSnapshot.forEach(doc => {
+            const data = doc.data() || {};
+            privateProfiles.set(doc.id, {
+                phone: typeof data.phone === 'string' ? data.phone : '',
+                iban: typeof data.iban === 'string' ? data.iban : '',
+                bankName: typeof data.bankName === 'string' && data.bankName.trim()
+                    ? data.bankName
+                    : getBankName(data.iban)
+            });
+        });
 
         // 3. Get team document to have rates and member names
         const teamDoc = await getDoc(doc(db, 'teams', teamId));
@@ -24,6 +39,7 @@ export async function getTeamPaymentsData(teamId) {
         const memberBalances = membersData.map(member => {
             const userId = member.id;
             const settings = memberSettings[userId] || {};
+            const privateProfile = privateProfiles.get(userId) || {};
             const dailyRate = Number(settings.dailyRate) || 0;
             const extraHourRate = Number(settings.extraHourRate) || 0;
 
@@ -51,7 +67,7 @@ export async function getTeamPaymentsData(teamId) {
                 }
             });
 
-            const totalPaid = userPayments.reduce((sum, p) => sum + p.amount, 0);
+            const totalPaid = userPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
             const balance = totalEarned - totalPaid;
 
             return {
@@ -66,6 +82,7 @@ export async function getTeamPaymentsData(teamId) {
                 balance,
                 dailyRate,
                 extraHourRate,
+                privateProfile,
                 payments: userPayments,
                 works: userWorks
             };
@@ -78,13 +95,15 @@ export async function getTeamPaymentsData(teamId) {
     }
 }
 
-export async function registerTeamPayment(teamId, userId, amount, type, registeredBy = null) {
+export async function registerTeamPayment(teamId, userId, amount, type, registeredBy = null, method = 'cash') {
     try {
+        const normalizedMethod = ['cash', 'transfer', 'bizum'].includes(method) ? method : 'cash';
         const paymentDoc = {
             teamId,
             userId,
             amount: Number(amount) || 0,
             type, // 'total' or 'partial'
+            method: normalizedMethod,
             date: new Date().toISOString(),
             createdAt: new Date().toISOString()
         };
