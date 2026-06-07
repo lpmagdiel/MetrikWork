@@ -1,6 +1,6 @@
 export const updateData = {
-  version: "0.9.83", // Actualiza este valor en cada release
-  message: "Novedades de MetricWork 0.9.83 - Beta",
+  version: "0.9.84", // Actualiza este valor en cada release
+  message: "Novedades de MetricWork 0.9.84 - Beta",
   features: [
     "Nuevo flujo de creación de equipos con configuración de pago y fecha de cobro desde el inicio.",
     "Pagos de equipo mejorados con saldo por miembro, historial, comprobantes y reportes exportables.",

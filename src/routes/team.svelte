@@ -13,6 +13,7 @@
     Info,
     Phone,
     Landmark,
+    WalletCards,
     Copy,
     DollarSign,
     Save,
@@ -606,6 +607,15 @@
                 <DollarSign size={24} />
               </div>
               <span>Pagos</span>
+            </button>
+            <button
+              class="menu-card"
+              onclick={() => (navigateTo(`/teams/${team.id}/charges`))}
+            >
+              <div class="menu-icon charges">
+                <WalletCards size={24} />
+              </div>
+              <span>Cobros</span>
             </button>
           {/if}
           {#if canViewLocations}
@@ -1242,6 +1252,10 @@
   .menu-icon.payments {
     background: var(--bg-success-subtle);
     color: var(--success-color);
+  }
+  .menu-icon.charges {
+    background: var(--bg-warning-subtle);
+    color: var(--warning-color);
   }
   .menu-icon.locations {
     background: var(--bg-info-subtle);

@@ -19,6 +19,13 @@ export const selectedTeam = derived(
 
 let teamsUnsubscribe;
 
+function normalizeCompanyProfile(profile = {}) {
+    const fields = ['name', 'taxId', 'email', 'phone', 'address', 'iban', 'bankName', 'bizum'];
+    return Object.fromEntries(
+        fields.map((field) => [field, String(profile?.[field] || '').trim()])
+    );
+}
+
 export function getTeamMembers() {
     const teamData = get(selectedTeam);
     if (!teamData || !teamData.memberSettings) return [];
@@ -384,6 +391,10 @@ export async function updateTeamProfile(teamId, data) {
 
         if (typeof data.projectBudgetCurrency === 'string') {
             updateData.projectBudgetCurrency = data.projectBudgetCurrency.trim().toUpperCase() || 'MXN';
+        }
+
+        if (data.companyProfile !== undefined) {
+            updateData.companyProfile = normalizeCompanyProfile(data.companyProfile);
         }
 
         await updateDoc(doc(db, 'teams', teamId), updateData);

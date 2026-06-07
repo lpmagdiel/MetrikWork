@@ -108,6 +108,11 @@ service cloud.firestore {
         .hasOnly(["projectBudget", "projectBudgetCurrency", "updatedAt"]);
     }
 
+    function isLocationBudgetUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(["budget", "updatedAt"]);
+    }
+
     function isAllowedTeamUpdateShape() {
       return request.resource.data.admin == resource.data.admin &&
              resource.data.admin in request.resource.data.members &&
@@ -117,6 +122,7 @@ service cloud.firestore {
                "adminEmail",
                "photoURL",
                "themePrimaryColor",
+               "companyProfile",
                "overtimeLimitHours",
                "nonWorkingDays",
                "projectBudget",
@@ -558,7 +564,8 @@ service cloud.firestore {
                "updatedAt",
                "phone",
                "address",
-               "iban"
+               "iban",
+               "bankName"
              ]) &&
              isPublicUserProfileDocument(request.resource.data);
     }
@@ -568,6 +575,7 @@ service cloud.firestore {
         "phone",
         "address",
         "iban",
+        "bankName",
         "updatedAt"
       ]);
     }
@@ -576,6 +584,7 @@ service cloud.firestore {
       return request.resource.data.keys().hasOnly([
         "phone",
         "iban",
+        "bankName",
         "updatedAt"
       ]);
     }
@@ -736,6 +745,13 @@ service cloud.firestore {
                             hasTeamPermission(teamId, "stats", "edit") &&
                             isStatsBudgetUpdate()
                           ) ||
+                          (
+                            (
+                              hasTeamPermission(teamId, "payments", "create") ||
+                              hasTeamPermission(teamId, "payments", "edit")
+                            ) &&
+                            isStatsBudgetUpdate()
+                          ) ||
                           isAcceptingTeamInvitation(teamId) ||
                           isSelfLeavingTeam(teamId)
                         )
@@ -792,10 +808,34 @@ service cloud.firestore {
                       hasTeamPermission(teamId, "inventory", "create");
         allow update: if hasTeamPermission(teamId, "locations", "edit") ||
                       hasTeamPermission(teamId, "settings", "edit") ||
-                      hasTeamPermission(teamId, "inventory", "edit");
+                      hasTeamPermission(teamId, "inventory", "edit") ||
+                      (
+                        (
+                          hasTeamPermission(teamId, "payments", "create") ||
+                          hasTeamPermission(teamId, "payments", "edit")
+                        ) &&
+                        isLocationBudgetUpdate()
+                      );
         allow delete: if hasTeamPermission(teamId, "locations", "delete") ||
                       hasTeamPermission(teamId, "settings", "delete") ||
                       hasTeamPermission(teamId, "inventory", "delete");
+      }
+
+      match /charges/{chargeId} {
+        allow read: if hasTeamPermission(teamId, "payments", "view") ||
+                    hasTeamPermission(teamId, "stats", "view");
+        allow create: if hasTeamPermission(teamId, "payments", "create");
+        allow update: if hasTeamPermission(teamId, "payments", "edit") ||
+                      hasTeamPermission(teamId, "payments", "create");
+        allow delete: if hasTeamPermission(teamId, "payments", "delete");
+      }
+
+      match /chargeTemplates/{templateId} {
+        allow read: if hasTeamPermission(teamId, "payments", "view") ||
+                    hasTeamPermission(teamId, "payments", "create");
+        allow create: if hasTeamPermission(teamId, "payments", "create");
+        allow update, delete: if isTeamAdmin(teamId) ||
+                              resource.data.createdBy == request.auth.uid;
       }
 
       match /messages/{messageId} {

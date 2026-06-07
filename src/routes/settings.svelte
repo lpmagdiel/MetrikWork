@@ -59,6 +59,7 @@
   let phone = $state("");
   let address = $state("");
   let iban = $state("");
+  let bankName = $state("");
   let isSaving = $state(false);
   let showToast = $state(false);
   let toastMessage = $state("");
@@ -139,6 +140,7 @@
         phone = privateProfile.phone || "";
         address = privateProfile.address || "";
         iban = privateProfile.iban || "";
+        bankName = privateProfile.bankName || "";
       }
     }
   });
@@ -152,6 +154,7 @@
         phone: phone.trim(),
         address: address.trim(),
         iban: iban.trim().toUpperCase(),
+        bankName: bankName.trim(),
       }, {
         teamIds: ($teamsStore || []).map((team) => team.id),
       });
@@ -468,6 +471,20 @@
               placeholder="ES00 0000 0000 0000 0000 0000"
               autocomplete="off"
               inputmode="text"
+            />
+          </div>
+        </div>
+
+        <div class="input-group">
+          <label for="bankName">Banco</label>
+          <div class="input-wrapper">
+            <Landmark size={18} />
+            <input
+              type="text"
+              id="bankName"
+              bind:value={bankName}
+              placeholder="Nombre del banco"
+              autocomplete="organization"
             />
           </div>
         </div>

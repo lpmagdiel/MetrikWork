@@ -186,6 +186,7 @@
     inventory: routeLoaders["/inventory"],
     chat: routeLoaders["/chat"],
     payments: routeLoaders["/team-payments"],
+    charges: () => import("./routes/team-charges.svelte"),
     settings: () => import("./routes/team-settings.svelte"),
     stats: () => import("./routes/team-stats.svelte"),
     "my-stats": () => import("./routes/user-stats.svelte"),

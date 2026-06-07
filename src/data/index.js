@@ -13,6 +13,7 @@ export * from './presence.js';
 export * from './works.js';
 export * from './teamStats.js';
 export * from './teamPayments.js';
+export * from './teamCharges.js';
 export * from './systemAdmin.js';
 export * from './teamSizes.js';
 export * from './templates.js';

@@ -67,6 +67,7 @@
   let productSearchError = $state("");
   let productCatalogRequestId = 0;
   let showStatsTeamPicker = $state(false);
+  let showChargesTeamPicker = $state(false);
   let todayAssignedTasks = $state([]);
   let todayRequestsOverview = $state({ own: [], incoming: [], invitations: [] });
   let todayWorkAssignments = $state([]);
@@ -104,6 +105,11 @@
       .sort((a, b) => (a.quantity - a.minStock) - (b.quantity - b.minStock)),
   );
   let todayActionItems = $derived.by(() => buildTodayActionItems());
+  let chargeAccessTeams = $derived.by(() =>
+    ($teamsStore || []).filter((team) =>
+      hasTeamPermission(team, $userStore?.uid, "payments", "view"),
+    ),
+  );
 
   let filteredProducts = $derived.by(() => {
     const term = normalizeSearch(productSearchTerm);
@@ -386,6 +392,20 @@
   function openTeamMyStats(team) {
     showStatsTeamPicker = false;
     navigateTo(`/teams/${team.id}/my-stats`);
+  }
+
+  function openCharges() {
+    if (chargeAccessTeams.length === 0) return;
+    if (chargeAccessTeams.length === 1) {
+      navigateTo(`/teams/${chargeAccessTeams[0].id}/charges`);
+      return;
+    }
+    showChargesTeamPicker = true;
+  }
+
+  function openTeamCharges(team) {
+    showChargesTeamPicker = false;
+    navigateTo(`/teams/${team.id}/charges`);
   }
 
   function buildTodayActionItems() {
@@ -780,6 +800,14 @@
         </div>
         <span class="action-label">Estadísticas</span>
       </button>
+      {#if chargeAccessTeams.length > 0}
+        <button type="button" class="action-btn" onclick={openCharges}>
+          <div class="action-icon-box charges">
+            <WalletCards size={28} />
+          </div>
+          <span class="action-label">Cobros</span>
+        </button>
+      {/if}
       <a href="/calendar" class="action-btn">
         <div class="action-icon-box">
           <Calendar size={28} />
@@ -920,6 +948,31 @@
         <button type="button" class="team-picker-item" onclick={() => openTeamMyStats(team)}>
           <span class="team-picker-icon">
             <Users size={18} />
+          </span>
+          <span>
+            <strong>{team.name || team.team || "Equipo"}</strong>
+            <small>{team.members?.length || 0} miembros</small>
+          </span>
+          <ArrowRight size={18} />
+        </button>
+      {/each}
+    </div>
+  </div>
+</SliceContainer>
+
+<SliceContainer bind:show={showChargesTeamPicker}>
+  <div class="team-picker-slice">
+    <div class="team-picker-header">
+      <span>Cobros</span>
+      <h2>Elige un equipo</h2>
+      <p>Verás los cobros, plantillas y facturas del equipo seleccionado.</p>
+    </div>
+
+    <div class="team-picker-list">
+      {#each chargeAccessTeams as team (team.id)}
+        <button type="button" class="team-picker-item" onclick={() => openTeamCharges(team)}>
+          <span class="team-picker-icon charges">
+            <WalletCards size={18} />
           </span>
           <span>
             <strong>{team.name || team.team || "Equipo"}</strong>
@@ -1761,6 +1814,12 @@
     justify-content: center;
     box-shadow: var(--shadow-card);
     color: var(--text-primary);
+  }
+
+  .action-icon-box.charges,
+  .team-picker-icon.charges {
+    background: var(--bg-warning-subtle);
+    color: var(--warning-color);
   }
 
   .action-label {

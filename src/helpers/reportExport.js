@@ -55,7 +55,28 @@ function buildSection(section) {
   `;
 }
 
-function buildReportHtml({ title, subtitle = "", meta = [], sections = [] }, options = {}) {
+function buildSignatures(signatures = []) {
+  if (!signatures.length) return "";
+
+  return `
+    <section class="signatures" aria-label="Firmas">
+      ${signatures
+        .map(
+          (signature) => `
+            <div class="signature-box">
+              <div class="signature-line"></div>
+              <strong>${escapeHtml(signature.label)}</strong>
+              <span>${escapeHtml(signature.name || "")}</span>
+              <small>${escapeHtml(signature.note || "Nombre, firma y fecha")}</small>
+            </div>
+          `,
+        )
+        .join("")}
+    </section>
+  `;
+}
+
+function buildReportHtml({ title, subtitle = "", meta = [], sections = [], signatures = [] }, options = {}) {
   const generatedAt = new Date().toLocaleString("es-ES");
   const includeActions = options.includeActions !== false;
   return `<!doctype html>
@@ -152,6 +173,31 @@ function buildReportHtml({ title, subtitle = "", meta = [], sections = [] }, opt
       font-size: 11px;
       text-transform: uppercase;
     }
+    .signatures {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 40px;
+      margin-top: 58px;
+      break-inside: avoid;
+    }
+    .signature-box {
+      min-height: 112px;
+      display: grid;
+      align-content: end;
+      gap: 5px;
+    }
+    .signature-line {
+      border-top: 1px solid #172033;
+      margin-bottom: 6px;
+    }
+    .signature-box strong {
+      font-size: 13px;
+    }
+    .signature-box span,
+    .signature-box small {
+      color: #647084;
+      font-size: 12px;
+    }
     @media print {
       body { padding: 0; background: #fff; }
       .page { border: 0; max-width: none; }
@@ -191,6 +237,7 @@ function buildReportHtml({ title, subtitle = "", meta = [], sections = [] }, opt
         : ""
     }
     ${sections.map(buildSection).join("")}
+    ${buildSignatures(signatures)}
   </main>
 </body>
 </html>`;

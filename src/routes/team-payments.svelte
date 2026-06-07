@@ -293,6 +293,8 @@
         const payments = member?.payments || [];
         const receiptNumber = payment?.id || `TEMP-${Date.now()}`;
         const teamName = team?.name || team?.team || "Equipo";
+        const company = team?.companyProfile || {};
+        const companyName = company.name || teamName;
         const memberName = member?.name || member?.email || "Usuario";
         const registeredBy = payment?.registeredByName || $userStore?.name || $userStore?.email || "Usuario";
         const generatedAt = new Date().toISOString();
@@ -450,7 +452,7 @@
         <header>
             <div>
                 <h1>Comprobante de pago</h1>
-                <p class="muted">MetricWork · ${escapeHtml(teamName)}</p>
+                <p class="muted">MetricWork · ${escapeHtml(companyName)}</p>
             </div>
             <div class="receipt-id">
                 <strong>No. ${escapeHtml(receiptNumber)}</strong>
@@ -459,6 +461,14 @@
         </header>
 
         <section class="grid">
+            <div class="box">
+                <span class="label">Empresa</span>
+                <span class="value">${escapeHtml(companyName)}</span>
+            </div>
+            <div class="box">
+                <span class="label">NIF/CIF empresa</span>
+                <span class="value">${escapeHtml(company.taxId || "Sin dato")}</span>
+            </div>
             <div class="box">
                 <span class="label">Equipo</span>
                 <span class="value">${escapeHtml(teamName)}</span>

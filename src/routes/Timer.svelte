@@ -15,10 +15,12 @@
     Trash2,
     TimerReset,
     Briefcase,
+    CalendarDays,
   } from "lucide-svelte";
   import Toast from "../components/Toast.svelte";
   import {
     registerWorkday,
+    hasWorkdayForDate,
     selectedTeamId,
     teamsStore,
     userStore,
@@ -46,11 +48,16 @@
   const POMODORO_FOCUS_SECONDS = 25 * 60;
   const POMODORO_SHORT_BREAK_SECONDS = 5 * 60;
   const POMODORO_LONG_BREAK_SECONDS = 15 * 60;
+  const TIMER_MODE_LABELS = {
+    "full-day": "Jornada completa",
+    variable: "Tiempo parcial",
+    overtime: "Horas extra",
+  };
 
   let activeTeamId = $state("");
   let taskTitle = $state("");
   let note = $state("");
-  let timerMode = $state("variable");
+  let timerMode = $state("full-day");
   let pomodoroEnabled = $state(false);
   let pomodoroPhase = $state("focus");
   let pomodoroCycle = $state(1);
@@ -69,6 +76,8 @@
   let checkInLocation = $state(null);
   let checkOutLocation = $state(null);
   let isCapturingLocation = $state(false);
+  let hasRegularWorkdayToday = $state(false);
+  let isCheckingWorkday = $state(false);
   let workdayTemplateName = $state("");
   let isSavingTemplate = $state(false);
   let deletingTemplateId = $state("");
@@ -77,12 +86,16 @@
   let selectedTeam = $derived(
     $teamsStore.find((team) => team.id === activeTeamId) || null,
   );
+  let memberSettings = $derived(selectedTeam?.memberSettings?.[$userStore?.uid] || {});
+  let dailyRate = $derived(Number(memberSettings.dailyRate) || 0);
   let overtimeLimitHours = $derived(getOvertimeLimitHours(selectedTeam));
   let overtimeEnabled = $derived(hasOvertimeEnabled(selectedTeam));
   let todayDate = $derived(getTodayDateString());
   let isTodayNonWorkingDay = $derived(isNonWorkingDay(selectedTeam, todayDate));
   let todayNonWorkingMessage = $derived(getNonWorkingDayMessage(selectedTeam, todayDate));
   let isRunning = $derived(Boolean(startedAt && !endedAt));
+  let hasRequiredTask = $derived(timerMode === "full-day" || taskTitle.trim().length > 0);
+  let fullDayStartBlocked = $derived(timerMode === "full-day" && (hasRegularWorkdayToday || isCheckingWorkday));
   let selectedTeamName = $derived(selectedTeam?.name || selectedTeam?.team || "Selecciona equipo");
   let teamOptions = $derived(
     $teamsStore.map((team) => ({
@@ -94,10 +107,18 @@
   );
   let timerModeOptions = $derived([
     {
-      label: "Jornada",
+      label: "Completa",
+      value: "full-day",
+      description: hasRegularWorkdayToday ? "Ya marcada" : dailyRate > 0 ? formatMoney(dailyRate) : "Precio jornada",
+      icon: CalendarDays,
+      disabled: isTodayNonWorkingDay || hasRegularWorkdayToday || isCheckingWorkday,
+    },
+    {
+      label: "Parcial",
       value: "variable",
-      description: "Tiempo normal",
+      description: "Tiempo parcial",
       icon: Clock,
+      disabled: isTodayNonWorkingDay,
     },
     {
       label: "Extra",
@@ -128,8 +149,16 @@
   });
   let trackedWorkSeconds = $derived.by(() => getTrackedWorkSeconds(now));
   let pomodoroPhaseLabel = $derived(pomodoroPhase === "break" ? "Descanso" : "Enfoque");
-  let canStart = $derived(Boolean(activeTeamId && taskTitle.trim() && !isRunning && !isTodayNonWorkingDay && !isCapturingLocation));
-  let canFinish = $derived(Boolean(isRunning && trackedWorkSeconds > 0));
+  let canStart = $derived(Boolean(
+    activeTeamId &&
+    hasRequiredTask &&
+    !isRunning &&
+    !isTodayNonWorkingDay &&
+    !isCapturingLocation &&
+    !fullDayStartBlocked &&
+    (timerMode !== "overtime" || overtimeEnabled),
+  ));
+  let canFinish = $derived(Boolean(isRunning && getDurationSecondsForMode(now) > 0));
 
   $effect(() => {
     const preferredTeamId = $selectedTeamId || $teamsStore[0]?.id || "";
@@ -145,9 +174,55 @@
   });
 
   $effect(() => {
-    if (!isRunning && !overtimeEnabled && timerMode === "overtime") {
+    if (!startedAt && !overtimeEnabled && timerMode === "overtime") {
       timerMode = "variable";
     }
+  });
+
+  $effect(() => {
+    if (!startedAt && timerMode === "full-day" && hasRegularWorkdayToday) {
+      timerMode = "variable";
+    }
+  });
+
+  $effect(() => {
+    if (!startedAt && timerMode === "full-day" && pomodoroEnabled) {
+      pomodoroEnabled = false;
+      resetPomodoroProgress();
+    }
+  });
+
+  $effect(() => {
+    const teamId = activeTeamId;
+    const userId = $userStore?.uid;
+    const date = todayDate;
+
+    if (!teamId || !userId) {
+      hasRegularWorkdayToday = false;
+      isCheckingWorkday = false;
+      return;
+    }
+
+    let cancelled = false;
+    isCheckingWorkday = true;
+
+    hasWorkdayForDate(teamId, userId, date)
+      .then((exists) => {
+        if (!cancelled) hasRegularWorkdayToday = exists;
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          hasRegularWorkdayToday = false;
+          console.warn("No se pudo comprobar la jornada de hoy:", error);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) isCheckingWorkday = false;
+      });
+
+    return () => {
+      cancelled = true;
+    };
   });
 
   $effect(() => {
@@ -195,6 +270,97 @@
     return (seconds / 3600).toFixed(2);
   }
 
+  function formatMoney(amount) {
+    return new Intl.NumberFormat("es-ES", {
+      style: "currency",
+      currency: selectedTeam?.projectBudgetCurrency || "MXN",
+      maximumFractionDigits: 2,
+    }).format(Number(amount) || 0);
+  }
+
+  function normalizeTimerMode(value) {
+    if (value === "full-day" || value === "overtime") return value;
+    return "variable";
+  }
+
+  function getTimerModeLabel(value) {
+    return TIMER_MODE_LABELS[normalizeTimerMode(value)] || TIMER_MODE_LABELS.variable;
+  }
+
+  function getEntryTitle(title, mode) {
+    return title.trim() || getTimerModeLabel(mode);
+  }
+
+  function getDurationSecondsForMode(timestamp = Date.now()) {
+    if (!startedAt) return 0;
+    if (timerMode === "full-day") {
+      const end = endedAt?.getTime() || timestamp;
+      return Math.max(0, Math.floor((end - startedAt.getTime()) / 1000));
+    }
+    return getTrackedWorkSeconds(timestamp);
+  }
+
+  function createTimedWorkday(totalSeconds, totalHours, finishDate, finishLocation) {
+    const primaryLocation = checkInLocation || finishLocation;
+    const cleanTaskTitle = taskTitle.trim();
+    const cleanNote = note.trim();
+    const workDay = {
+      type: timerMode === "full-day" ? "full-day" : "variable",
+      overtimeHours: timerMode === "overtime" ? totalHours : 0,
+      durationHours: totalHours,
+      durationSeconds: totalSeconds,
+      startedAt: startedAt.toISOString(),
+      endedAt: finishDate.toISOString(),
+      timerMode,
+      pomodoroEnabled: timerMode !== "full-day" && pomodoroEnabled,
+      completedPomodoros: timerMode !== "full-day" ? completedPomodoros : 0,
+      memberGps: primaryLocation?.gps || null,
+      memberLocationCapturedAt: primaryLocation?.capturedAt || null,
+      checkInGps: checkInLocation?.gps || null,
+      checkInLocationCapturedAt: checkInLocation?.capturedAt || null,
+      checkOutGps: finishLocation?.gps || null,
+      checkOutLocationCapturedAt: finishLocation?.capturedAt || null,
+    };
+
+    if (timerMode !== "full-day") {
+      workDay.variableHours = totalHours;
+    }
+
+    if (cleanTaskTitle) {
+      workDay.taskTitle = cleanTaskTitle;
+    }
+
+    if (cleanNote) {
+      workDay.note = cleanNote;
+    }
+
+    return workDay;
+  }
+
+  async function checkRegularWorkdayNow(teamId = activeTeamId, userId = $userStore?.uid, date = todayDate) {
+    if (!teamId || !userId) {
+      hasRegularWorkdayToday = false;
+      return false;
+    }
+
+    isCheckingWorkday = true;
+    try {
+      const exists = await hasWorkdayForDate(teamId, userId, date);
+      if (teamId === activeTeamId && userId === $userStore?.uid && date === todayDate) {
+        hasRegularWorkdayToday = exists;
+      }
+      return exists;
+    } catch (error) {
+      console.error("Error checking today's workday:", error);
+      showNotification("No se pudo comprobar la jornada de hoy.", "warning");
+      return false;
+    } finally {
+      if (teamId === activeTeamId && userId === $userStore?.uid && date === todayDate) {
+        isCheckingWorkday = false;
+      }
+    }
+  }
+
   function getPomodoroBreakSeconds(completedFocusSessions) {
     return completedFocusSessions > 0 && completedFocusSessions % 4 === 0
       ? POMODORO_LONG_BREAK_SECONDS
@@ -236,6 +402,13 @@
   }
 
   function handlePomodoroToggle(event) {
+    if (timerMode === "full-day") {
+      event.currentTarget.checked = false;
+      pomodoroEnabled = false;
+      resetPomodoroProgress();
+      return;
+    }
+
     pomodoroEnabled = event.currentTarget.checked;
     resetPomodoroProgress();
   }
@@ -245,11 +418,14 @@
     const payload = template?.payload || {};
     taskTitle = payload.taskTitle || "";
     note = payload.note || "";
+    const nextMode = normalizeTimerMode(payload.timerMode);
     timerMode =
-      payload.timerMode === "overtime" && overtimeEnabled
-        ? "overtime"
-        : "variable";
-    pomodoroEnabled = Boolean(payload.pomodoroEnabled);
+      nextMode === "overtime" && !overtimeEnabled
+        ? "variable"
+        : nextMode === "full-day" && hasRegularWorkdayToday
+        ? "variable"
+        : nextMode;
+    pomodoroEnabled = timerMode !== "full-day" && Boolean(payload.pomodoroEnabled);
     resetPomodoroProgress();
     workdayTemplateName = template?.name || "";
   }
@@ -439,8 +615,8 @@
       activeTeamId = savedTimer.activeTeamId || activeTeamId;
       taskTitle = savedTimer.taskTitle || "";
       note = savedTimer.note || "";
-      timerMode = savedTimer.timerMode === "overtime" ? "overtime" : "variable";
-      pomodoroEnabled = Boolean(savedTimer.pomodoroEnabled);
+      timerMode = normalizeTimerMode(savedTimer.timerMode);
+      pomodoroEnabled = timerMode !== "full-day" && Boolean(savedTimer.pomodoroEnabled);
       pomodoroPhase = savedTimer.pomodoroPhase === "break" ? "break" : "focus";
       pomodoroCycle = Math.max(1, Number(savedTimer.pomodoroCycle) || 1);
       pomodoroPhaseStartedAt = savedTimer.pomodoroPhaseStartedAt
@@ -469,10 +645,37 @@
       return;
     }
 
-    if (!canStart) {
+    if (!activeTeamId) {
+      showNotification("Selecciona un equipo antes de iniciar.", "error");
+      return;
+    }
+
+    if (timerMode === "overtime" && !overtimeEnabled) {
+      await showErrorAlert("Horas extra desactivadas", getOvertimeLimitMessage(selectedTeam));
+      return;
+    }
+
+    if (timerMode !== "full-day" && !taskTitle.trim()) {
       showNotification("Selecciona un equipo y escribe la tarea antes de iniciar.", "error");
       return;
     }
+
+    if (timerMode === "full-day") {
+      const alreadyHasWorkday = await checkRegularWorkdayNow();
+      if (alreadyHasWorkday) {
+        await showErrorAlert(
+          "Jornada ya registrada",
+          "Hoy ya tienes una jornada completa o media jornada. Usa tiempo parcial u horas extra para registrar otra entrada.",
+        );
+        return;
+      }
+    }
+
+    if (!canStart) {
+      showNotification("No se pudo iniciar el registro.", "error");
+      return;
+    }
+
     const startDate = new Date();
     startedAt = startDate;
     endedAt = null;
@@ -526,8 +729,9 @@
     if (pomodoroEnabled) {
       syncPomodoro(finishDate.getTime());
     }
-    const totalSeconds = Math.max(1, getTrackedWorkSeconds(finishDate.getTime()));
+    const totalSeconds = Math.max(1, getDurationSecondsForMode(finishDate.getTime()));
     const totalHours = Number(formatHours(totalSeconds));
+    const finishedTimerMode = timerMode;
     endedAt = finishDate;
     stopTicker();
     isSaving = true;
@@ -539,6 +743,20 @@
         persistActiveTimer();
         await showErrorAlert("Día no laborable", todayNonWorkingMessage);
         return;
+      }
+
+      if (timerMode === "full-day") {
+        const alreadyHasWorkday = await checkRegularWorkdayNow();
+        if (alreadyHasWorkday) {
+          endedAt = null;
+          startTicker();
+          persistActiveTimer();
+          await showErrorAlert(
+            "Jornada ya registrada",
+            "Hoy ya tienes una jornada completa o media jornada. Usa tiempo parcial u horas extra para registrar otra entrada.",
+          );
+          return;
+        }
       }
 
       if (timerMode === "overtime" && !overtimeEnabled) {
@@ -559,28 +777,8 @@
 
       const finishLocation = await captureLocationSnapshot(finishDate);
       checkOutLocation = finishLocation;
-      const primaryLocation = checkInLocation || finishLocation;
       const workDayToRegister = applyWorkdayOvertimeLimit(
-        {
-          type: "variable",
-          overtimeHours: timerMode === "overtime" ? totalHours : 0,
-          variableHours: totalHours,
-          durationHours: totalHours,
-          durationSeconds: totalSeconds,
-          startedAt: startedAt.toISOString(),
-          endedAt: finishDate.toISOString(),
-          taskTitle: taskTitle.trim(),
-          note: note.trim(),
-          timerMode,
-          pomodoroEnabled,
-          completedPomodoros,
-          memberGps: primaryLocation?.gps || null,
-          memberLocationCapturedAt: primaryLocation?.capturedAt || null,
-          checkInGps: checkInLocation?.gps || null,
-          checkInLocationCapturedAt: checkInLocation?.capturedAt || null,
-          checkOutGps: finishLocation?.gps || null,
-          checkOutLocationCapturedAt: finishLocation?.capturedAt || null,
-        },
+        createTimedWorkday(totalSeconds, totalHours, finishDate, finishLocation),
         selectedTeam,
       );
 
@@ -594,12 +792,12 @@
       const savedSeconds = Number(workDayToRegister.durationSeconds) || totalSeconds;
       lastEntry = {
         teamName: selectedTeam.name || selectedTeam.team || "Equipo",
-        taskTitle: taskTitle.trim(),
+        taskTitle: getEntryTitle(taskTitle, finishedTimerMode),
         duration: formatTime(savedSeconds),
         startedAt,
         endedAt: finishDate,
-        timerMode,
-        pomodoroEnabled,
+        timerMode: finishedTimerMode,
+        pomodoroEnabled: finishedTimerMode !== "full-day" && pomodoroEnabled,
         checkInLocation,
         checkOutLocation: finishLocation,
       };
@@ -612,27 +810,34 @@
       resetPomodoroProgress();
       now = Date.now();
       clearActiveTimer();
+      if (finishedTimerMode === "full-day") {
+        hasRegularWorkdayToday = true;
+      }
       await showSuccessAlert(
         result?.queued
           ? "Guardado sin conexión"
-          : timerMode === "overtime" ? "Horas extra registradas" : "Jornada registrada",
+          : finishedTimerMode === "full-day"
+          ? "Jornada completa registrada"
+          : finishedTimerMode === "overtime" ? "Horas extra registradas" : "Jornada parcial registrada",
         result?.queued
           ? "El registro quedó en el dispositivo y se sincronizará al volver la conexión."
+          : finishedTimerMode === "full-day"
+          ? "La jornada completa se guardó con entrada, salida y GPS."
           : pomodoroEnabled
           ? "Tiempo de enfoque registrado correctamente."
-          : overtimeLimitHours > 0 && totalHours > overtimeLimitHours && timerMode === "variable"
+          : overtimeLimitHours > 0 && totalHours > overtimeLimitHours && finishedTimerMode === "variable"
           ? `Jornada registrada con el máximo permitido: ${overtimeLimitHours}h.`
-          : "Jornada variable registrada correctamente.",
+          : "Tiempo parcial registrado correctamente.",
       );
     } catch (error) {
-      console.error("Error registering variable workday:", error);
+      console.error("Error registering timed workday:", error);
       endedAt = null;
       checkOutLocation = null;
       startTicker();
       persistActiveTimer();
       await showErrorAlert(
         "Error al registrar jornada",
-        error?.message || "No se pudo registrar la jornada variable.",
+        error?.message || "No se pudo registrar la jornada.",
       );
     } finally {
       isSaving = false;
@@ -648,7 +853,7 @@
   <Toast message={messageToast} type={typeToast} show={showToast} />
 
   <header class="timer-header">
-    <TitleHeader title="Timer" description="Jornada variable" icon={Clock} iconPosition="right" />
+    <TitleHeader title="Timer" description="Fichaje de jornada" icon={Clock} iconPosition="right" />
   </header>
 
   <main class="timer-content">
@@ -698,7 +903,7 @@
           <strong>{formatTime(pomodoroRemainingSeconds)}</strong>
           <p>{formatTime(trackedWorkSeconds)} de enfoque acumulado</p>
         {:else}
-          <span>{timerMode === "overtime" ? "Horas extra" : "Jornada"}</span>
+          <span>{getTimerModeLabel(timerMode)}</span>
           <strong>{formatTime(elapsedSeconds)}</strong>
           <p>{formatHours(elapsedSeconds)} h registradas</p>
         {/if}
@@ -723,8 +928,8 @@
         </div>
         <div>
           <Clock size={16} />
-          <span>Máximo</span>
-          <strong>{overtimeEnabled ? `${overtimeLimitHours} h` : "Sin extra"}</strong>
+          <span>{timerMode === "full-day" ? "Pago" : "Máximo"}</span>
+          <strong>{timerMode === "full-day" ? (dailyRate > 0 ? formatMoney(dailyRate) : "Jornada") : overtimeEnabled ? `${overtimeLimitHours} h` : "Sin extra"}</strong>
         </div>
       </div>
 
@@ -747,14 +952,18 @@
         <p class="notice error">{todayNonWorkingMessage}</p>
       {/if}
 
+      {#if timerMode === "full-day" && hasRegularWorkdayToday}
+        <p class="notice error">Hoy ya tienes una jornada completa o media jornada registrada.</p>
+      {/if}
+
       <label class="field quick-task" for="task">
-        <span>Tarea</span>
+        <span>{timerMode === "full-day" ? "Tarea opcional" : "Tarea"}</span>
         <input
           id="task"
           type="text"
           bind:value={taskTitle}
           disabled={isRunning || isSaving}
-          placeholder="Instalación, soporte, revisión..."
+          placeholder={timerMode === "full-day" ? "Turno, obra, cliente..." : "Instalación, soporte, revisión..."}
         />
       </label>
 
@@ -820,7 +1029,7 @@
                   disabled={isRunning || isSaving}
                 >
                   <strong>{template.name}</strong>
-                  <small>{template.payload?.timerMode === "overtime" ? "Horas extra" : "Jornada"}</small>
+                  <small>{getTimerModeLabel(template.payload?.timerMode)}</small>
                 </button>
                 {#if canManageTemplate(template)}
                   <button
@@ -855,7 +1064,7 @@
         <input
           type="checkbox"
           checked={pomodoroEnabled}
-          disabled={isRunning || isSaving}
+          disabled={timerMode === "full-day" || isRunning || isSaving}
           onchange={handlePomodoroToggle}
         />
         <span class="switch-track" aria-hidden="true">

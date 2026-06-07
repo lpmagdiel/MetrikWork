@@ -67,6 +67,7 @@
   let customRoles = $state([]);
   let teamName = $state("");
   let teamCurrency = $state("MXN");
+  let companyProfile = $state(createDefaultCompanyProfile());
   let overtimeLimitHours = $state(0);
   let nonWorkingDays = $state([]);
   let themePrimaryColor = $state("#a7f3d0");
@@ -128,6 +129,7 @@
     if (team) {
       teamName = team.team || team.name || "";
       teamCurrency = team.projectBudgetCurrency || "MXN";
+      companyProfile = normalizeCompanyProfile(team.companyProfile);
       overtimeLimitHours = Number(team.overtimeLimitHours) || 0;
       nonWorkingDays = normalizeNonWorkingDays(team.nonWorkingDays);
       themePrimaryColor = normalizeThemeColor(team.themePrimaryColor) || "#a7f3d0";
@@ -161,6 +163,26 @@
 
   function goToTeamHome() {
     navigateTo(teamId ? `/teams/${teamId}` : "/teams");
+  }
+
+  function createDefaultCompanyProfile() {
+    return {
+      name: "",
+      taxId: "",
+      email: "",
+      phone: "",
+      address: "",
+      iban: "",
+      bankName: "",
+      bizum: "",
+    };
+  }
+
+  function normalizeCompanyProfile(profile = {}) {
+    const defaults = createDefaultCompanyProfile();
+    return Object.fromEntries(
+      Object.keys(defaults).map((key) => [key, String(profile?.[key] || "").trim()]),
+    );
   }
 
   function getMemberPhoto(member) {
@@ -374,6 +396,7 @@
         name: teamName,
         photoURL,
         projectBudgetCurrency: teamCurrency,
+        companyProfile: normalizeCompanyProfile(companyProfile),
         overtimeLimitHours: nextOvertimeLimitHours,
         nonWorkingDays: nextNonWorkingDays,
         themePrimaryColor,
@@ -644,8 +667,13 @@
     </div>
   {:else}
     <div class="content">
-      <section class="section">
-        <h2>Perfil</h2>
+      <section class="section profile-section">
+        <div class="section-heading-row profile-heading">
+          <div>
+            <h2>Perfil</h2>
+            <p>Ajustes generales, facturación y reglas de jornada.</p>
+          </div>
+        </div>
         <div class="profile-row">
           <div class="team-photo">
             {#if photoPreview}
@@ -685,7 +713,7 @@
           </article>
         </div>
 
-        <div class="profile-fields settings-field">
+        <div class="profile-fields settings-field compact-field">
           <label for="teamCurrency">Moneda del equipo</label>
           <select
             id="teamCurrency"
@@ -700,76 +728,174 @@
             Se usará para pagos, presupuestos, ubicaciones, inventario y estadísticas del equipo.
           </p>
         </div>
-        <div class="profile-fields settings-field">
-          <label for="themePrimaryColor">Color primario del equipo</label>
-          <div class="theme-color-control">
-            <div class="input-with-icon color-input">
-              <Palette size={18} />
-              <input
-                id="themePrimaryColor"
-                type="color"
-                bind:value={themePrimaryColor}
-                disabled={!canEditSettings}
-                aria-label="Color primario del equipo"
-              />
-              <input
-                type="text"
-                bind:value={themePrimaryColor}
-                disabled={!canEditSettings}
-                aria-label="Código hexadecimal del color primario"
-              />
-            </div>
-            <div class="theme-presets" aria-label="Colores sugeridos">
-              {#each themeColorPresets as color}
-                <button
-                  type="button"
-                  class:active={themePrimaryColor.toLowerCase() === color}
-                  style={`--preset-color: ${color};`}
-                  onclick={() => selectThemeColor(color)}
-                  disabled={!canEditSettings}
-                  aria-label={`Usar color ${color}`}
-                ></button>
-              {/each}
-            </div>
-          </div>
-          <p class="field-help">
-            Personaliza botones, acentos y estados destacados de este equipo.
-          </p>
-        </div>
-        <div class="profile-fields settings-field">
-          <label for="overtimeLimitHours">Límite de horas extra</label>
-          <input
-            id="overtimeLimitHours"
-            type="number"
-            min="0"
-            step="0.25"
-            bind:value={overtimeLimitHours}
-            disabled={!canEditSettings}
-            placeholder="0 = desactivadas"
-          />
-          <p class="field-help">
-            Usa 0 para desactivar las horas extra. Con un valor mayor, se limita el máximo permitido.
-          </p>
-        </div>
-        <div class="profile-fields settings-field">
-          <span class="field-label">Días no laborables</span>
-          <div class="weekday-grid">
-            {#each WEEKDAY_OPTIONS as day}
-              <label class="weekday-toggle" class:active={nonWorkingDays.includes(day.value)}>
+
+        <details class="settings-panel">
+          <summary class="settings-summary">
+            <span>
+              <CreditCard size={17} />
+              Datos de empresa
+            </span>
+            <small>Facturas, cobros y comprobantes</small>
+            <ChevronDown size={18} />
+          </summary>
+          <div class="settings-panel-body">
+            <div class="company-grid">
+              <div class="profile-fields settings-field">
+                <label for="companyName">Nombre fiscal</label>
                 <input
-                  type="checkbox"
-                  checked={nonWorkingDays.includes(day.value)}
-                  onchange={() => toggleNonWorkingDay(day.value)}
+                  id="companyName"
+                  bind:value={companyProfile.name}
                   disabled={!canEditSettings}
+                  placeholder={teamName || "Nombre de la empresa"}
                 />
-                <span>{day.shortLabel}</span>
-              </label>
-            {/each}
+              </div>
+              <div class="profile-fields settings-field">
+                <label for="companyTaxId">NIF/CIF/RFC</label>
+                <input
+                  id="companyTaxId"
+                  bind:value={companyProfile.taxId}
+                  disabled={!canEditSettings}
+                  placeholder="Documento fiscal"
+                />
+              </div>
+              <div class="profile-fields settings-field">
+                <label for="companyEmail">Email de facturación</label>
+                <input
+                  id="companyEmail"
+                  type="email"
+                  bind:value={companyProfile.email}
+                  disabled={!canEditSettings}
+                  placeholder="facturas@empresa.com"
+                />
+              </div>
+              <div class="profile-fields settings-field">
+                <label for="companyPhone">Teléfono</label>
+                <input
+                  id="companyPhone"
+                  type="tel"
+                  bind:value={companyProfile.phone}
+                  disabled={!canEditSettings}
+                  placeholder="+34..."
+                />
+              </div>
+              <div class="profile-fields settings-field">
+                <label for="companyIban">IBAN / cuenta bancaria</label>
+                <input
+                  id="companyIban"
+                  bind:value={companyProfile.iban}
+                  disabled={!canEditSettings}
+                  placeholder="ES00 0000 0000 0000 0000"
+                />
+              </div>
+              <div class="profile-fields settings-field">
+                <label for="companyBankName">Banco</label>
+                <input
+                  id="companyBankName"
+                  bind:value={companyProfile.bankName}
+                  disabled={!canEditSettings}
+                  placeholder="Nombre del banco"
+                />
+              </div>
+              <div class="profile-fields settings-field">
+                <label for="companyBizum">Bizum</label>
+                <input
+                  id="companyBizum"
+                  bind:value={companyProfile.bizum}
+                  disabled={!canEditSettings}
+                  placeholder="Teléfono Bizum"
+                />
+              </div>
+            </div>
+            <div class="profile-fields settings-field">
+              <label for="companyAddress">Dirección fiscal</label>
+              <textarea
+                id="companyAddress"
+                rows="3"
+                bind:value={companyProfile.address}
+                disabled={!canEditSettings}
+                placeholder="Dirección fiscal de la empresa"
+              ></textarea>
+            </div>
           </div>
-          <p class="field-help">
-            Los usuarios no podrán registrar jornadas en los días marcados. Si desmarcas un día, vuelve a permitir fichar.
-          </p>
-        </div>
+        </details>
+
+        <details class="settings-panel" open>
+          <summary class="settings-summary">
+            <span>
+              <Palette size={17} />
+              Jornada y apariencia
+            </span>
+            <small>Horas extra, días no laborables y color</small>
+            <ChevronDown size={18} />
+          </summary>
+          <div class="settings-panel-body">
+            <div class="operation-grid">
+              <div class="profile-fields settings-field">
+                <label for="themePrimaryColor">Color primario</label>
+                <div class="theme-color-control">
+                  <div class="input-with-icon color-input">
+                    <Palette size={18} />
+                    <input
+                      id="themePrimaryColor"
+                      type="color"
+                      bind:value={themePrimaryColor}
+                      disabled={!canEditSettings}
+                      aria-label="Color primario del equipo"
+                    />
+                    <input
+                      type="text"
+                      bind:value={themePrimaryColor}
+                      disabled={!canEditSettings}
+                      aria-label="Código hexadecimal del color primario"
+                    />
+                  </div>
+                  <div class="theme-presets" aria-label="Colores sugeridos">
+                    {#each themeColorPresets as color}
+                      <button
+                        type="button"
+                        class:active={themePrimaryColor.toLowerCase() === color}
+                        style={`--preset-color: ${color};`}
+                        onclick={() => selectThemeColor(color)}
+                        disabled={!canEditSettings}
+                        aria-label={`Usar color ${color}`}
+                      ></button>
+                    {/each}
+                  </div>
+                </div>
+              </div>
+              <div class="profile-fields settings-field">
+                <label for="overtimeLimitHours">Límite de horas extra</label>
+                <input
+                  id="overtimeLimitHours"
+                  type="number"
+                  min="0"
+                  step="0.25"
+                  bind:value={overtimeLimitHours}
+                  disabled={!canEditSettings}
+                  placeholder="0 = desactivadas"
+                />
+                <p class="field-help">Usa 0 para desactivar las horas extra.</p>
+              </div>
+            </div>
+            <div class="profile-fields settings-field">
+              <span class="field-label">Días no laborables</span>
+              <div class="weekday-grid">
+                {#each WEEKDAY_OPTIONS as day}
+                  <label class="weekday-toggle" class:active={nonWorkingDays.includes(day.value)}>
+                    <input
+                      type="checkbox"
+                      checked={nonWorkingDays.includes(day.value)}
+                      onchange={() => toggleNonWorkingDay(day.value)}
+                      disabled={!canEditSettings}
+                    />
+                    <span>{day.shortLabel}</span>
+                  </label>
+                {/each}
+              </div>
+            </div>
+          </div>
+        </details>
+
         {#if canEditSettings}
           <button class="primary-btn" onclick={handleSaveProfile} disabled={isSavingProfile || !teamName.trim()}>
             <Save size={18} />
@@ -778,141 +904,69 @@
         {/if}
       </section>
 
-      <section class="section">
-        <div class="section-heading-row">
-          <h2>Roles personalizados</h2>
+      <details class="section collapsible-section">
+        <summary class="section-summary">
+          <span>
+            <Users size={17} />
+            Roles personalizados
+          </span>
+          <small>{customRoles.length} roles</small>
+          <ChevronDown size={18} />
+        </summary>
+        <div class="section-body">
           {#if canEditSettings}
-            <button type="button" class="secondary-btn compact-btn" onclick={openCreateCustomRole}>
+            <button type="button" class="secondary-btn compact-btn section-action" onclick={openCreateCustomRole}>
               <Plus size={16} />
               <span>Nuevo rol</span>
             </button>
           {/if}
-        </div>
 
-        {#if customRoles.length > 0}
-          <div class="custom-roles-list">
-            {#each customRoles as role (role.id)}
-              <article class="custom-role-card">
-                <div class="custom-role-main">
-                  <div>
-                    <h3>{role.label}</h3>
-                    {#if role.description}
-                      <p>{role.description}</p>
+          {#if customRoles.length > 0}
+            <div class="custom-roles-list">
+              {#each customRoles as role (role.id)}
+                <article class="custom-role-card">
+                  <div class="custom-role-main">
+                    <div>
+                      <h3>{role.label}</h3>
+                      {#if role.description}
+                        <p>{role.description}</p>
+                      {/if}
+                    </div>
+                    {#if canEditSettings}
+                      <div class="custom-role-actions">
+                        <button type="button" class="icon-btn" onclick={() => openEditCustomRole(role)} aria-label="Editar rol">
+                          <Pencil size={16} />
+                        </button>
+                        <button type="button" class="icon-btn danger" onclick={() => handleDeleteCustomRole(role)} aria-label="Eliminar rol">
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     {/if}
                   </div>
-                  {#if canEditSettings}
-                    <div class="custom-role-actions">
-                      <button type="button" class="icon-btn" onclick={() => openEditCustomRole(role)} aria-label="Editar rol">
-                        <Pencil size={16} />
-                      </button>
-                      <button type="button" class="icon-btn danger" onclick={() => handleDeleteCustomRole(role)} aria-label="Eliminar rol">
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  {/if}
-                </div>
-                <div class="role-summary">
-                  {#each getRolePermissionSummary(role.permissions) as summary}
-                    <span>{summary}</span>
-                  {/each}
-                </div>
-              </article>
-            {/each}
-          </div>
-        {:else}
-          <div class="compact-empty">Sin roles personalizados</div>
-        {/if}
-
-        {#if showCustomRoleForm && canEditSettings}
-          <div class="custom-role-form">
-            <div class="profile-fields settings-field">
-              <label for="customRoleName">Nombre del rol</label>
-              <input id="customRoleName" bind:value={customRoleName} placeholder="Supervisor de obra" />
-            </div>
-            <div class="profile-fields settings-field">
-              <label for="customRoleDescription">Descripción</label>
-              <input id="customRoleDescription" bind:value={customRoleDescription} placeholder="Permisos principales del rol" />
-            </div>
-
-            <div class="permissions-editor">
-              {#each permissionModules as [module, moduleLabel]}
-                <div class="permission-row">
-                  <span>{moduleLabel}</span>
-                  <div class="permission-actions">
-                    {#each permissionActions as [action, actionLabel]}
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={customRolePermissions[module]?.[action]}
-                          onchange={() => toggleCustomRolePermission(module, action)}
-                        />
-                        {actionLabel}
-                      </label>
+                  <div class="role-summary">
+                    {#each getRolePermissionSummary(role.permissions) as summary}
+                      <span>{summary}</span>
                     {/each}
                   </div>
-                </div>
+                </article>
               {/each}
             </div>
+          {:else}
+            <div class="compact-empty">Sin roles personalizados</div>
+          {/if}
 
-            <div class="custom-role-form-actions">
-              <button type="button" class="secondary-btn" onclick={closeCustomRoleForm}>
-                <span>Cancelar</span>
-              </button>
-              <button
-                type="button"
-                class="primary-btn"
-                onclick={handleSaveCustomRole}
-                disabled={isSavingCustomRole || !customRoleName.trim()}
-              >
-                <Save size={18} />
-                <span>{isSavingCustomRole ? "Guardando..." : "Guardar rol"}</span>
-              </button>
-            </div>
-          </div>
-        {/if}
-      </section>
+          {#if showCustomRoleForm && canEditSettings}
+            <div class="custom-role-form">
+              <div class="profile-fields settings-field">
+                <label for="customRoleName">Nombre del rol</label>
+                <input id="customRoleName" bind:value={customRoleName} placeholder="Supervisor de obra" />
+              </div>
+              <div class="profile-fields settings-field">
+                <label for="customRoleDescription">Descripción</label>
+                <input id="customRoleDescription" bind:value={customRoleDescription} placeholder="Permisos principales del rol" />
+              </div>
 
-      {#if canCreateSettings}
-        <section class="section">
-          <h2>Invitar miembro</h2>
-          <div class="input-with-icon">
-            <Mail size={18} />
-            <input type="email" bind:value={newMemberEmail} placeholder="usuario@ejemplo.com" />
-          </div>
-          <div class="accordion">
-            <button
-              type="button"
-              class="accordion-trigger"
-              class:open={showNewMemberPermissions}
-              aria-expanded={showNewMemberPermissions}
-              onclick={() => (showNewMemberPermissions = !showNewMemberPermissions)}
-            >
-              <span>Permisos iniciales</span>
-              <ChevronDown size={18} />
-            </button>
-            {#if showNewMemberPermissions}
-              <div class="permissions-editor accordion-panel">
-                <div class="role-template-section">
-                  <div class="role-template-heading">
-                    <h4>Roles</h4>
-                    <p>Rellena los permisos de una vez y ajusta cualquier checkbox después.</p>
-                  </div>
-                  <div class="role-template-grid">
-                    {#each roleTemplates as role}
-                      <button
-                        type="button"
-                        class="role-template-btn"
-                        class:active={selectedNewMemberRole === role.id}
-                        onclick={() => applyNewMemberRoleTemplate(role.id)}
-                        title={role.description}
-                      >
-                        <span>{role.label}</span>
-                        <small>{role.description}</small>
-                      </button>
-                    {/each}
-                  </div>
-                </div>
-
+              <div class="permissions-editor">
                 {#each permissionModules as [module, moduleLabel]}
                   <div class="permission-row">
                     <span>{moduleLabel}</span>
@@ -921,8 +975,8 @@
                         <label>
                           <input
                             type="checkbox"
-                            checked={newMemberPermissions[module][action]}
-                            onchange={() => toggleNewMemberPermission(module, action)}
+                            checked={customRolePermissions[module]?.[action]}
+                            onchange={() => toggleCustomRolePermission(module, action)}
                           />
                           {actionLabel}
                         </label>
@@ -931,39 +985,134 @@
                   </div>
                 {/each}
               </div>
-            {/if}
-          </div>
 
-          <button class="primary-btn" onclick={handleAddMember} disabled={isAddingMember || !newMemberEmail.trim()}>
-            <UserPlus size={18} />
-            <span>{isAddingMember ? "Enviando..." : "Enviar invitación"}</span>
-          </button>
-        </section>
+              <div class="custom-role-form-actions">
+                <button type="button" class="secondary-btn" onclick={closeCustomRoleForm}>
+                  <span>Cancelar</span>
+                </button>
+                <button
+                  type="button"
+                  class="primary-btn"
+                  onclick={handleSaveCustomRole}
+                  disabled={isSavingCustomRole || !customRoleName.trim()}
+                >
+                  <Save size={18} />
+                  <span>{isSavingCustomRole ? "Guardando..." : "Guardar rol"}</span>
+                </button>
+              </div>
+            </div>
+          {/if}
+        </div>
+      </details>
+
+      {#if canCreateSettings}
+        <details class="section collapsible-section">
+          <summary class="section-summary">
+            <span>
+              <UserPlus size={17} />
+              Invitar miembro
+            </span>
+            <small>Email y permisos iniciales</small>
+            <ChevronDown size={18} />
+          </summary>
+          <div class="section-body">
+            <div class="input-with-icon">
+              <Mail size={18} />
+              <input type="email" bind:value={newMemberEmail} placeholder="usuario@ejemplo.com" />
+            </div>
+            <div class="accordion">
+              <button
+                type="button"
+                class="accordion-trigger"
+                class:open={showNewMemberPermissions}
+                aria-expanded={showNewMemberPermissions}
+                onclick={() => (showNewMemberPermissions = !showNewMemberPermissions)}
+              >
+                <span>Permisos iniciales</span>
+                <ChevronDown size={18} />
+              </button>
+              {#if showNewMemberPermissions}
+                <div class="permissions-editor accordion-panel">
+                  <div class="role-template-section">
+                    <div class="role-template-heading">
+                      <h4>Roles</h4>
+                      <p>Rellena los permisos de una vez y ajusta cualquier checkbox después.</p>
+                    </div>
+                    <div class="role-template-grid">
+                      {#each roleTemplates as role}
+                        <button
+                          type="button"
+                          class="role-template-btn"
+                          class:active={selectedNewMemberRole === role.id}
+                          onclick={() => applyNewMemberRoleTemplate(role.id)}
+                          title={role.description}
+                        >
+                          <span>{role.label}</span>
+                          <small>{role.description}</small>
+                        </button>
+                      {/each}
+                    </div>
+                  </div>
+
+                  {#each permissionModules as [module, moduleLabel]}
+                    <div class="permission-row">
+                      <span>{moduleLabel}</span>
+                      <div class="permission-actions">
+                        {#each permissionActions as [action, actionLabel]}
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={newMemberPermissions[module][action]}
+                              onchange={() => toggleNewMemberPermission(module, action)}
+                            />
+                            {actionLabel}
+                          </label>
+                        {/each}
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+
+            <button class="primary-btn" onclick={handleAddMember} disabled={isAddingMember || !newMemberEmail.trim()}>
+              <UserPlus size={18} />
+              <span>{isAddingMember ? "Enviando..." : "Enviar invitación"}</span>
+            </button>
+          </div>
+        </details>
       {/if}
 
-      <section class="section">
-        <h2>Miembros</h2>
-        <div class="members-list">
+      <details class="section collapsible-section">
+        <summary class="section-summary">
+          <span>
+            <Users size={17} />
+            Miembros
+          </span>
+          <small>{memberList.length} personas</small>
+          <ChevronDown size={18} />
+        </summary>
+        <div class="section-body members-list">
           {#each memberList as member}
-            <article class="member-item">
-              <div class="member-header">
-                <div class="member-avatar">
-                  {#if getMemberPhoto(member)}
-                    <img src={optimizeCloudinary(getMemberPhoto(member), 84, { height: 84, crop: "fill" })} alt={member.name || member.email} width="42" height="42" loading="eager" decoding="async" />
-                  {:else if getMemberFallbackAvatar(member)}
-                    <span>{getMemberFallbackAvatar(member)}</span>
-                  {:else}
-                    <Users size={20} />
+              <article class="member-item">
+                <div class="member-header">
+                  <div class="member-avatar">
+                    {#if getMemberPhoto(member)}
+                      <img src={optimizeCloudinary(getMemberPhoto(member), 84, { height: 84, crop: "fill" })} alt={member.name || member.email} width="42" height="42" loading="eager" decoding="async" />
+                    {:else if getMemberFallbackAvatar(member)}
+                      <span>{getMemberFallbackAvatar(member)}</span>
+                    {:else}
+                      <Users size={20} />
+                    {/if}
+                  </div>
+                  <div>
+                    <h3>{member.name || member.email || "Usuario"}</h3>
+                    <p>{member.email}</p>
+                  </div>
+                  {#if member.id === team.admin}
+                    <span class="admin-badge">Admin</span>
                   {/if}
                 </div>
-                <div>
-                  <h3>{member.name || member.email || "Usuario"}</h3>
-                  <p>{member.email}</p>
-                </div>
-                {#if member.id === team.admin}
-                  <span class="admin-badge">Admin</span>
-                {/if}
-              </div>
 
               {#if member.id !== team.admin}
                 <div class="accordion member-permissions">
@@ -1039,27 +1188,36 @@
                   {/if}
                 </div>
               {/if}
-            </article>
+              </article>
           {/each}
         </div>
-      </section>
+      </details>
 
-      <section class="section danger-section">
-        <h2>Zona peligrosa</h2>
-        {#if isAdmin}
-          <p>Como administrador, abandonar el equipo eliminará definitivamente el equipo y quitará el acceso a todos los miembros.</p>
-          <button class="delete-team-btn" onclick={handleLeaveTeam}>
-            <Trash2 size={18} />
-            <span>Abandonar y eliminar equipo</span>
-          </button>
-        {:else}
-          <p>Abandonar el equipo quitará tu acceso a sus tareas, chat, pagos, inventario y ubicaciones.</p>
-          <button class="delete-team-btn" onclick={handleLeaveTeam}>
-            <UserMinus size={18} />
-            <span>Abandonar equipo</span>
-          </button>
-        {/if}
-      </section>
+      <details class="section danger-section collapsible-section">
+        <summary class="section-summary">
+          <span>
+            <AlertCircle size={17} />
+            Zona peligrosa
+          </span>
+          <small>{isAdmin ? "Eliminar equipo" : "Salir del equipo"}</small>
+          <ChevronDown size={18} />
+        </summary>
+        <div class="section-body">
+          {#if isAdmin}
+            <p>Como administrador, abandonar el equipo eliminará definitivamente el equipo y quitará el acceso a todos los miembros.</p>
+            <button class="delete-team-btn" onclick={handleLeaveTeam}>
+              <Trash2 size={18} />
+              <span>Abandonar y eliminar equipo</span>
+            </button>
+          {:else}
+            <p>Abandonar el equipo quitará tu acceso a sus tareas, chat, pagos, inventario y ubicaciones.</p>
+            <button class="delete-team-btn" onclick={handleLeaveTeam}>
+              <UserMinus size={18} />
+              <span>Abandonar equipo</span>
+            </button>
+          {/if}
+        </div>
+      </details>
     </div>
   {/if}
 </div>
@@ -1069,7 +1227,7 @@
     height: 100%;
     overflow-y: auto;
     box-sizing: border-box;
-    padding: 24px 20px var(--bottom-nav-clearance);
+    padding: 20px 16px var(--bottom-nav-clearance);
     padding-top: var(--page-top-safe);
     background: var(--bg-page);
     color: var(--text-primary);
@@ -1079,7 +1237,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    margin-bottom: 22px;
+    margin-bottom: 14px;
   }
 
 
@@ -1089,15 +1247,17 @@
   }
 
   h2 {
-    font-size: 17px;
+    font-size: 16px;
     font-weight: 800;
-    margin-bottom: 14px;
+    margin-bottom: 0;
   }
 
   .content {
+    width: min(100%, 900px);
+    margin: 0 auto;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 10px;
   }
 
   .section,
@@ -1105,35 +1265,119 @@
     background: var(--bg-card);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
-    padding: 16px;
+    padding: 14px;
     box-shadow: var(--shadow-card);
+  }
+
+  .collapsible-section {
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .section-body {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .section-summary,
+  .settings-summary {
+    list-style: none;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .section-summary::-webkit-details-marker,
+  .settings-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .section-summary {
+    min-height: 54px;
+    padding: 0 14px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .section-summary > span,
+  .settings-summary > span {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 850;
+  }
+
+  .section-summary small,
+  .settings-summary small {
+    min-width: 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .section-summary > :global(svg:last-child),
+  .settings-summary > :global(svg:last-child),
+  .accordion-trigger :global(svg) {
+    transition: transform 0.18s ease;
+  }
+
+  .collapsible-section[open] > .section-summary,
+  .settings-panel[open] > .settings-summary {
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .collapsible-section[open] > .section-summary > :global(svg:last-child),
+  .settings-panel[open] > .settings-summary > :global(svg:last-child),
+  .accordion-trigger.open :global(svg) {
+    transform: rotate(180deg);
   }
 
   .profile-row {
     display: flex;
     align-items: center;
     gap: 16px;
-    margin-bottom: 14px;
+    margin-bottom: 12px;
+  }
+
+  .profile-heading {
+    align-items: flex-start;
+    margin-bottom: 12px;
+  }
+
+  .profile-heading p {
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.35;
+    margin-top: 3px;
   }
 
   .billing-summary {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 10px;
-    margin-bottom: 14px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 12px;
   }
 
   .billing-card {
     min-width: 0;
-    min-height: 106px;
+    min-height: 76px;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
     background: var(--bg-input);
     color: var(--text-primary);
-    padding: 13px;
+    padding: 10px;
     display: grid;
-    align-content: start;
-    gap: 5px;
+    align-content: center;
+    gap: 4px;
   }
 
   .billing-card.plan {
@@ -1147,7 +1391,7 @@
 
   .billing-card span {
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 800;
   }
 
@@ -1159,20 +1403,20 @@
   .billing-card strong {
     min-width: 0;
     color: inherit;
-    font-size: 20px;
+    font-size: 17px;
     font-weight: 900;
     line-height: 1.1;
     overflow-wrap: anywhere;
   }
 
   .billing-card.plan strong {
-    font-size: 30px;
+    font-size: 24px;
   }
 
   .billing-card small {
     min-width: 0;
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
     line-height: 1.35;
     overflow-wrap: anywhere;
@@ -1180,9 +1424,9 @@
 
   .team-photo {
     position: relative;
-    width: 76px;
-    height: 76px;
-    border-radius: 18px;
+    width: 64px;
+    height: 64px;
+    border-radius: 16px;
     background: var(--bg-accent-subtle);
     color: var(--accent-ink);
     display: flex;
@@ -1203,8 +1447,8 @@
     position: absolute;
     right: 6px;
     bottom: 6px;
-    width: 30px;
-    height: 30px;
+    width: 28px;
+    height: 28px;
     border-radius: 50%;
     background: var(--accent-strong);
     color: #fff;
@@ -1223,14 +1467,48 @@
   }
 
   .settings-field {
-    margin-bottom: 14px;
+    margin-bottom: 10px;
+  }
+
+  .settings-panel {
+    margin-top: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-page);
+    overflow: hidden;
+  }
+
+  .settings-summary {
+    min-height: 48px;
+    padding: 0 12px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .settings-panel-body {
+    padding: 12px;
+    display: grid;
+    gap: 10px;
+  }
+
+  .company-grid,
+  .operation-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .settings-panel-body .settings-field {
+    margin-bottom: 0;
   }
 
   .field-help {
     color: var(--text-secondary);
     font-size: 12px;
     line-height: 1.4;
-    margin-top: 6px;
+    margin-top: 5px;
   }
 
   .field-label {
@@ -1240,7 +1518,7 @@
 
   .theme-color-control {
     display: grid;
-    gap: 10px;
+    gap: 8px;
   }
 
   .input-with-icon.color-input {
@@ -1264,13 +1542,13 @@
 
   .theme-presets {
     display: grid;
-    grid-template-columns: repeat(6, 34px);
-    gap: 8px;
+    grid-template-columns: repeat(6, 28px);
+    gap: 7px;
   }
 
   .theme-presets button {
-    width: 34px;
-    height: 34px;
+    width: 28px;
+    height: 28px;
     border-radius: 999px;
     border: 2px solid var(--border-color);
     background: var(--preset-color);
@@ -1284,12 +1562,12 @@
 
   .weekday-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
-    gap: 8px;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 6px;
   }
 
   .weekday-toggle {
-    min-height: 42px;
+    min-height: 36px;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
     background: var(--bg-input);
@@ -1297,7 +1575,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 0 10px;
+    padding: 0 6px;
     cursor: pointer;
   }
 
@@ -1322,16 +1600,24 @@
   }
 
   input,
-  select {
+  select,
+  textarea {
     width: 100%;
     box-sizing: border-box;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
     background: var(--bg-input);
     color: var(--text-primary);
-    padding: 12px 14px;
-    margin-top: 7px;
-    font-size: 15px;
+    min-height: 42px;
+    padding: 9px 11px;
+    margin-top: 6px;
+    font-size: 14px;
+  }
+
+  textarea {
+    min-height: 76px;
+    resize: vertical;
+    line-height: 1.45;
   }
 
   .input-with-icon {
@@ -1341,8 +1627,9 @@
     background: var(--bg-input);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
-    padding: 0 12px;
-    margin-bottom: 14px;
+    min-height: 42px;
+    padding: 0 11px;
+    margin-bottom: 10px;
   }
 
   .input-with-icon input {
@@ -1363,7 +1650,7 @@
 
   .section-heading-row {
     justify-content: space-between;
-    margin-bottom: 14px;
+    margin-bottom: 10px;
   }
 
   .section-heading-row h2 {
@@ -1374,6 +1661,10 @@
     min-height: 36px;
     padding-inline: 11px;
     font-size: 13px;
+  }
+
+  .section-action {
+    align-self: flex-start;
   }
 
   .custom-roles-list,
@@ -1614,10 +1905,11 @@
     gap: 12px;
   }
 
-.member-actions {
+  .member-actions {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
     gap: 10px;
+    margin-top: 12px;
   }
 
   .member-header {
@@ -1664,11 +1956,6 @@
     color: var(--accent-ink);
     font-size: 12px;
     font-weight: 800;
-  }
-
-  .member-actions {
-    margin-top: 12px;
-    flex-wrap: wrap;
   }
 
   button {
@@ -1727,5 +2014,11 @@
     text-align: center;
     gap: 12px;
     color: var(--text-secondary);
+  }
+
+  @media (max-width: 620px) {
+    .company-grid {
+      grid-template-columns: 1fr;
+    }
   }
 </style>

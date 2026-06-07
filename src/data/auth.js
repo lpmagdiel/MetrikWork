@@ -9,7 +9,7 @@ export const authReady = writable(false);
 export const settingsStore = writable(null);
 
 let settingsUnsubscribe;
-const PRIVATE_PROFILE_FIELDS = ['phone', 'address', 'iban'];
+const PRIVATE_PROFILE_FIELDS = ['phone', 'address', 'iban', 'bankName'];
 const CLOUDINARY_PRESET_AVATAR =
     import.meta.env.VITE_CLOUDINARY_PRESET_AVATAR ||
     import.meta.env.CLOUDINARY_PRESET_AVATAR ||
@@ -308,6 +308,7 @@ export async function updateUserProfile(uid, data, options = {}) {
                 setDoc(doc(db, 'teams', teamId, 'privateMemberProfiles', uid), {
                     phone: privateProfileData.phone || '',
                     iban: privateProfileData.iban || '',
+                    bankName: privateProfileData.bankName || '',
                     updatedAt: now
                 }, { merge: true })
             ));
