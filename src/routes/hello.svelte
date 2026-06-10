@@ -4,7 +4,14 @@
   import { navigateTo } from "../router";
   import LoadingSpinner from "../components/LoadingSpinner.svelte";
   import SliceContainer from "../components/SliceContainer.svelte";
-  import { userStore } from "../data/stores";
+  import {
+    userStore,
+    updateUserProfile,
+    MINIMUM_USER_AGE,
+    normalizeBirthDate,
+    getLatestAllowedBirthDate,
+    isAtLeastMinimumAge,
+  } from "../data/stores";
   import { auth, googleProvider } from "../data/firebase";
   import { showErrorAlert, showSuccessAlert } from "../data/alerts.js";
   import {
@@ -23,9 +30,11 @@
   let email = $state("");
   let password = $state("");
   let name = $state("");
+  let birthDate = $state("");
   let isRegistering = $state(false);
 
   let skipAutoRedirect = false;
+  const latestAllowedBirthDate = getLatestAllowedBirthDate();
 
   onMount(() => {
     // Revisa si regresamos de un inicio de sesión con redirección
@@ -94,6 +103,20 @@
       showErrorAlert("Campos requeridos", "Por favor ingresa correo y contraseña");
       return;
     }
+
+    let normalizedBirthDate = "";
+    if (isRegistering) {
+      normalizedBirthDate = normalizeBirthDate(birthDate);
+      if (!normalizedBirthDate) {
+        showErrorAlert("Fecha requerida", "Indica tu fecha de nacimiento para crear la cuenta.");
+        return;
+      }
+      if (!isAtLeastMinimumAge(normalizedBirthDate)) {
+        showErrorAlert("Edad mínima", `Debes tener al menos ${MINIMUM_USER_AGE} años para registrarte.`);
+        return;
+      }
+    }
+
     loadingShow = true;
 
     try {
@@ -112,6 +135,9 @@
             displayName: name,
           });
         }
+        await updateUserProfile(userCredential.user.uid, {
+          birthDate: normalizedBirthDate,
+        });
         showSuccessAlert("¡Bienvenido!", "Tu cuenta ha sido creada exitosamente");
       } else {
         // Login
@@ -123,6 +149,7 @@
         email = "";
         password = "";
         name = "";
+        birthDate = "";
         if (isNewUser) {
           navigateTo("/tour");
         } else {
@@ -220,6 +247,15 @@
             id="name"
             bind:value={name}
             placeholder="Tu nombre"
+          />
+
+          <label for="birthDate">Fecha de nacimiento</label>
+          <input
+            type="date"
+            id="birthDate"
+            bind:value={birthDate}
+            max={latestAllowedBirthDate}
+            autocomplete="bday"
           />
         {/if}
 

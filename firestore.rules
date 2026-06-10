@@ -565,7 +565,8 @@ service cloud.firestore {
                "phone",
                "address",
                "iban",
-               "bankName"
+               "bankName",
+               "birthDate"
              ]) &&
              isPublicUserProfileDocument(request.resource.data);
     }
@@ -576,6 +577,7 @@ service cloud.firestore {
         "address",
         "iban",
         "bankName",
+        "birthDate",
         "updatedAt"
       ]);
     }

@@ -17,7 +17,8 @@
     Info,
     Album,
     Settings,
-    ShieldCheck
+    ShieldCheck,
+    CalendarDays
   } from "lucide-svelte";
   import {
     userStore,
@@ -25,6 +26,11 @@
     updateUserProfile,
     getUserProfile,
     getUserPrivateProfile,
+    MINIMUM_USER_AGE,
+    normalizeBirthDate,
+    getAgeFromBirthDate,
+    getLatestAllowedBirthDate,
+    isAtLeastMinimumAge,
     settingsStore,
     notificationPreferencesStore,
     teamsStore,
@@ -57,6 +63,7 @@
 
   let name = $state("");
   let email = $state("");
+  let birthDate = $state("");
   let phone = $state("");
   let address = $state("");
   let iban = $state("");
@@ -77,6 +84,9 @@
   let notificationPreferences = $derived(normalizeNotificationPreferences($notificationPreferencesStore));
   let reminder = $derived(normalizeReminderSettings($settingsStore || {}));
   let locationSettings = $derived(normalizeLocationSettings($settingsStore || {}));
+  let birthDateAge = $derived(getAgeFromBirthDate(birthDate));
+  let birthDateMeetsAge = $derived(isAtLeastMinimumAge(birthDate));
+  const latestAllowedBirthDate = getLatestAllowedBirthDate();
 
   const notificationPreferenceOptions = [
     {
@@ -138,6 +148,8 @@
 
       const privateProfile = await getUserPrivateProfile($userStore.uid);
       if (privateProfile) {
+        birthDate = privateProfile.birthDate || "";
+        if (birthDate) userStore.update((u) => ({ ...u, birthDate }));
         phone = privateProfile.phone || "";
         address = privateProfile.address || "";
         iban = privateProfile.iban || "";
@@ -148,10 +160,27 @@
 
   async function handleSave() {
     if (!$userStore) return;
+    const normalizedBirthDate = normalizeBirthDate(birthDate);
+
+    if (!normalizedBirthDate) {
+      toastMessage = "Indica tu fecha de nacimiento";
+      toastType = "warning";
+      showToast = true;
+      return;
+    }
+
+    if (!isAtLeastMinimumAge(normalizedBirthDate)) {
+      toastMessage = `Debes tener al menos ${MINIMUM_USER_AGE} años para usar MetricWork`;
+      toastType = "error";
+      showToast = true;
+      return;
+    }
+
     isSaving = true;
     try {
       const success = await updateUserProfile($userStore.uid, {
         name: name.trim(),
+        birthDate: normalizedBirthDate,
         phone: phone.trim(),
         address: address.trim(),
         iban: iban.trim().toUpperCase(),
@@ -165,7 +194,7 @@
         showToast = true;
       }
     } catch (error) {
-      toastMessage = "Error al guardar los cambios";
+      toastMessage = error?.message || "Error al guardar los cambios";
       toastType = "error";
       showToast = true;
     } finally {
@@ -420,6 +449,13 @@
       <AvatarCircle />
 
       <div class="profile-form">
+        {#if !birthDate}
+          <div class="profile-notice">
+            <CalendarDays size={19} />
+            <p>Completa tu fecha de nacimiento para confirmar que tienes al menos {MINIMUM_USER_AGE} años.</p>
+          </div>
+        {/if}
+
         <div class="input-group">
           <label for="name">Nombre Completo</label>
           <div class="input-wrapper">
@@ -431,6 +467,30 @@
               placeholder="Tu nombre"
             />
           </div>
+        </div>
+
+        <div class="input-group">
+          <label for="birthDate">Fecha de nacimiento</label>
+          <div class="input-wrapper">
+            <CalendarDays size={18} />
+            <input
+              type="date"
+              id="birthDate"
+              bind:value={birthDate}
+              max={latestAllowedBirthDate}
+              autocomplete="bday"
+              required
+            />
+          </div>
+          <p class={`input-help ${birthDate && !birthDateMeetsAge ? "warning" : ""}`}>
+            {#if birthDateAge !== null && birthDateMeetsAge}
+              {birthDateAge} años
+            {:else if birthDate}
+              Debes tener al menos {MINIMUM_USER_AGE} años.
+            {:else}
+              Necesaria para validar la edad mínima.
+            {/if}
+          </p>
         </div>
 
         <div class="input-group">
@@ -740,6 +800,26 @@
     gap: 20px;
   }
 
+  .profile-notice {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid color-mix(in srgb, var(--accent-color) 32%, var(--border-color));
+    border-radius: var(--radius-md);
+    background: var(--bg-accent-subtle);
+    color: var(--text-primary);
+  }
+
+  .profile-notice p {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 750;
+    line-height: 1.35;
+  }
+
   .input-group {
     display: flex;
     flex-direction: column;
@@ -776,6 +856,18 @@
 
   .input-wrapper.disabled {
     opacity: 0.6;
+  }
+
+  .input-help {
+    margin: 0 4px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.35;
+  }
+
+  .input-help.warning {
+    color: var(--danger-color);
   }
 
   .save-btn {

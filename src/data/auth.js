@@ -10,11 +10,83 @@ export const authReady = writable(false);
 export const settingsStore = writable(null);
 
 let settingsUnsubscribe;
-const PRIVATE_PROFILE_FIELDS = ['phone', 'address', 'iban', 'bankName'];
+export const MINIMUM_USER_AGE = 16;
+const PRIVATE_PROFILE_FIELDS = ['phone', 'address', 'iban', 'bankName', 'birthDate'];
 const CLOUDINARY_PRESET_AVATAR =
     import.meta.env.VITE_CLOUDINARY_PRESET_AVATAR ||
     import.meta.env.CLOUDINARY_PRESET_AVATAR ||
     'MetricWorkProfile';
+
+function padDatePart(value) {
+    return String(value).padStart(2, '0');
+}
+
+function formatLocalDate(date) {
+    return [
+        date.getFullYear(),
+        padDatePart(date.getMonth() + 1),
+        padDatePart(date.getDate())
+    ].join('-');
+}
+
+function parseBirthDateParts(value) {
+    const normalized = String(value || '').trim();
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(normalized);
+    if (!match) return null;
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = new Date(year, month - 1, day);
+
+    if (
+        date.getFullYear() !== year ||
+        date.getMonth() !== month - 1 ||
+        date.getDate() !== day
+    ) {
+        return null;
+    }
+
+    return { year, month, day, date };
+}
+
+export function normalizeBirthDate(value) {
+    const parts = parseBirthDateParts(value);
+    return parts ? `${parts.year}-${padDatePart(parts.month)}-${padDatePart(parts.day)}` : '';
+}
+
+export function getAgeFromBirthDate(value, today = new Date()) {
+    const parts = parseBirthDateParts(value);
+    if (!parts) return null;
+
+    let age = today.getFullYear() - parts.year;
+    const currentMonth = today.getMonth() + 1;
+    const currentDay = today.getDate();
+    const hasBirthdayPassed =
+        currentMonth > parts.month ||
+        (currentMonth === parts.month && currentDay >= parts.day);
+
+    if (!hasBirthdayPassed) age -= 1;
+    return age;
+}
+
+export function isAtLeastMinimumAge(value, minimumAge = MINIMUM_USER_AGE, today = new Date()) {
+    const age = getAgeFromBirthDate(value, today);
+    return age !== null && age >= minimumAge;
+}
+
+export function getLatestAllowedBirthDate(minimumAge = MINIMUM_USER_AGE, today = new Date()) {
+    return formatLocalDate(new Date(today.getFullYear() - minimumAge, today.getMonth(), today.getDate()));
+}
+
+export function isBirthdayToday(value, today = new Date()) {
+    const parts = parseBirthDateParts(value);
+    return Boolean(
+        parts &&
+        parts.month === today.getMonth() + 1 &&
+        parts.day === today.getDate()
+    );
+}
 
 function splitProfileData(data = {}) {
     const publicData = {};
@@ -278,6 +350,15 @@ export async function updateUserProfile(uid, data, options = {}) {
 
         const userRef = doc(db, 'users', uid);
         const { publicData, privateData } = splitProfileData(data);
+        if (Object.prototype.hasOwnProperty.call(privateData, 'birthDate')) {
+            privateData.birthDate = normalizeBirthDate(privateData.birthDate);
+            if (!privateData.birthDate) {
+                throw new Error("Indica una fecha de nacimiento válida.");
+            }
+            if (!isAtLeastMinimumAge(privateData.birthDate)) {
+                throw new Error(`Debes tener al menos ${MINIMUM_USER_AGE} años para usar MetricWork.`);
+            }
+        }
         const now = new Date().toISOString();
         const profileData = {
             ...publicData,
@@ -328,7 +409,13 @@ export async function updateUserProfile(uid, data, options = {}) {
         // Update local userStore if it's the current user
         const currentUser = get(userStore);
         if (currentUser && currentUser.uid === uid) {
-            userStore.update(u => ({ ...u, ...publicData }));
+            userStore.update(u => ({
+                ...u,
+                ...publicData,
+                ...(Object.prototype.hasOwnProperty.call(privateData, 'birthDate')
+                    ? { birthDate: privateData.birthDate }
+                    : {})
+            }));
         }
 
         userProfileCache[uid] = {

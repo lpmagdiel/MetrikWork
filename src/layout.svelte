@@ -7,11 +7,15 @@
     selectedTeam,
     selectedTeamId,
     settingsStore,
+    getUserPrivateProfile,
+    isAtLeastMinimumAge,
+    isBirthdayToday,
   } from "./data/stores.js";
   import NavBar from "./components/NavBar.svelte";
   import LoadingSpinner from "./components/LoadingSpinner.svelte";
   import Toast from "./components/Toast.svelte";
   import UpdateFeaturesModal from "./components/UpdateFeaturesModal.svelte";
+  import BirthdayCelebration from "./components/BirthdayCelebration.svelte";
   import { updateData } from "./data/updateFeatures.js";
   import { injectSpeedInsights } from "@vercel/speed-insights";
 
@@ -25,6 +29,10 @@
   let showConnectionToast = $state(false);
   let connectionToastType = $state("info");
   let connectionToastMessage = $state("");
+  let birthDateGateUid = $state("");
+  let birthDateGateStatus = $state("idle");
+  let showBirthdayCelebration = $state(false);
+  let birthDateGateRequestId = 0;
 
   const teamThemeVars = [
     "--team-primary",
@@ -293,6 +301,40 @@
     }
   });
 
+  $effect(() => {
+    if (!$authReady) return;
+
+    const uid = $userStore?.uid || "";
+    if (!uid) {
+      birthDateGateUid = "";
+      birthDateGateStatus = "idle";
+      return;
+    }
+
+    if (birthDateGateUid === uid && birthDateGateStatus !== "idle") return;
+    checkUserBirthDateGate(uid);
+  });
+
+  $effect(() => {
+    if (!$authReady || !$userStore?.uid) return;
+    if (
+      birthDateGateUid === $userStore.uid &&
+      birthDateGateStatus === "needs_birthdate" &&
+      $userStore.birthDate &&
+      isAtLeastMinimumAge($userStore.birthDate)
+    ) {
+      birthDateGateStatus = "valid";
+      maybeShowBirthdayCelebration($userStore.uid, $userStore.birthDate);
+    }
+  });
+
+  $effect(() => {
+    if (!$authReady || !$userStore?.uid || birthDateGateStatus !== "needs_birthdate") return;
+    if (!isBirthDateGateOpenPath(cleanPath)) {
+      navigateTo("/settings?required=birthdate");
+    }
+  });
+
   // Dark mode sync
   $effect(() => {
     if ($settingsStore?.darkMode) {
@@ -337,6 +379,78 @@
     const luminance = (red * 299 + green * 587 + blue * 114) / 1000;
     return luminance > 145 ? "#000000" : "#ffffff";
   }
+
+  function isBirthDateGateOpenPath(path) {
+    return ["/hello", "/login", "/settings"].includes(path);
+  }
+
+  async function checkUserBirthDateGate(uid) {
+    const requestId = ++birthDateGateRequestId;
+    birthDateGateUid = uid;
+    birthDateGateStatus = "checking";
+
+    try {
+      const privateProfile = await getUserPrivateProfile(uid);
+      if (requestId !== birthDateGateRequestId) return;
+
+      const birthDate = privateProfile?.birthDate || "";
+      if (birthDate && isAtLeastMinimumAge(birthDate)) {
+        userStore.update((user) => user?.uid === uid ? { ...user, birthDate } : user);
+        birthDateGateStatus = "valid";
+        maybeShowBirthdayCelebration(uid, birthDate);
+        return;
+      }
+
+      birthDateGateStatus = "needs_birthdate";
+      if (!isBirthDateGateOpenPath(cleanPath)) {
+        navigateTo("/settings?required=birthdate");
+      }
+    } catch (error) {
+      console.error("Error checking user birth date:", error);
+      if (requestId === birthDateGateRequestId) {
+        birthDateGateStatus = "unknown";
+      }
+    }
+  }
+
+  function getLocalDateKey(date = new Date()) {
+    return [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, "0"),
+      String(date.getDate()).padStart(2, "0"),
+    ].join("-");
+  }
+
+  function getBirthdayCelebrationKey(uid) {
+    return `metricwork:birthday-celebration:${uid}:${getLocalDateKey()}`;
+  }
+
+  function hasSeenBirthdayCelebration(uid) {
+    try {
+      return localStorage.getItem(getBirthdayCelebrationKey(uid)) === "seen";
+    } catch {
+      return false;
+    }
+  }
+
+  function markBirthdayCelebrationSeen(uid) {
+    try {
+      localStorage.setItem(getBirthdayCelebrationKey(uid), "seen");
+    } catch {
+      // La felicitación puede mostrarse igualmente si localStorage no está disponible.
+    }
+  }
+
+  function maybeShowBirthdayCelebration(uid, birthDate) {
+    if (!uid || !isBirthdayToday(birthDate) || hasSeenBirthdayCelebration(uid)) return;
+
+    markBirthdayCelebrationSeen(uid);
+    showBirthdayCelebration = true;
+  }
+
+  function dismissBirthdayCelebration() {
+    showBirthdayCelebration = false;
+  }
 </script>
 
 <main>
@@ -366,6 +480,11 @@
     type={connectionToastType}
     duration={3500}
     bind:show={showConnectionToast}
+  />
+  <BirthdayCelebration
+    bind:show={showBirthdayCelebration}
+    name={$userStore?.name || $userStore?.email || "Usuario"}
+    onClose={dismissBirthdayCelebration}
   />
 </main>
 
