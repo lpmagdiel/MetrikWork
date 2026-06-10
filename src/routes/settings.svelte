@@ -18,7 +18,10 @@
     Album,
     Settings,
     ShieldCheck,
-    CalendarDays
+    CalendarDays,
+    Cookie,
+    FileText,
+    Scale
   } from "lucide-svelte";
   import {
     userStore,
@@ -59,6 +62,7 @@
     getLocationPermissionState,
     normalizeLocationSettings,
   } from "../data/geolocation.js";
+  import { openCookiePreferences } from "../data/cookieConsent.js";
   import { getBankName } from "../helpers/banks.js";
 
   let name = $state("");
@@ -751,6 +755,66 @@
       </div>
     </section>
 
+    <section class="settings-group">
+      <h3>Legal</h3>
+      <div class="settings-list">
+        <button class="settings-item actionable" type="button" onclick={openCookiePreferences}>
+          <div class="item-icon cookie">
+            <Cookie size={18} />
+          </div>
+          <div class="item-info">
+            <span>Preferencias de cookies</span>
+            <p>Gestionar analitica y almacenamiento.</p>
+          </div>
+          <ChevronRight size={18} class="chevron" />
+        </button>
+
+        <a href="/terms" class="settings-item actionable">
+          <div class="item-icon legal">
+            <FileText size={18} />
+          </div>
+          <div class="item-info">
+            <span>Terminos y condiciones</span>
+            <p>Reglas de uso de MetricWork.</p>
+          </div>
+          <ChevronRight size={18} class="chevron" />
+        </a>
+
+        <a href="/privacy" class="settings-item actionable">
+          <div class="item-icon privacy">
+            <ShieldCheck size={18} />
+          </div>
+          <div class="item-info">
+            <span>Politica de privacidad</span>
+            <p>Datos, finalidades y derechos.</p>
+          </div>
+          <ChevronRight size={18} class="chevron" />
+        </a>
+
+        <a href="/cookies" class="settings-item actionable">
+          <div class="item-icon cookie">
+            <Cookie size={18} />
+          </div>
+          <div class="item-info">
+            <span>Politica de cookies</span>
+            <p>Cookies, localStorage y analitica.</p>
+          </div>
+          <ChevronRight size={18} class="chevron" />
+        </a>
+
+        <a href="/legal" class="settings-item actionable">
+          <div class="item-icon legal">
+            <Scale size={18} />
+          </div>
+          <div class="item-info">
+            <span>Aviso legal</span>
+            <p>Datos del titular y contacto.</p>
+          </div>
+          <ChevronRight size={18} class="chevron" />
+        </a>
+      </div>
+    </section>
+
     <button class="logout-btn" onclick={handleLogout}>
       <LogOut size={20} />
       <span>Cerrar Sesión</span>
@@ -1054,6 +1118,18 @@
   .item-icon.shield {
     background: var(--bg-accent-subtle);
     color: var(--accent-ink);
+  }
+  .item-icon.cookie {
+    background: var(--bg-warning-subtle);
+    color: var(--warning-color);
+  }
+  .item-icon.legal {
+    background: var(--bg-input);
+    color: var(--text-primary);
+  }
+  .item-icon.privacy {
+    background: var(--bg-success-subtle);
+    color: var(--success-color);
   }
 
   .item-info {

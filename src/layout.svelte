@@ -16,7 +16,9 @@
   import Toast from "./components/Toast.svelte";
   import UpdateFeaturesModal from "./components/UpdateFeaturesModal.svelte";
   import BirthdayCelebration from "./components/BirthdayCelebration.svelte";
+  import CookieConsent from "./components/CookieConsent.svelte";
   import { updateData } from "./data/updateFeatures.js";
+  import { cookieConsentStore, hasCookieConsentDecision } from "./data/cookieConsent.js";
   import { injectSpeedInsights } from "@vercel/speed-insights";
 
   // Modal de novedades
@@ -41,13 +43,12 @@
     "--accent-ink",
     "--bg-accent-subtle",
   ];
+  const legalRoutes = ["/terms", "/privacy", "/cookies", "/legal"];
+  const publicRoutes = ["/hello", "/login", ...legalRoutes];
+  const noNavRoutes = ["/hello", "/login", "/tour", ...legalRoutes];
+  const analyticsConsentReloadKey = "metricwork:analytics-consent-reload";
 
   onMount(() => {
-    speedInsights = injectSpeedInsights({
-      framework: "svelte",
-      route: cleanPath,
-    });
-
     let connectionCheckId = 0;
     let showToastTimeout = null;
 
@@ -146,12 +147,33 @@
   });
 
   $effect(() => {
+    const consent = $cookieConsentStore;
+    if (!hasCookieConsentDecision(consent)) return;
+
+    if (consent.analytics) {
+      clearAnalyticsReloadFlag();
+      if (!speedInsights) {
+        speedInsights = injectSpeedInsights({
+          framework: "svelte",
+          route: cleanPath,
+        });
+      }
+      return;
+    }
+
+    if (speedInsights) {
+      speedInsights = null;
+      reloadOnceAfterAnalyticsRevocation();
+    }
+  });
+
+  $effect(() => {
     // Solo mostrar si el usuario está autenticado y no está en login/hello/tour
     if (
       !hasCheckedUpdate &&
       $authReady &&
       $userStore &&
-      ["/hello", "/login", "/tour"].indexOf(cleanPath) === -1
+      noNavRoutes.indexOf(cleanPath) === -1
     ) {
       const lastSeen = localStorage.getItem("lastUpdateFeaturesVersion");
       if (lastSeen !== updateData.version) {
@@ -171,6 +193,10 @@
     "/teams": () => import("./routes/teams.svelte"),
     "/login": () => import("./routes/login.svelte"),
     "/hello": () => import("./routes/hello.svelte"),
+    "/terms": () => import("./routes/terms.svelte"),
+    "/privacy": () => import("./routes/privacy.svelte"),
+    "/cookies": () => import("./routes/cookies.svelte"),
+    "/legal": () => import("./routes/legal.svelte"),
     "/settings": () => import("./routes/settings.svelte"),
     "/system-admin": () => import("./routes/system-admin.svelte"),
     "/calendar": () => import("./routes/calendar.svelte"),
@@ -269,10 +295,10 @@
 
   let canRender = $derived(
     $authReady &&
-      ($userStore || cleanPath === "/hello" || cleanPath === "/login"),
+      ($userStore || publicRoutes.includes(cleanPath)),
   );
   let showNav = $derived(
-    $authReady && !["/hello", "/login", "/tour"].includes(cleanPath),
+    $authReady && !noNavRoutes.includes(cleanPath),
   );
 
   // Sync selectedTeamId store
@@ -294,8 +320,7 @@
     if (!$authReady) return;
     if (
       !$userStore &&
-      cleanPath !== "/hello" &&
-      cleanPath !== "/login"
+      !publicRoutes.includes(cleanPath)
     ) {
       navigateTo("/hello");
     }
@@ -381,7 +406,7 @@
   }
 
   function isBirthDateGateOpenPath(path) {
-    return ["/hello", "/login", "/settings"].includes(path);
+    return ["/hello", "/login", "/settings", ...legalRoutes].includes(path);
   }
 
   async function checkUserBirthDateGate(uid) {
@@ -451,6 +476,25 @@
   function dismissBirthdayCelebration() {
     showBirthdayCelebration = false;
   }
+
+  function clearAnalyticsReloadFlag() {
+    try {
+      sessionStorage.removeItem(analyticsConsentReloadKey);
+    } catch {
+      // Sin sessionStorage no necesitamos persistir nada.
+    }
+  }
+
+  function reloadOnceAfterAnalyticsRevocation() {
+    try {
+      if (sessionStorage.getItem(analyticsConsentReloadKey) === "done") return;
+      sessionStorage.setItem(analyticsConsentReloadKey, "done");
+    } catch {
+      // Recargar sigue siendo la forma mas clara de retirar medicion ya inicializada.
+    }
+
+    window.location.reload();
+  }
 </script>
 
 <main>
@@ -486,6 +530,7 @@
     name={$userStore?.name || $userStore?.email || "Usuario"}
     onClose={dismissBirthdayCelebration}
   />
+  <CookieConsent />
 </main>
 
 {#if showNav}

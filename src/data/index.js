@@ -22,4 +22,5 @@ export * from './permissions.js';
 export * from './offlineQueue.js';
 export * from './offlineActions.js';
 export * from './ui.js';
+export * from './cookieConsent.js';
 export { auth, db, googleProvider } from './firebase.js';

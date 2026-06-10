@@ -7,11 +7,16 @@
   import {
     userStore,
     updateUserProfile,
+    updateSettings,
     MINIMUM_USER_AGE,
     normalizeBirthDate,
     getLatestAllowedBirthDate,
     isAtLeastMinimumAge,
   } from "../data/stores";
+  import {
+    LEGAL_PRIVACY_VERSION,
+    LEGAL_TERMS_VERSION,
+  } from "../data/legalContent.js";
   import { auth, googleProvider } from "../data/firebase";
   import { showErrorAlert, showSuccessAlert } from "../data/alerts.js";
   import {
@@ -22,6 +27,7 @@
     createUserWithEmailAndPassword,
     updateProfile,
     getAdditionalUserInfo,
+    signOut,
   } from "firebase/auth";
 
   let loadingShow = $state(false);
@@ -31,18 +37,31 @@
   let password = $state("");
   let name = $state("");
   let birthDate = $state("");
+  let acceptedLegalTerms = $state(false);
   let isRegistering = $state(false);
 
   let skipAutoRedirect = false;
   const latestAllowedBirthDate = getLatestAllowedBirthDate();
+  const pendingLegalAcceptanceKey = "metricwork:pending-legal-acceptance";
 
   onMount(() => {
     // Revisa si regresamos de un inicio de sesión con redirección
-    getRedirectResult(auth).then((result) => {
+    getRedirectResult(auth).then(async (result) => {
       if (result) {
         skipAutoRedirect = true;
         const additionalInfo = getAdditionalUserInfo(result);
         if (additionalInfo?.isNewUser) {
+          if (!hasPendingLegalAcceptance()) {
+            await showErrorAlert(
+              "Aceptacion requerida",
+              "Para crear una cuenta debes aceptar los Terminos y la Politica de Privacidad.",
+            );
+            await signOut(auth);
+            clearPendingLegalAcceptance();
+            return;
+          }
+          await saveLegalAcceptance(result.user.uid);
+          clearPendingLegalAcceptance();
           navigateTo("/tour");
         } else {
           navigateTo("/");
@@ -66,12 +85,18 @@
     if (provider === "mail") {
       openMailForm = true;
     } else if (provider === "google") {
+      if (isRegistering && !acceptedLegalTerms) {
+        showErrorAlert("Aceptacion requerida", "Acepta los Terminos y la Politica de Privacidad para registrarte.");
+        return;
+      }
+
       loadingShow = true;
       skipAutoRedirect = true;
       try {
         const credential = await signInWithPopup(auth, googleProvider);
         const additionalInfo = getAdditionalUserInfo(credential);
         if (additionalInfo?.isNewUser) {
+          await saveLegalAcceptance(credential.user.uid);
           navigateTo("/tour");
         } else {
           navigateTo("/");
@@ -81,6 +106,7 @@
         if (error.code === 'auth/popup-blocked') {
           console.warn("Popup bloqueado por el navegador, intentando con redirección...");
           try {
+            if (isRegistering) markPendingLegalAcceptance();
             await signInWithRedirect(auth, googleProvider);
             return; // El navegador redireccionará
           } catch (redirectError) {
@@ -106,6 +132,11 @@
 
     let normalizedBirthDate = "";
     if (isRegistering) {
+      if (!acceptedLegalTerms) {
+        showErrorAlert("Aceptacion requerida", "Acepta los Terminos y la Politica de Privacidad para registrarte.");
+        return;
+      }
+
       normalizedBirthDate = normalizeBirthDate(birthDate);
       if (!normalizedBirthDate) {
         showErrorAlert("Fecha requerida", "Indica tu fecha de nacimiento para crear la cuenta.");
@@ -138,6 +169,7 @@
         await updateUserProfile(userCredential.user.uid, {
           birthDate: normalizedBirthDate,
         });
+        await saveLegalAcceptance(userCredential.user.uid);
         showSuccessAlert("¡Bienvenido!", "Tu cuenta ha sido creada exitosamente");
       } else {
         // Login
@@ -150,6 +182,7 @@
         password = "";
         name = "";
         birthDate = "";
+        acceptedLegalTerms = false;
         if (isNewUser) {
           navigateTo("/tour");
         } else {
@@ -164,6 +197,46 @@
       loadingShow = false;
     }
   };
+
+  function getLegalAcceptancePayload() {
+    const now = new Date().toISOString();
+    return {
+      legalTermsAccepted: true,
+      legalTermsVersion: LEGAL_TERMS_VERSION,
+      privacyPolicyAccepted: true,
+      privacyPolicyVersion: LEGAL_PRIVACY_VERSION,
+      legalAcceptedAt: now,
+    };
+  }
+
+  async function saveLegalAcceptance(uid) {
+    if (!uid) return;
+    await updateSettings(uid, getLegalAcceptancePayload());
+  }
+
+  function markPendingLegalAcceptance() {
+    try {
+      sessionStorage.setItem(pendingLegalAcceptanceKey, JSON.stringify(getLegalAcceptancePayload()));
+    } catch {
+      // Si no se puede persistir, la ruta de redireccion pedira aceptar de nuevo.
+    }
+  }
+
+  function hasPendingLegalAcceptance() {
+    try {
+      return Boolean(sessionStorage.getItem(pendingLegalAcceptanceKey));
+    } catch {
+      return false;
+    }
+  }
+
+  function clearPendingLegalAcceptance() {
+    try {
+      sessionStorage.removeItem(pendingLegalAcceptanceKey);
+    } catch {
+      // No hay nada mas que limpiar.
+    }
+  }
 </script>
 
 <div class="hello-page">
@@ -206,6 +279,16 @@
           </button>
         </div>
       </div>
+
+      {#if isRegistering}
+        <label class="legal-check">
+          <input type="checkbox" bind:checked={acceptedLegalTerms} />
+          <span>
+            Acepto los <a href="/terms">Terminos y condiciones</a> y la
+            <a href="/privacy">Politica de privacidad</a>.
+          </span>
+        </label>
+      {/if}
 
       <button class="toggle-mode" type="button" onclick={() => (isRegistering = !isRegistering)}>
         {isRegistering
@@ -257,6 +340,14 @@
             max={latestAllowedBirthDate}
             autocomplete="bday"
           />
+
+          <label class="legal-check form-check">
+            <input type="checkbox" bind:checked={acceptedLegalTerms} />
+            <span>
+              Acepto los <a href="/terms">Terminos y condiciones</a> y la
+              <a href="/privacy">Politica de privacidad</a>.
+            </span>
+          </label>
         {/if}
 
         <button class="submit-btn" type="submit">
@@ -269,6 +360,13 @@
           ? "¿Ya tienes cuenta? Inicia sesión"
           : "¿No tienes cuenta? Regístrate"}
       </button>
+
+      <div class="legal-links">
+        <a href="/terms">Terminos</a>
+        <a href="/privacy">Privacidad</a>
+        <a href="/cookies">Cookies</a>
+        <a href="/legal">Aviso legal</a>
+      </div>
     </div>
   </SliceContainer>
 </div>
@@ -379,6 +477,42 @@
     background: #ffffff;
   }
 
+  .legal-check {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: flex-start;
+    gap: 10px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.4;
+    font-weight: 650;
+  }
+
+  .legal-check input {
+    width: 18px;
+    height: 18px;
+    margin-top: 1px;
+    accent-color: var(--accent-strong);
+  }
+
+  .legal-check a,
+  .legal-links a {
+    color: var(--text-primary);
+    font-weight: 850;
+  }
+
+  .form-check {
+    margin-top: 2px;
+  }
+
+  .legal-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    font-size: 12px;
+  }
+
 
 
   .mail-form {
@@ -404,6 +538,15 @@
     outline: none;
     border-color: var(--accent-color);
     box-shadow: 0 0 0 4px rgba(167, 243, 208, 0.18);
+  }
+
+  .legal-check input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    min-width: 18px;
+    margin-top: 1px;
+    padding: 0;
+    box-shadow: none;
   }
 
   .submit-btn {
