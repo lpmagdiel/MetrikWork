@@ -119,9 +119,11 @@
 <style>
   .cookie-layer {
     position: fixed;
-    inset: auto 0 0;
+    inset: 0;
     z-index: 1500;
     padding: 16px;
+    display: grid;
+    place-items: center;
     pointer-events: none;
   }
 
@@ -138,6 +140,8 @@
     padding: 18px;
     display: grid;
     gap: 16px;
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
     pointer-events: auto;
   }
 
@@ -312,6 +316,7 @@
 
     .cookie-panel {
       border-radius: var(--radius-md);
+      max-height: calc(100dvh - 20px);
     }
 
     .cookie-heading {
