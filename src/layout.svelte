@@ -6,6 +6,7 @@
     authReady,
     selectedTeam,
     selectedTeamId,
+    teamsStore,
     settingsStore,
     getUserPrivateProfile,
     isAtLeastMinimumAge,
@@ -212,6 +213,7 @@
     "/team-payments": () => import("./routes/team-payments.svelte"),
     "/pay": () => import("./routes/pay.svelte"),
     "/timer": () => import("./routes/Timer.svelte"),
+    "/basic": () => import("./routes/basic.svelte"),
     "/tour": () => import("./routes/tour.svelte"),
   };
 
@@ -323,6 +325,18 @@
       !publicRoutes.includes(cleanPath)
     ) {
       navigateTo("/hello");
+    }
+  });
+
+  $effect(() => {
+    const uid = $userStore?.uid;
+    if (!$authReady || !uid || cleanPath !== "/") return;
+    const currentUserTeams = ($teamsStore || []).filter((teamItem) =>
+      !Array.isArray(teamItem?.members) || teamItem.members.includes(uid),
+    );
+
+    if (currentUserTeams.length === 1) {
+      navigateTo("/basic");
     }
   });
 

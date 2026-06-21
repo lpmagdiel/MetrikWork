@@ -20,7 +20,7 @@
 
   const isPathActive = (path, iconPath) => {
     if (iconPath === "/") {
-      return path === "/" || path === "";
+      return path === "/" || path === "" || path === "/basic";
     }
     if (iconPath === "/teams") {
       return (

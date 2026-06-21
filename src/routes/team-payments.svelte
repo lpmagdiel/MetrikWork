@@ -80,9 +80,10 @@
     });
 
     $effect(() => {
-        if (!showDetailsModal || !selectedMemberDetails?.works?.length) return;
+        const detailWorks = getDetailWorks(selectedMemberDetails);
+        if (!showDetailsModal || !detailWorks.length) return;
 
-        const pendingWorks = selectedMemberDetails.works.filter((work) => {
+        const pendingWorks = detailWorks.filter((work) => {
             const key = getWorkAddressKey(work);
             return getWorkMemberGps(work) &&
                 !work.memberLocationAddress &&
@@ -132,6 +133,7 @@
         try {
             const memberSnapshot = selectedMember;
             const amountToPay = Number(paymentAmount) || 0;
+            const coveredWorks = getPaymentCoveredWorks(memberSnapshot, amountToPay);
             if (shouldPrint) {
                 receiptWindow = openReceiptWindow();
             }
@@ -142,6 +144,13 @@
                 paymentType,
                 $userStore,
                 paymentMethod,
+                {
+                    balanceBefore: memberSnapshot.balance,
+                    balanceAfter: Math.max((Number(memberSnapshot.balance) || 0) - amountToPay, 0),
+                    pendingWorkDaysBefore: memberSnapshot.pendingWorkDays,
+                    pendingOvertimeHoursBefore: memberSnapshot.pendingOvertimeHours,
+                    coveredWorks,
+                },
             );
             
             // Notificar al usuario
@@ -157,7 +166,7 @@
             showNotification("Pago registrado exitosamente");
             showPaymentModal = false;
             if (shouldPrint) {
-                generatePaymentReceipt(memberSnapshot, payment, receiptWindow);
+                generatePaymentReceipt({ ...memberSnapshot, receiptWorks: coveredWorks }, payment, receiptWindow);
             }
             await loadData();
         } catch (e) {
@@ -207,6 +216,13 @@
         });
     }
 
+    function formatMetric(value, decimals = 2) {
+        const numericValue = Number(value) || 0;
+        return Number.isInteger(numericValue)
+            ? String(numericValue)
+            : numericValue.toFixed(decimals).replace(/\.?0+$/, "");
+    }
+
     function getWorkTypeLabel(work) {
         if (work.type === "full-day") return "Día completo";
         if (work.type === "half-day") return "Medio día";
@@ -249,15 +265,65 @@
     }
 
     function getWorkUnits(work) {
+        if (Number.isFinite(Number(work?.workUnits))) return Number(work.workUnits);
         if (work.type === "full-day") return 1;
         if (work.type === "half-day") return 0.5;
+        if (work.type === "variable") return (Number(work.variableHours || work.durationHours) || 0) / 8;
         return 0;
     }
 
-    function getWorkAmount(work, member) {
+    function getPendingWorkUnits(work) {
+        return Number.isFinite(Number(work?.pendingWorkUnits))
+            ? Number(work.pendingWorkUnits)
+            : getWorkUnits(work);
+    }
+
+    function getPendingOvertimeHours(work) {
+        return Number.isFinite(Number(work?.pendingOvertimeHours))
+            ? Number(work.pendingOvertimeHours)
+            : Number(work.overtimeHours) || 0;
+    }
+
+    function getWorkAmount(work, member, mode = "total") {
+        if (Number.isFinite(Number(work?.paymentAppliedAmount))) return Number(work.paymentAppliedAmount);
+        if (mode === "pending" && Number.isFinite(Number(work?.pendingAmount))) return Number(work.pendingAmount);
+        if (Number.isFinite(Number(work?.workAmount))) return Number(work.workAmount);
         const base = getWorkUnits(work) * (Number(member?.dailyRate) || 0);
         const extra = (Number(work.overtimeHours) || 0) * (Number(member?.extraHourRate) || 0);
         return base + extra;
+    }
+
+    function getPaymentCoveredWorks(member, amount) {
+        let remainingAmount = Number(amount) || 0;
+
+        return (member?.pendingWorks || []).flatMap((work) => {
+            if (remainingAmount <= 0) return [];
+
+            const pendingAmount = Math.max(0, Number(work.pendingAmount) || 0);
+            if (pendingAmount <= 0) return [];
+
+            const paymentAppliedAmount = Math.min(pendingAmount, remainingAmount);
+            const appliedRatio = pendingAmount > 0 ? paymentAppliedAmount / pendingAmount : 0;
+            remainingAmount -= paymentAppliedAmount;
+
+            return [{
+                ...work,
+                paymentAppliedAmount,
+                pendingAmountBeforePayment: pendingAmount,
+                pendingAmount: paymentAppliedAmount,
+                pendingWorkUnits: (Number(work.pendingWorkUnits) || 0) * appliedRatio,
+                pendingOvertimeHours: (Number(work.pendingOvertimeHours) || 0) * appliedRatio,
+            }];
+        });
+    }
+
+    function getDetailWorks(member) {
+        if (Number(member?.balance) > 0.01) return member?.pendingWorks || [];
+        return member?.works || [];
+    }
+
+    function getDetailWorksTitle(member) {
+        return Number(member?.balance) > 0.01 ? "Jornadas pendientes" : "Jornadas registradas";
     }
 
     function getWorkAddressKey(work) {
@@ -332,7 +398,7 @@
         const paymentAmountValue = Number(payment?.amount) || 0;
         const balanceAfter = Math.max(balanceBefore - paymentAmountValue, 0);
         const paymentsBeforeThis = Math.max((Number(member?.totalPaid) || 0), 0);
-        const works = member?.works || [];
+        const works = member?.receiptWorks || member?.pendingWorks || [];
         const payments = member?.payments || [];
         const receiptNumber = payment?.id || `TEMP-${Date.now()}`;
         const teamName = team?.name || team?.team || "Equipo";
@@ -347,11 +413,11 @@
             <tr>
                 <td>${escapeHtml(work.date || "-")}</td>
                 <td>${escapeHtml(getWorkTypeLabel(work))}</td>
-                <td>${getWorkUnits(work)}</td>
-                <td>${Number(work.overtimeHours) || 0}h</td>
+                <td>${escapeHtml(formatMetric(getPendingWorkUnits(work)))}</td>
+                <td>${escapeHtml(formatMetric(getPendingOvertimeHours(work)))}h</td>
                 <td>${escapeHtml(work.taskTitle || work.note || "")}</td>
                 <td>${escapeHtml(getWorkMemberLocationLabel(work) || "Sin GPS")}</td>
-                <td class="money">${escapeHtml(formatMoney(getWorkAmount(work, member)))}</td>
+                <td class="money">${escapeHtml(formatMoney(getWorkAmount(work, member, "pending")))}</td>
             </tr>
         `).join("");
 
@@ -546,12 +612,12 @@
                 <span class="value">${escapeHtml(formatMoney(member?.extraHourRate || 0))}</span>
             </div>
             <div class="box">
-                <span class="label">Días trabajados</span>
-                <span class="value">${Number(member?.totalWorkDays) || 0}</span>
+                <span class="label">Días pendientes</span>
+                <span class="value">${escapeHtml(formatMetric(member?.pendingWorkDays ?? member?.totalWorkDays))}</span>
             </div>
             <div class="box">
-                <span class="label">Horas extra</span>
-                <span class="value">${Number(member?.totalOvertimeHours) || 0}h</span>
+                <span class="label">Horas extra pendientes</span>
+                <span class="value">${escapeHtml(formatMetric(member?.pendingOvertimeHours ?? member?.totalOvertimeHours))}h</span>
             </div>
         </section>
 
@@ -568,7 +634,7 @@
             </tbody>
         </table>
 
-        <h2>Jornadas incluidas en el balance</h2>
+        <h2>Jornadas cubiertas por este pago</h2>
         <table>
             <thead>
                 <tr>
@@ -582,7 +648,7 @@
                 </tr>
             </thead>
             <tbody>
-                ${workRows || `<tr><td colspan="7">No hay jornadas registradas.</td></tr>`}
+                ${workRows || `<tr><td colspan="7">No hay jornadas pendientes asociadas a este pago.</td></tr>`}
             </tbody>
         </table>
 
@@ -629,8 +695,8 @@
                 acc.earned += Number(member.totalEarned) || 0;
                 acc.paid += Number(member.totalPaid) || 0;
                 acc.balance += Number(member.balance) || 0;
-                acc.workDays += Number(member.totalWorkDays) || 0;
-                acc.overtime += Number(member.totalOvertimeHours) || 0;
+                acc.workDays += Number(member.pendingWorkDays) || 0;
+                acc.overtime += Number(member.pendingOvertimeHours) || 0;
                 return acc;
             },
             { earned: 0, paid: 0, balance: 0, workDays: 0, overtime: 0 },
@@ -654,17 +720,17 @@
                         ["Total ganado", formatMoney(totals.earned)],
                         ["Total pagado", formatMoney(totals.paid)],
                         ["Saldo pendiente", formatMoney(totals.balance)],
-                        ["Dias trabajados", totals.workDays],
-                        ["Horas extra", `${totals.overtime}h`],
+                        ["Dias pendientes", formatMetric(totals.workDays)],
+                        ["Horas extra pendientes", `${formatMetric(totals.overtime)}h`],
                     ],
                 },
                 {
                     title: "Balance por integrante",
-                    headers: ["Integrante", "Dias", "Horas extra", "Tarifa diaria", "Hora extra", "Total ganado", "Pagado", "Saldo", "Estado"],
+                    headers: ["Integrante", "Dias pendientes", "Horas extra pendientes", "Tarifa diaria", "Hora extra", "Total ganado", "Pagado", "Saldo", "Estado"],
                     rows: filteredMembers.map((member) => [
                         member?.name || member?.email || "Usuario",
-                        member.totalWorkDays,
-                        `${member.totalOvertimeHours}h`,
+                        formatMetric(member.pendingWorkDays),
+                        `${formatMetric(member.pendingOvertimeHours)}h`,
                         formatMoney(member.dailyRate),
                         formatMoney(member.extraHourRate),
                         formatMoney(member.totalEarned),
@@ -674,18 +740,18 @@
                     ]),
                 },
                 {
-                    title: "Detalle de jornadas",
+                    title: "Detalle de jornadas pendientes",
                     headers: ["Integrante", "Fecha", "Tipo", "Dias", "Horas extra", "Nota / tarea", "Ubicación GPS", "Importe"],
                     rows: filteredMembers.flatMap((member) =>
-                        (member.works || []).map((work) => [
+                        (member.pendingWorks || []).map((work) => [
                             member?.name || member?.email || "Usuario",
                             formatDate(work.date),
                             getWorkTypeLabel(work),
-                            getWorkUnits(work),
-                            `${Number(work.overtimeHours) || 0}h`,
+                            formatMetric(getPendingWorkUnits(work)),
+                            `${formatMetric(getPendingOvertimeHours(work))}h`,
                             work.taskTitle || work.note || "",
                             getWorkMemberLocationLabel(work) || "Sin GPS",
-                            formatMoney(getWorkAmount(work, member)),
+                            formatMoney(getWorkAmount(work, member, "pending")),
                         ]),
                     ),
                 },
@@ -790,8 +856,8 @@
                     <thead>
                         <tr>
                             <th>Integrante</th>
-                            <th>Días Trabajados</th>
-                            <th>Horas Extras</th>
+                            <th>Días pendientes</th>
+                            <th>Horas extra pendientes</th>
                             <th>Total Ganado</th>
                             <th>Pagado</th>
                             <th>Saldo Pendiente</th>
@@ -805,8 +871,8 @@
                                     <div class="avatar">{(member?.name || member?.email || "?").charAt(0).toUpperCase()}</div>
                                     <span>{member?.name || member?.email || "Usuario"}</span>
                                 </td>
-                                <td>{member.totalWorkDays}</td>
-                                <td>{member.totalOvertimeHours}h</td>
+                                <td>{formatMetric(member.pendingWorkDays)}</td>
+                                <td>{formatMetric(member.pendingOvertimeHours)}h</td>
                                 <td>{formatMoney(member.totalEarned)}</td>
                                 <td>{formatMoney(member.totalPaid)}</td>
                                 <td class="balance-cell">
@@ -854,7 +920,7 @@
                                 <div class="avatar">{(member?.name || member?.email || "?").charAt(0).toUpperCase()}</div>
                                 <div class="mobile-member-text">
                                     <h3>{member?.name || member?.email || "Usuario"}</h3>
-                                    <span>{member.totalWorkDays} días · {member.totalOvertimeHours}h extra</span>
+                                    <span>{formatMetric(member.pendingWorkDays)} días pendientes · {formatMetric(member.pendingOvertimeHours)}h extra</span>
                                 </div>
                             </div>
                             <div class="mobile-balance">
@@ -889,12 +955,12 @@
                                         <strong>{formatMoney(member.totalPaid)}</strong>
                                     </div>
                                     <div>
-                                        <span>Días trabajados</span>
-                                        <strong>{member.totalWorkDays}</strong>
+                                        <span>Días pendientes</span>
+                                        <strong>{formatMetric(member.pendingWorkDays)}</strong>
                                     </div>
                                     <div>
-                                        <span>Horas extra</span>
-                                        <strong>{member.totalOvertimeHours}h</strong>
+                                        <span>Horas extra pendientes</span>
+                                        <strong>{formatMetric(member.pendingOvertimeHours)}h</strong>
                                     </div>
                                 </div>
 
@@ -1099,9 +1165,9 @@
 
                 <div class="details-tabs">
                     <div class="tab">
-                        <h4><History size={16} /> Jornadas y Horas Extras</h4>
+                        <h4><History size={16} /> {getDetailWorksTitle(selectedMemberDetails)}</h4>
                         <div class="scroll-list">
-                            {#each selectedMemberDetails?.works || [] as work}
+                            {#each getDetailWorks(selectedMemberDetails) as work}
                                 <div class="history-item">
                                     <div class="item-info">
                                         <span class="item-date">{work.date}</span>
@@ -1118,13 +1184,16 @@
                                         {/if}
                                     </div>
                                     <div class="item-values">
-                                        {#if work.overtimeHours > 0}
-                                            <span class="item-extra">+{work.overtimeHours}h extras</span>
+                                        {#if getPendingOvertimeHours(work) > 0}
+                                            <span class="item-extra">+{formatMetric(getPendingOvertimeHours(work))}h extras</span>
+                                        {/if}
+                                        {#if Number(work.pendingAmount) > 0}
+                                            <span class="item-price">{formatMoney(work.pendingAmount)}</span>
                                         {/if}
                                     </div>
                                 </div>
                             {:else}
-                                <p class="empty-msg">No hay registros de trabajo.</p>
+                                <p class="empty-msg">No hay jornadas pendientes.</p>
                             {/each}
                         </div>
                     </div>

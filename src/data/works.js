@@ -1,5 +1,5 @@
 import { db } from './firebase.js';
-import { collection, addDoc, query, where, getDocs, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, doc, getDoc, setDoc, updateDoc, runTransaction } from 'firebase/firestore';
 import {
     enqueueOfflineOperation,
     getQueuedOperationsByType,
@@ -11,6 +11,7 @@ import { applyWorkdayOvertimeLimit, assertWorkingDay } from './workLimits.js';
 import { geocodeAddress, getStoredUserGpsLocation, normalizeCoordinates } from '../helpers/navigation.js';
 
 const REGISTER_WORKDAY_OPERATION = 'registerWorkday';
+const DUPLICATE_REGULAR_WORKDAY_MESSAGE = 'Ya existe una jornada completa o media jornada para este día.';
 const WORKDAY_OPTIONAL_FIELDS = [
     'taskTitle',
     'note',
@@ -34,10 +35,92 @@ const WORKDAY_OPTIONAL_FIELDS = [
 
 export function getTodayDateString() {
     const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
+    return getLocalDateString(now);
+}
+
+function getLocalDateString(value = new Date()) {
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+
+    const date = value instanceof Date ? value : new Date(value || Date.now());
+    const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+    const year = safeDate.getFullYear();
+    const month = String(safeDate.getMonth() + 1).padStart(2, '0');
+    const day = String(safeDate.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+}
+
+function resolveWorkdayDate(workDay = {}, operation = null) {
+    return workDay.date || getLocalDateString(workDay.startedAt || operation?.createdAt || new Date());
+}
+
+function withResolvedWorkdayDate(workDay = {}, operation = null) {
+    return {
+        ...workDay,
+        date: resolveWorkdayDate(workDay, operation)
+    };
+}
+
+function isRegularWorkdayType(type) {
+    return type === 'full-day' || type === 'half-day';
+}
+
+function isRegularWorkday(workDay = {}) {
+    return isRegularWorkdayType(workDay.type || 'full-day');
+}
+
+function getRegularWorkdayDocId(teamId, userId, date) {
+    return ['regular-workday', teamId, userId, date]
+        .map((part) => encodeURIComponent(String(part || '')))
+        .join('__');
+}
+
+async function findRegularWorkdayForDate(teamId, userId, date, { excludeId = '' } = {}) {
+    if (!teamId || !userId || !date) return null;
+    const worksQuery = query(
+        collection(db, 'works'),
+        where('teamId', '==', teamId),
+        where('userId', '==', userId),
+        where('date', '==', date)
+    );
+    const snapshot = await getDocs(worksQuery);
+    return snapshot.docs.find((workDoc) => {
+        if (excludeId && workDoc.id === excludeId) return false;
+        return isRegularWorkdayType(workDoc.data().type);
+    }) || null;
+}
+
+async function saveRegularWorkday(teamId, userId, workDayDoc) {
+    const regularDocId = getRegularWorkdayDocId(teamId, userId, workDayDoc.date);
+    const legacyRegularDoc = await findRegularWorkdayForDate(teamId, userId, workDayDoc.date, {
+        excludeId: regularDocId
+    });
+
+    if (legacyRegularDoc) {
+        throw new Error(DUPLICATE_REGULAR_WORKDAY_MESSAGE);
+    }
+
+    const workRef = doc(db, 'works', regularDocId);
+    await runTransaction(db, async (transaction) => {
+        const existingDoc = await transaction.get(workRef);
+
+        if (existingDoc.exists()) {
+            const existingWorkday = existingDoc.data() || {};
+            const sameOperation = workDayDoc.clientOperationId &&
+                existingWorkday.clientOperationId === workDayDoc.clientOperationId;
+
+            if (!sameOperation) {
+                throw new Error(DUPLICATE_REGULAR_WORKDAY_MESSAGE);
+            }
+        }
+
+        if (existingDoc.exists()) {
+            transaction.set(workRef, workDayDoc, { merge: true });
+        } else {
+            transaction.set(workRef, workDayDoc);
+        }
+    });
+
+    return regularDocId;
 }
 
 export async function hasWorkdayForDate(teamId, userId, date = getTodayDateString()) {
@@ -75,7 +158,7 @@ function rememberLocalWorkday(workDate) {
 
 function buildWorkdayDoc(teamId, userId, userName, workDay, teamData = null) {
     if (!workDay) throw new Error("workDay is missing");
-    const workDate = workDay.date || getTodayDateString();
+    const workDate = resolveWorkdayDate(workDay);
     if (teamData) assertWorkingDay(teamData, workDate);
     const limitedWorkDay = teamData ? applyWorkdayOvertimeLimit(workDay, teamData) : workDay;
     const newWork = {
@@ -138,15 +221,15 @@ async function hasQueuedRegularWorkdayForDate(teamId, userId, date) {
         const type = workDay.type || 'full-day';
         return payload.teamId === teamId &&
             payload.userId === userId &&
-            (workDay.date || getTodayDateString()) === date &&
-            (type === 'full-day' || type === 'half-day');
+            resolveWorkdayDate(workDay, operation) === date &&
+            isRegularWorkdayType(type);
     });
 }
 
 async function enqueueRegisterWorkday(teamId, userId, userName, workDay) {
     const clientOperationId = workDay.clientOperationId || `workday-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const queuedWorkDay = { ...workDay, clientOperationId };
-    const workDate = queuedWorkDay.date || getTodayDateString();
+    const queuedWorkDay = withResolvedWorkdayDate({ ...workDay, clientOperationId });
+    const workDate = queuedWorkDay.date;
     const operation = await enqueueOfflineOperation(
         REGISTER_WORKDAY_OPERATION,
         { teamId, userId, userName, workDay: queuedWorkDay },
@@ -164,9 +247,20 @@ export async function executeRegisterWorkday({ teamId, userId, userName, workDay
     if (!workDay) throw new Error("workDay is missing");
     const teamSnapshot = await getDoc(doc(db, 'teams', teamId));
     const teamData = teamSnapshot.data();
-    const workDayWithLocation = await ensureStoredMemberLocationAddress(workDay);
+    const datedWorkDay = withResolvedWorkdayDate({
+        ...workDay,
+        clientOperationId: workDay.clientOperationId || operation?.id
+    }, operation);
+    const workDayWithLocation = await ensureStoredMemberLocationAddress(datedWorkDay);
     const newWork = buildWorkdayDoc(teamId, userId, userName, workDayWithLocation, teamData);
-    const deterministicId = workDay.clientOperationId || operation?.id;
+
+    if (isRegularWorkday(newWork)) {
+        const id = await saveRegularWorkday(teamId, userId, newWork);
+        rememberLocalWorkday(newWork.date);
+        return id;
+    }
+
+    const deterministicId = newWork.clientOperationId || operation?.id;
 
     if (deterministicId) {
         await setDoc(doc(db, 'works', deterministicId), newWork, { merge: true });
@@ -181,7 +275,14 @@ export async function executeRegisterWorkday({ teamId, userId, userName, workDay
 
 export async function registerWorkday(teamId, userId, userName, workDay) {
     if (!workDay) throw new Error("workDay is missing");
-    const workDayWithLocation = await addStoredMemberLocation(workDay, {
+    const datedWorkDay = withResolvedWorkdayDate(workDay);
+
+    if (isRegularWorkday(datedWorkDay)) {
+        const hasQueuedWorkday = await hasQueuedRegularWorkdayForDate(teamId, userId, datedWorkDay.date);
+        if (hasQueuedWorkday) throw new Error(DUPLICATE_REGULAR_WORKDAY_MESSAGE);
+    }
+
+    const workDayWithLocation = await addStoredMemberLocation(datedWorkDay, {
         includeAddress: !isBrowserOffline()
     });
 
@@ -206,14 +307,7 @@ export async function assignWorkdayToMember(teamId, userId, userName, workDay, a
     const teamSnapshot = await getDoc(doc(db, 'teams', teamId));
     const teamData = teamSnapshot.data();
     assertWorkingDay(teamData, workDay.date);
-    const limitedWorkDay = applyWorkdayOvertimeLimit(workDay, teamData);
-    const worksQuery = query(
-        collection(db, 'works'),
-        where('teamId', '==', teamId),
-        where('userId', '==', userId),
-        where('date', '==', workDay.date)
-    );
-    const snapshot = await getDocs(worksQuery);
+    const limitedWorkDay = withResolvedWorkdayDate(applyWorkdayOvertimeLimit(workDay, teamData));
     const workData = {
         teamId,
         userId,
@@ -232,9 +326,21 @@ export async function assignWorkdayToMember(teamId, userId, userName, workDay, a
         }
     });
 
-    if (!snapshot.empty) {
-        await updateDoc(snapshot.docs[0].ref, workData);
-        return snapshot.docs[0].id;
+    if (isRegularWorkday(workData)) {
+        const existingRegularDoc = await findRegularWorkdayForDate(teamId, userId, workData.date);
+
+        if (existingRegularDoc) {
+            await updateDoc(existingRegularDoc.ref, workData);
+            return existingRegularDoc.id;
+        }
+
+        const regularDocId = getRegularWorkdayDocId(teamId, userId, workData.date);
+        await setDoc(doc(db, 'works', regularDocId), {
+            ...workData,
+            createdAt: new Date().toISOString(),
+            paid: false
+        });
+        return regularDocId;
     }
 
     const docRef = await addDoc(collection(db, 'works'), {

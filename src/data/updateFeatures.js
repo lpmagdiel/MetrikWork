@@ -1,7 +1,11 @@
 export const updateData = {
-  version: "0.9.84", // Actualiza este valor en cada release
-  message: "Novedades de MetricWork 0.9.84 - Beta",
+  version: "0.9.86", // Actualiza este valor en cada release
+  message: "Novedades de MetricWork 0.9.86 - Beta",
   features: [
+    "Nueva pantalla Basic para registrar jornada con un solo botón cuando el usuario pertenece a un único equipo.",
+    "Pagos pendientes recalculados por jornadas reales sin volver a contar días que ya fueron pagados.",
+    "Bloqueo reforzado para impedir dos jornadas completas o medias jornadas del mismo miembro en un mismo día.",
+    "Comprobantes de pago actualizados para mostrar solo las jornadas cubiertas por el pago registrado.",
     "Nuevo flujo de creación de equipos con configuración de pago y fecha de cobro desde el inicio.",
     "Pagos de equipo mejorados con saldo por miembro, historial, comprobantes y reportes exportables.",
     "Recordatorio diario para fichar jornada con hora, mensaje personalizado y zona horaria.",

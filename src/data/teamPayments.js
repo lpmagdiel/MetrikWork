@@ -3,6 +3,95 @@ import { collection, addDoc, query, where, getDocs, doc, getDoc } from 'firebase
 import { getWorksByTeamId } from './works.js';
 import { getBankName } from '../helpers/banks.js';
 
+const MONEY_EPSILON = 0.01;
+
+function roundMetric(value, decimals = 2) {
+    const factor = 10 ** decimals;
+    return Math.round((Number(value) || 0) * factor) / factor;
+}
+
+function getWorkUnits(work) {
+    if (work.type === 'full-day') return 1;
+    if (work.type === 'half-day') return 0.5;
+    if (work.type === 'variable') {
+        return (Number(work.variableHours || work.durationHours) || 0) / 8;
+    }
+    return 0;
+}
+
+function getWorkAmount(work, dailyRate, extraHourRate) {
+    const base = getWorkUnits(work) * dailyRate;
+    const overtime = (Number(work.overtimeHours) || 0) * extraHourRate;
+    return base + overtime;
+}
+
+function sortWorksByDate(works = []) {
+    return [...works].sort((a, b) => {
+        const dateCompare = (a.date || '').localeCompare(b.date || '');
+        if (dateCompare) return dateCompare;
+        return (a.createdAt || '').localeCompare(b.createdAt || '');
+    });
+}
+
+function applyPaymentsToWorks(userWorks, totalPaid, dailyRate, extraHourRate) {
+    let remainingPaid = Math.max(0, Number(totalPaid) || 0);
+    const annotatedWorks = userWorks.map((work) => {
+        const workUnits = getWorkUnits(work);
+        const workAmount = getWorkAmount(work, dailyRate, extraHourRate);
+        const paidAmount = Math.min(workAmount, remainingPaid);
+        const pendingAmount = Math.max(workAmount - paidAmount, 0);
+        const pendingRatio = workAmount > MONEY_EPSILON ? pendingAmount / workAmount : 0;
+        const paymentStatus = pendingAmount <= MONEY_EPSILON
+            ? 'paid'
+            : paidAmount > MONEY_EPSILON
+                ? 'partial'
+                : 'unpaid';
+
+        remainingPaid = Math.max(remainingPaid - workAmount, 0);
+
+        return {
+            ...work,
+            workUnits: roundMetric(workUnits, 4),
+            workAmount,
+            paidAmount,
+            pendingAmount,
+            pendingWorkUnits: roundMetric(workUnits * pendingRatio, 4),
+            pendingOvertimeHours: roundMetric((Number(work.overtimeHours) || 0) * pendingRatio, 4),
+            paymentStatus,
+            paid: paymentStatus === 'paid'
+        };
+    });
+
+    const pendingWorks = annotatedWorks.filter((work) => Number(work.pendingAmount) > MONEY_EPSILON);
+    const pendingWorkDays = pendingWorks.reduce((sum, work) => sum + (Number(work.pendingWorkUnits) || 0), 0);
+    const pendingOvertimeHours = pendingWorks.reduce((sum, work) => sum + (Number(work.pendingOvertimeHours) || 0), 0);
+    const pendingEarned = pendingWorks.reduce((sum, work) => sum + (Number(work.pendingAmount) || 0), 0);
+
+    return {
+        annotatedWorks,
+        pendingWorks,
+        pendingWorkDays: roundMetric(pendingWorkDays, 4),
+        pendingOvertimeHours: roundMetric(pendingOvertimeHours, 4),
+        pendingEarned,
+        unappliedPaidAmount: remainingPaid
+    };
+}
+
+function normalizeCoveredWorks(coveredWorks = []) {
+    if (!Array.isArray(coveredWorks)) return [];
+    return coveredWorks
+        .map((work) => ({
+            id: work?.id || '',
+            date: work?.date || '',
+            type: work?.type || '',
+            amount: Math.max(0, Number(work?.paymentAppliedAmount ?? work?.pendingAmount ?? work?.amount) || 0),
+            pendingAmountBeforePayment: Math.max(0, Number(work?.pendingAmountBeforePayment ?? work?.pendingAmount) || 0),
+            workUnits: Math.max(0, Number(work?.pendingWorkUnits ?? work?.workUnits) || 0),
+            overtimeHours: Math.max(0, Number(work?.pendingOvertimeHours ?? work?.overtimeHours) || 0)
+        }))
+        .filter((work) => work.id || work.date || work.amount > 0);
+}
+
 export async function getTeamPaymentsData(teamId) {
     try {
         // 1. Get works for the team
@@ -43,48 +132,67 @@ export async function getTeamPaymentsData(teamId) {
             const dailyRate = Number(settings.dailyRate) || 0;
             const extraHourRate = Number(settings.extraHourRate) || 0;
 
-            const userWorks = (works[userId] || []).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+            const userWorks = sortWorksByDate(works[userId] || []);
             const userPayments = payments
                 .filter(p => p.userId === userId)
                 .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
             let totalFullDays = 0;
             let totalHalfDays = 0;
+            let totalVariableHours = 0;
+            let totalWorkDays = 0;
             let totalOvertimeHours = 0;
             let totalEarned = 0;
 
             userWorks.forEach(work => {
+                totalWorkDays += getWorkUnits(work);
                 if (work.type === 'full-day') {
                     totalFullDays++;
-                    totalEarned += dailyRate;
                 } else if (work.type === 'half-day') {
                     totalHalfDays++;
-                    totalEarned += dailyRate / 2;
+                } else if (work.type === 'variable') {
+                    totalVariableHours += Number(work.variableHours || work.durationHours) || 0;
                 }
                 if (work.overtimeHours > 0) {
-                    totalOvertimeHours += work.overtimeHours;
-                    totalEarned += work.overtimeHours * extraHourRate;
+                    totalOvertimeHours += Number(work.overtimeHours) || 0;
                 }
+                totalEarned += getWorkAmount(work, dailyRate, extraHourRate);
             });
 
             const totalPaid = userPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-            const balance = totalEarned - totalPaid;
+            const balance = Math.max(totalEarned - totalPaid, 0);
+            const overpaidAmount = Math.max(totalPaid - totalEarned, 0);
+            const {
+                annotatedWorks,
+                pendingWorks,
+                pendingWorkDays,
+                pendingOvertimeHours,
+                pendingEarned,
+                unappliedPaidAmount
+            } = applyPaymentsToWorks(userWorks, totalPaid, dailyRate, extraHourRate);
 
             return {
                 id: userId,
                 name: member.name,
                 totalFullDays,
                 totalHalfDays,
-                totalWorkDays: totalFullDays + (totalHalfDays / 2),
-                totalOvertimeHours,
+                totalVariableHours,
+                totalWorkDays: roundMetric(totalWorkDays, 4),
+                totalOvertimeHours: roundMetric(totalOvertimeHours, 4),
                 totalEarned,
                 totalPaid,
                 balance,
+                overpaidAmount,
+                pendingWorkDays,
+                pendingOvertimeHours,
+                pendingEarned,
+                pendingWorks,
+                unappliedPaidAmount,
                 dailyRate,
                 extraHourRate,
                 privateProfile,
                 payments: userPayments,
-                works: userWorks
+                works: annotatedWorks
             };
         });
 
@@ -95,9 +203,10 @@ export async function getTeamPaymentsData(teamId) {
     }
 }
 
-export async function registerTeamPayment(teamId, userId, amount, type, registeredBy = null, method = 'cash') {
+export async function registerTeamPayment(teamId, userId, amount, type, registeredBy = null, method = 'cash', metadata = {}) {
     try {
         const normalizedMethod = ['cash', 'transfer', 'bizum'].includes(method) ? method : 'cash';
+        const coveredWorks = normalizeCoveredWorks(metadata.coveredWorks);
         const paymentDoc = {
             teamId,
             userId,
@@ -107,6 +216,17 @@ export async function registerTeamPayment(teamId, userId, amount, type, register
             date: new Date().toISOString(),
             createdAt: new Date().toISOString()
         };
+
+        if (coveredWorks.length) {
+            paymentDoc.coveredWorks = coveredWorks;
+            paymentDoc.coveredWorkIds = coveredWorks.map((work) => work.id).filter(Boolean);
+        }
+
+        ['balanceBefore', 'balanceAfter', 'pendingWorkDaysBefore', 'pendingOvertimeHoursBefore'].forEach((field) => {
+            if (Number.isFinite(Number(metadata[field]))) {
+                paymentDoc[field] = Number(metadata[field]);
+            }
+        });
 
         if (registeredBy?.uid) {
             paymentDoc.registeredBy = registeredBy.uid;
