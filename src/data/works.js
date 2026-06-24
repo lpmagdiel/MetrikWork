@@ -41,12 +41,18 @@ export function getTodayDateString() {
 function getLocalDateString(value = new Date()) {
     if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
 
-    const date = value instanceof Date ? value : new Date(value || Date.now());
+    const resolvedValue = typeof value?.toDate === 'function' ? value.toDate() : value;
+    const date = resolvedValue instanceof Date ? resolvedValue : new Date(resolvedValue || Date.now());
     const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
     const year = safeDate.getFullYear();
     const month = String(safeDate.getMonth() + 1).padStart(2, '0');
     const day = String(safeDate.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+}
+
+function getWorkDateKey(work = {}) {
+    const dateValue = work.date || work.startedAt || work.createdAt;
+    return dateValue ? getLocalDateString(dateValue) : '';
 }
 
 function resolveWorkdayDate(workDay = {}, operation = null) {
@@ -359,7 +365,7 @@ export const getTeamWorks = async (teamId) => {
     snapshot.forEach((doc) => {
         works.push({ id: doc.id, ...doc.data() });
     });
-    return works.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    return works.sort((a, b) => getWorkDateKey(b).localeCompare(getWorkDateKey(a)));
 }
 
 export const getUserTeamWorks = async (teamId, userId) => {
@@ -374,7 +380,7 @@ export const getUserTeamWorks = async (teamId, userId) => {
     snapshot.forEach((doc) => {
         works.push({ id: doc.id, ...doc.data() });
     });
-    return works.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    return works.sort((a, b) => getWorkDateKey(b).localeCompare(getWorkDateKey(a)));
 }
 
 export const getWorksByTeamId = async (teamId) => {

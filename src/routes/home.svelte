@@ -681,12 +681,18 @@
   function getWorkDayValue(work) {
     if (work.type === "full-day") return 1;
     if (work.type === "half-day") return 0.5;
+    if (work.type === "variable" && work.timerMode !== "overtime") {
+      return Math.max(0, Number(work.variableHours ?? work.durationHours) || 0) / 8;
+    }
     return 0;
   }
 
   function getBaseWorkEarnings(work, dailyRate) {
     if (work.type === "full-day") return dailyRate;
     if (work.type === "half-day") return dailyRate / 2;
+    if (work.type === "variable" && work.timerMode !== "overtime") {
+      return getWorkDayValue(work) * dailyRate;
+    }
     return 0;
   }
 

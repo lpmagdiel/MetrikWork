@@ -226,6 +226,7 @@
     settings: () => import("./routes/team-settings.svelte"),
     stats: () => import("./routes/team-stats.svelte"),
     "my-stats": () => import("./routes/user-stats.svelte"),
+    renta: () => import("./routes/team-renta.svelte"),
     planning: () => import("./routes/planning.svelte"),
     locations: () => import("./routes/team-locations.svelte"),
   };

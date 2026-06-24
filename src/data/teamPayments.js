@@ -13,10 +13,14 @@ function roundMetric(value, decimals = 2) {
 function getWorkUnits(work) {
     if (work.type === 'full-day') return 1;
     if (work.type === 'half-day') return 0.5;
-    if (work.type === 'variable') {
-        return (Number(work.variableHours || work.durationHours) || 0) / 8;
+    if (work.type === 'variable' && work.timerMode !== 'overtime') {
+        return getVariableHours(work) / 8;
     }
     return 0;
+}
+
+function getVariableHours(work) {
+    return Math.max(0, Number(work?.variableHours ?? work?.durationHours) || 0);
 }
 
 function getWorkAmount(work, dailyRate, extraHourRate) {
@@ -150,8 +154,8 @@ export async function getTeamPaymentsData(teamId) {
                     totalFullDays++;
                 } else if (work.type === 'half-day') {
                     totalHalfDays++;
-                } else if (work.type === 'variable') {
-                    totalVariableHours += Number(work.variableHours || work.durationHours) || 0;
+                } else if (work.type === 'variable' && work.timerMode !== 'overtime') {
+                    totalVariableHours += getVariableHours(work);
                 }
                 if (work.overtimeHours > 0) {
                     totalOvertimeHours += Number(work.overtimeHours) || 0;

@@ -2,6 +2,7 @@
   import {
     BarChart3,
     CalendarDays,
+    ChevronRight,
     Clock,
     DollarSign,
     FileText,
@@ -25,6 +26,7 @@
   let messageToast = $state("");
   let typeToast = $state("success");
   let showToast = $state(false);
+  let loadRequestId = 0;
 
   const periodLabels = {
     month: "Este mes",
@@ -39,7 +41,7 @@
   let userWorks = $derived.by(() =>
     works
       .filter((work) => work.userId === $userStore?.uid)
-      .sort((a, b) => (b.date || "").localeCompare(a.date || "")),
+      .sort((a, b) => getWorkDateKey(b).localeCompare(getWorkDateKey(a))),
   );
 
   let range = $derived.by(() => {
@@ -51,7 +53,7 @@
   });
 
   let filteredWorks = $derived.by(() =>
-    userWorks.filter((work) => work.date && work.date >= range.start && work.date <= range.end),
+    userWorks.filter((work) => dateInRange(getWorkDateKey(work), range)),
   );
 
   let filteredPayments = $derived.by(() =>
@@ -61,6 +63,8 @@
   let stats = $derived.by(() => {
     let fullDays = 0;
     let halfDays = 0;
+    let variableEntries = 0;
+    let variableHours = 0;
     let overtimeEntries = 0;
     let overtimeHours = 0;
     let notesCount = 0;
@@ -69,17 +73,24 @@
     filteredWorks.forEach((work) => {
       if (work.type === "full-day") fullDays += 1;
       if (work.type === "half-day") halfDays += 1;
+      if (work.type === "variable" && !isOvertimeTimer(work)) {
+        variableEntries += 1;
+        variableHours += getVariableHours(work);
+      }
       if (Number(work.overtimeHours) > 0 || work.type === "overtime") {
         overtimeEntries += 1;
         overtimeHours += Number(work.overtimeHours) || 0;
       }
       if (work.note) notesCount += 1;
-      activeDates.add(work.date);
+      const dateKey = getWorkDateKey(work);
+      if (dateKey) activeDates.add(dateKey);
     });
 
-    const totalWorkDays = fullDays + halfDays / 2;
-    const estimatedEarnings =
-      fullDays * dailyRate + halfDays * (dailyRate / 2) + overtimeHours * extraHourRate;
+    const totalWorkDays = fullDays + halfDays / 2 + variableHours / 8;
+    const estimatedEarnings = filteredWorks.reduce(
+      (sum, work) => sum + getWorkEarnings(work),
+      0,
+    );
     const totalPaid = filteredPayments.reduce(
       (sum, payment) => sum + (Number(payment.amount) || 0),
       0,
@@ -89,6 +100,8 @@
     return {
       fullDays,
       halfDays,
+      variableEntries,
+      variableHours,
       overtimeEntries,
       overtimeHours,
       notesCount,
@@ -106,42 +119,59 @@
   let distribution = $derived.by(() => [
     { label: "Completas", value: stats.fullDays, color: "var(--success-color)" },
     { label: "Medias", value: stats.halfDays, color: "var(--warning-color)" },
-    { label: "Extra", value: stats.overtimeHours, color: "var(--info-color)" },
+    { label: "Parciales", value: stats.variableEntries, color: "var(--purple-color)" },
+    { label: "Extra", value: stats.overtimeEntries, color: "var(--info-color)" },
   ]);
 
   let monthlyTrend = $derived.by(() => {
     const buckets = new Map();
     filteredWorks.forEach((work) => {
-      const key = (work.date || "").slice(0, 7);
+      const key = getWorkDateKey(work).slice(0, 7);
       if (!key) return;
-      const previous = buckets.get(key) || { label: formatMonthKey(key), earnings: 0 };
+      const previous = buckets.get(key) || { key, label: formatMonthKey(key), earnings: 0 };
       previous.earnings += getWorkEarnings(work);
       buckets.set(key, previous);
     });
-    return Array.from(buckets.values()).slice(-6);
+    return Array.from(buckets.values())
+      .sort((a, b) => a.key.localeCompare(b.key))
+      .slice(-6);
   });
 
   let maxDistributionValue = $derived(Math.max(...distribution.map((item) => item.value), 1));
   let maxTrendValue = $derived(Math.max(...monthlyTrend.map((item) => item.earnings), 1));
 
   $effect(() => {
-    if (team?.id && $userStore?.uid) loadWorks();
+    if (team?.id && $userStore?.uid) {
+      loadWorks(team.id, $userStore.uid);
+    } else {
+      works = [];
+      payments = [];
+    }
   });
 
-  async function loadWorks() {
+  async function loadWorks(teamId, userId) {
+    const requestId = ++loadRequestId;
     isLoading = true;
     try {
-      const [loadedWorks, loadedPayments] = await Promise.all([
-        getUserTeamWorks(team.id, $userStore.uid),
-        getUserTeamPayments(team.id, $userStore.uid),
+      const [worksResult, paymentsResult] = await Promise.allSettled([
+        getUserTeamWorks(teamId, userId),
+        getUserTeamPayments(teamId, userId),
       ]);
-      works = loadedWorks;
-      payments = loadedPayments;
+      if (requestId !== loadRequestId) return;
+      if (worksResult.status === "rejected") throw worksResult.reason;
+
+      works = worksResult.value;
+      payments = paymentsResult.status === "fulfilled" ? paymentsResult.value : [];
+      if (paymentsResult.status === "rejected") {
+        console.error("Error loading user payments:", paymentsResult.reason);
+        showNotification("No se pudieron cargar los pagos; las jornadas sí están disponibles.", "error");
+      }
     } catch (error) {
+      if (requestId !== loadRequestId) return;
       console.error("Error loading user stats:", error);
       showNotification("Error al cargar estadísticas", "error");
     } finally {
-      isLoading = false;
+      if (requestId === loadRequestId) isLoading = false;
     }
   }
 
@@ -176,8 +206,9 @@
   }
 
   function formatDate(dateString) {
-    if (!dateString) return "";
-    const [year, month, day] = dateString.slice(0, 10).split("-").map(Number);
+    const dateKey = getDateKey(dateString);
+    if (!dateKey) return "";
+    const [year, month, day] = dateKey.split("-").map(Number);
     return new Date(year, month - 1, day).toLocaleDateString("es-ES", {
       day: "2-digit",
       month: "short",
@@ -201,19 +232,63 @@
   }
 
   function getWorkEarnings(work) {
-    const base =
-      work.type === "full-day" ? dailyRate : work.type === "half-day" ? dailyRate / 2 : 0;
+    const base = getWorkUnits(work) * dailyRate;
     return base + (Number(work.overtimeHours) || 0) * extraHourRate;
   }
 
+  function getWorkUnits(work) {
+    if (work.type === "full-day") return 1;
+    if (work.type === "half-day") return 0.5;
+    if (work.type === "variable" && !isOvertimeTimer(work)) {
+      return getVariableHours(work) / 8;
+    }
+    return 0;
+  }
+
+  function getVariableHours(work) {
+    return Math.max(0, Number(work?.variableHours ?? work?.durationHours) || 0);
+  }
+
+  function isOvertimeTimer(work) {
+    return work?.timerMode === "overtime";
+  }
+
+  function getDateKey(value) {
+    if (!value) return "";
+    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) {
+      return value.slice(0, 10);
+    }
+
+    const date = typeof value?.toDate === "function" ? value.toDate() : new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return toDateString(date);
+  }
+
+  function getWorkDateKey(work) {
+    return (
+      getDateKey(work?.date) ||
+      getDateKey(work?.startedAt) ||
+      getDateKey(work?.createdAt)
+    );
+  }
+
   function dateInRange(value, currentRange) {
-    const date = String(value || "").slice(0, 10);
+    const date = getDateKey(value);
     return Boolean(date && date >= currentRange.start && date <= currentRange.end);
+  }
+
+  function formatNumber(value, digits = 1) {
+    return new Intl.NumberFormat("es-ES", {
+      maximumFractionDigits: digits,
+    }).format(Number(value) || 0);
   }
 
   function workTypeLabel(work) {
     if (work.type === "full-day") return "Jornada completa";
     if (work.type === "half-day") return "Media jornada";
+    if (work.type === "variable") {
+      return isOvertimeTimer(work) ? "Horas extra" : "Jornada parcial";
+    }
     if (work.type === "overtime") return "Horas extra";
     return "Jornada";
   }
@@ -225,6 +300,11 @@
   function goToTeamHome() {
     const teamId = team?.id || $selectedTeamId;
     navigateTo(teamId ? `/teams/${teamId}` : "/teams");
+  }
+
+  function goToPlanning() {
+    const teamId = team?.id || $selectedTeamId;
+    navigateTo(teamId ? `/teams/${teamId}/planning` : "/teams");
   }
 </script>
 
@@ -250,6 +330,15 @@
           <TrendingUp size={28} />
         </div>
       </section>
+
+      <button type="button" class="planning-access" onclick={goToPlanning}>
+        <span class="planning-access-icon"><CalendarDays size={20} /></span>
+        <span class="planning-access-copy">
+          <small>Calendario del equipo</small>
+          <strong>Abrir Planning</strong>
+        </span>
+        <ChevronRight size={20} aria-hidden="true" />
+      </button>
 
       <section class="filters-panel">
         <div class="period-tabs">
@@ -291,14 +380,19 @@
           <article class="metric-card">
             <div class="metric-icon days"><CalendarDays size={20} /></div>
             <span>Jornadas</span>
-            <strong>{stats.totalWorkDays}</strong>
-            <small>{stats.fullDays} completas / {stats.halfDays} medias</small>
+            <strong>{formatNumber(stats.totalWorkDays)}</strong>
+            <small>
+              {stats.fullDays} completas / {stats.halfDays} medias
+              {#if stats.variableHours > 0}
+                / {formatNumber(stats.variableHours)}h parciales
+              {/if}
+            </small>
           </article>
 
           <article class="metric-card">
             <div class="metric-icon overtime"><Clock size={20} /></div>
             <span>Horas extra</span>
-            <strong>{stats.overtimeHours}h</strong>
+            <strong>{formatNumber(stats.overtimeHours)}h</strong>
             <small>{stats.overtimeEntries} registros</small>
           </article>
 
@@ -416,7 +510,7 @@
                 <article class="record-item">
                   <div>
                     <h3>{workTypeLabel(work)}</h3>
-                    <p>{formatDate(work.date)}</p>
+                    <p>{formatDate(getWorkDateKey(work))}</p>
                     {#if work.note}
                       <small>{work.note}</small>
                     {/if}
@@ -505,6 +599,54 @@
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+  }
+
+  .planning-access {
+    width: 100%;
+    min-width: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+    box-shadow: var(--shadow-card);
+    color: var(--text-primary);
+    padding: 14px 16px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .planning-access:hover {
+    border-color: var(--info-color);
+  }
+
+  .planning-access:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--info-color) 35%, transparent);
+    outline-offset: 2px;
+  }
+
+  .planning-access-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-info-subtle);
+    color: var(--info-color);
+  }
+
+  .planning-access-copy {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+  }
+
+  .planning-access-copy small {
+    color: var(--text-secondary);
+    font-size: 12px;
   }
 
   .filters-panel,

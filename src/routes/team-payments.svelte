@@ -268,7 +268,9 @@
         if (Number.isFinite(Number(work?.workUnits))) return Number(work.workUnits);
         if (work.type === "full-day") return 1;
         if (work.type === "half-day") return 0.5;
-        if (work.type === "variable") return (Number(work.variableHours || work.durationHours) || 0) / 8;
+        if (work.type === "variable" && work.timerMode !== "overtime") {
+            return (Number(work.variableHours ?? work.durationHours) || 0) / 8;
+        }
         return 0;
     }
 

@@ -152,7 +152,9 @@
     filteredWorks.forEach((work) => {
       if (work.type === "full-day") fullDays += 1;
       if (work.type === "half-day") halfDays += 1;
-      if (work.type === "variable") variableHours += Number(work.variableHours || work.durationHours) || 0;
+      if (work.type === "variable" && work.timerMode !== "overtime") {
+        variableHours += getVariableHours(work);
+      }
       overtimeHours += Number(work.overtimeHours) || 0;
       laborCost += getWorkLaborCost(work);
       if (work.date) activeDates.add(work.date);
@@ -557,10 +559,14 @@
   function getWorkUnits(work) {
     if (work.type === "full-day") return 1;
     if (work.type === "half-day") return 0.5;
-    if (work.type === "variable") {
-      return (Number(work.variableHours || work.durationHours) || 0) / 8;
+    if (work.type === "variable" && work.timerMode !== "overtime") {
+      return getVariableHours(work) / 8;
     }
     return 0;
+  }
+
+  function getVariableHours(work) {
+    return Math.max(0, Number(work?.variableHours ?? work?.durationHours) || 0);
   }
 
   function getWorkTypeLabel(work) {

@@ -27,6 +27,7 @@
     Circle,
     CheckCircle2,
     AlertCircle,
+    FileText,
     Loader,
     User,
     Calendar1,
@@ -630,6 +631,15 @@
             </button>
           {/if}
           {#if isAdmin}
+            <button
+              class="menu-card"
+              onclick={() => (navigateTo(`/teams/${team.id}/renta`))}
+            >
+              <div class="menu-icon renta">
+                <FileText size={24} />
+              </div>
+              <span>Preparar Renta</span>
+            </button>
             <button
               class="menu-card"
               onclick={() => (navigateTo(`/teams/${team.id}/planning`))}
@@ -1264,6 +1274,10 @@
   .menu-icon.planning {
     background: var(--bg-danger-subtle);
     color: var(--danger-color);
+  }
+  .menu-icon.renta {
+    background: var(--bg-success-subtle);
+    color: var(--success-color);
   }
   .members-section {
     margin-bottom: 32px;
