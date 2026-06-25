@@ -150,7 +150,7 @@
   let trackedWorkSeconds = $derived.by(() => getTrackedWorkSeconds(now));
   let pomodoroPhaseLabel = $derived(pomodoroPhase === "break" ? "Descanso" : "Enfoque");
   let canStart = $derived(Boolean(
-    activeTeamId &&
+    selectedTeam &&
     hasRequiredTask &&
     !isRunning &&
     !isTodayNonWorkingDay &&
@@ -161,8 +161,22 @@
   let canFinish = $derived(Boolean(isRunning && getDurationSecondsForMode(now) > 0));
 
   $effect(() => {
-    const preferredTeamId = $selectedTeamId || $teamsStore[0]?.id || "";
+    const teams = $teamsStore || [];
+    const preferredTeamId = teams.some((team) => team.id === $selectedTeamId)
+      ? $selectedTeamId
+      : teams[0]?.id || "";
+
     if (!activeTeamId && preferredTeamId) {
+      activeTeamId = preferredTeamId;
+      return;
+    }
+
+    if (
+      activeTeamId &&
+      !isRunning &&
+      teams.length > 0 &&
+      !teams.some((team) => team.id === activeTeamId)
+    ) {
       activeTeamId = preferredTeamId;
     }
   });
@@ -193,7 +207,7 @@
   });
 
   $effect(() => {
-    const teamId = activeTeamId;
+    const teamId = selectedTeam?.id;
     const userId = $userStore?.uid;
     const date = todayDate;
 
@@ -226,8 +240,8 @@
   });
 
   $effect(() => {
-    if (activeTeamId) {
-      return subscribeToTeamTemplates(activeTeamId, "workday");
+    if (selectedTeam?.id) {
+      return subscribeToTeamTemplates(selectedTeam.id, "workday");
     }
     return subscribeToTeamTemplates(null);
   });
@@ -337,7 +351,7 @@
     return workDay;
   }
 
-  async function checkRegularWorkdayNow(teamId = activeTeamId, userId = $userStore?.uid, date = todayDate) {
+  async function checkRegularWorkdayNow(teamId = selectedTeam?.id, userId = $userStore?.uid, date = todayDate) {
     if (!teamId || !userId) {
       hasRegularWorkdayToday = false;
       return false;
@@ -346,7 +360,7 @@
     isCheckingWorkday = true;
     try {
       const exists = await hasWorkdayForDate(teamId, userId, date);
-      if (teamId === activeTeamId && userId === $userStore?.uid && date === todayDate) {
+      if (teamId === selectedTeam?.id && userId === $userStore?.uid && date === todayDate) {
         hasRegularWorkdayToday = exists;
       }
       return exists;
@@ -355,7 +369,7 @@
       showNotification("No se pudo comprobar la jornada de hoy.", "warning");
       return false;
     } finally {
-      if (teamId === activeTeamId && userId === $userStore?.uid && date === todayDate) {
+      if (teamId === selectedTeam?.id && userId === $userStore?.uid && date === todayDate) {
         isCheckingWorkday = false;
       }
     }
@@ -645,7 +659,7 @@
       return;
     }
 
-    if (!activeTeamId) {
+    if (!selectedTeam) {
       showNotification("Selecciona un equipo antes de iniciar.", "error");
       return;
     }

@@ -1,0 +1,313 @@
+{
+  "schemaVersion": "2.0",
+  "database": "Firestore",
+  "designPrinciples": [
+    "Cada dato operativo pertenece a un equipo y vive bajo /teams/{teamId}.",
+    "El documento del equipo solo contiene configuración y metadatos acotados.",
+    "Las colecciones que pueden crecer se almacenan como subcolecciones paginables.",
+    "Los datos privados se separan de los datos operativos y se protegen con reglas específicas.",
+    "Las estadísticas y resúmenes son datos derivados, nunca la fuente de verdad."
+  ],
+  "collections": {
+    "teams": {
+      "path": "/teams/{teamId}",
+      "purpose": "Configuración, identidad y políticas del equipo.",
+      "document": {
+        "id": "teamId",
+        "schemaVersion": 2,
+        "name": "MetricWork España",
+        "adminId": "userId",
+        "memberIds": ["userId"],
+        "currency": "EUR",
+        "companyProfile": {
+          "legalName": "Empresa SL",
+          "taxId": "B00000000",
+          "email": "administracion@empresa.es",
+          "phone": "+34 600 000 000",
+          "address": "Calle Ejemplo 1, Madrid"
+        },
+        "workPolicy": {
+          "nonWorkingDays": [0, 6],
+          "overtimeLimitHours": 8,
+          "timezone": "Europe/Madrid"
+        },
+        "billing": {
+          "plan": "M",
+          "status": "active",
+          "renewalDate": "2026-07-01"
+        },
+        "createdAt": "ISO-8601 timestamp",
+        "updatedAt": "ISO-8601 timestamp"
+      },
+      "subcollections": {
+        "members": {
+          "path": "/teams/{teamId}/members/{userId}",
+          "purpose": "Relación laboral/operativa del usuario con el equipo.",
+          "document": {
+            "userId": "userId",
+            "displayName": "Nombre Apellidos",
+            "email": "usuario@ejemplo.es",
+            "role": "admin | manager | member",
+            "permissions": {
+              "tasks": ["view", "create", "edit"],
+              "payments": ["view"],
+              "stats": ["view"],
+              "settings": []
+            },
+            "employment": {
+              "dailyRate": 120,
+              "extraHourRate": 18,
+              "startedAt": "YYYY-MM-DD",
+              "active": true
+            },
+            "joinedAt": "ISO-8601 timestamp",
+            "updatedAt": "ISO-8601 timestamp"
+          }
+        },
+        "privateMembers": {
+          "path": "/teams/{teamId}/privateMembers/{userId}",
+          "purpose": "Datos privados consultables solo por el titular y roles autorizados.",
+          "document": {
+            "userId": "userId",
+            "phone": "+34 600 000 000",
+            "iban": "ES00 0000 0000 0000 0000 0000",
+            "bankName": "Banco",
+            "taxDataConsent": {
+              "granted": false,
+              "grantedAt": null,
+              "expiresAt": null
+            },
+            "updatedAt": "ISO-8601 timestamp"
+          }
+        },
+        "workEntries": {
+          "path": "/teams/{teamId}/workEntries/{entryId}",
+          "purpose": "Jornadas, trabajo parcial y horas extra. Fuente de verdad para pagos y estadísticas.",
+          "document": {
+            "userId": "userId",
+            "date": "YYYY-MM-DD",
+            "type": "full-day | half-day | variable | overtime",
+            "timerMode": "full-day | variable | overtime",
+            "durationHours": 8,
+            "variableHours": 0,
+            "overtimeHours": 0,
+            "taskTitle": "Instalación cliente A",
+            "note": "Observaciones",
+            "assignedBy": "userId | null",
+            "locationId": "locationId | null",
+            "startedAt": "ISO-8601 timestamp | null",
+            "endedAt": "ISO-8601 timestamp | null",
+            "createdAt": "ISO-8601 timestamp",
+            "updatedAt": "ISO-8601 timestamp"
+          },
+          "recommendedIndexes": [
+            ["userId", "date"],
+            ["date", "type"],
+            ["locationId", "date"]
+          ]
+        },
+        "payments": {
+          "path": "/teams/{teamId}/payments/{paymentId}",
+          "purpose": "Pagos realizados a miembros; no sustituye nóminas ni certificados de retenciones.",
+          "document": {
+            "userId": "userId",
+            "amount": 1250.5,
+            "currency": "EUR",
+            "type": "partial | total",
+            "method": "cash | transfer | bizum",
+            "date": "YYYY-MM-DD",
+            "coveredWorkEntryIds": ["entryId"],
+            "registeredBy": "userId",
+            "registeredByName": "Administrador",
+            "createdAt": "ISO-8601 timestamp"
+          },
+          "recommendedIndexes": [
+            ["userId", "date"],
+            ["date", "userId"]
+          ]
+        },
+        "messages": {
+          "path": "/teams/{teamId}/messages/{messageId}",
+          "purpose": "Chat del equipo, paginado por fecha.",
+          "document": {
+            "authorId": "userId",
+            "text": "Mensaje",
+            "attachments": [],
+            "createdAt": "ISO-8601 timestamp",
+            "editedAt": "ISO-8601 timestamp | null",
+            "deletedAt": "ISO-8601 timestamp | null"
+          },
+          "recommendedIndexes": [["createdAt"]]
+        },
+        "tasks": {
+          "path": "/teams/{teamId}/tasks/{taskId}",
+          "purpose": "Tareas y seguimiento de trabajo del equipo.",
+          "document": {
+            "title": "Revisar instalación",
+            "description": "Detalle de la tarea",
+            "status": "pending | in_progress | completed | cancelled",
+            "priority": "low | medium | high",
+            "assigneeIds": ["userId"],
+            "dueDate": "YYYY-MM-DD | null",
+            "createdBy": "userId",
+            "createdAt": "ISO-8601 timestamp",
+            "updatedAt": "ISO-8601 timestamp"
+          },
+          "recommendedIndexes": [
+            ["status", "dueDate"],
+            ["assigneeIds", "status", "dueDate"]
+          ]
+        },
+        "locations": {
+          "path": "/teams/{teamId}/locations/{locationId}",
+          "purpose": "Centros, obras o ubicaciones operativas.",
+          "document": {
+            "name": "Oficina Madrid",
+            "address": "Calle Ejemplo 1",
+            "coordinates": {
+              "latitude": 40.4168,
+              "longitude": -3.7038
+            },
+            "budget": 0,
+            "assignedMemberIds": ["userId"],
+            "active": true,
+            "createdAt": "ISO-8601 timestamp",
+            "updatedAt": "ISO-8601 timestamp"
+          }
+        },
+        "inventory": {
+          "path": "/teams/{teamId}/inventory/{itemId}",
+          "purpose": "Herramientas, materiales y consumibles del equipo.",
+          "document": {
+            "name": "Taladro",
+            "productType": "tool | material",
+            "category": "Herramientas",
+            "quantity": 1,
+            "minStock": 0,
+            "unitCost": 120,
+            "currency": "EUR",
+            "locationId": "locationId | null",
+            "createdAt": "ISO-8601 timestamp",
+            "updatedAt": "ISO-8601 timestamp"
+          },
+          "recommendedIndexes": [
+            ["locationId", "productType"],
+            ["productType", "quantity"]
+          ]
+        },
+        "charges": {
+          "path": "/teams/{teamId}/charges/{chargeId}",
+          "purpose": "Cobros a clientes y facturación operativa.",
+          "document": {
+            "client": {
+              "name": "Cliente",
+              "taxId": "B00000000",
+              "email": "cliente@ejemplo.es"
+            },
+            "title": "Servicio mensual",
+            "amount": 500,
+            "currency": "EUR",
+            "status": "pending | paid | overdue | cancelled",
+            "dueDate": "YYYY-MM-DD",
+            "paidAt": "ISO-8601 timestamp | null",
+            "createdAt": "ISO-8601 timestamp",
+            "updatedAt": "ISO-8601 timestamp"
+          },
+          "recommendedIndexes": [
+            ["status", "dueDate"],
+            ["client.name", "dueDate"]
+          ]
+        },
+        "stats": {
+          "path": "/teams/{teamId}/stats/{periodId}",
+          "purpose": "Resumen derivado por periodo para paneles rápidos. Debe recalcularse desde datos fuente.",
+          "document": {
+            "period": "2025-06",
+            "workUnits": 54.5,
+            "overtimeHours": 22,
+            "laborEstimated": 6850,
+            "paymentsRegistered": 5300,
+            "inventoryValue": 1450,
+            "generatedAt": "ISO-8601 timestamp",
+            "sourceVersion": "2.0"
+          }
+        },
+        "auditLogs": {
+          "path": "/teams/{teamId}/auditLogs/{eventId}",
+          "purpose": "Trazabilidad de acciones sensibles, especialmente pagos y datos privados.",
+          "document": {
+            "actorId": "userId",
+            "action": "payment.created",
+            "entityType": "payment",
+            "entityId": "paymentId",
+            "summary": "Pago registrado para un miembro",
+            "createdAt": "ISO-8601 timestamp"
+          },
+          "recommendedIndexes": [["createdAt"], ["actorId", "createdAt"]]
+        }
+      }
+    },
+    "users": {
+      "path": "/users/{userId}",
+      "purpose": "Perfil global del usuario, independiente de cualquier equipo.",
+      "document": {
+        "displayName": "Nombre Apellidos",
+        "email": "usuario@ejemplo.es",
+        "photoURL": "https://...",
+        "createdAt": "ISO-8601 timestamp",
+        "updatedAt": "ISO-8601 timestamp"
+      },
+      "subcollections": {
+        "teamMemberships": {
+          "path": "/users/{userId}/teamMemberships/{teamId}",
+          "purpose": "Índice de lectura rápida para cargar los equipos del usuario.",
+          "document": {
+            "teamId": "teamId",
+            "teamName": "MetricWork España",
+            "role": "admin | manager | member",
+            "active": true,
+            "updatedAt": "ISO-8601 timestamp"
+          }
+        }
+      }
+    },
+    "system_admins": {
+      "path": "/system_admins/{userId}",
+      "purpose": "Administración global de la plataforma.",
+      "document": {
+        "active": true,
+        "createdAt": "ISO-8601 timestamp"
+      }
+    },
+    "team_access_codes": {
+      "path": "/team_access_codes/{code}",
+      "purpose": "Códigos de alta y facturación de equipos.",
+      "document": {
+        "code": "12345678",
+        "used": false,
+        "expiresAt": "ISO-8601 timestamp",
+        "size": "S | M | L"
+      }
+    }
+  },
+  "securityModel": {
+    "teamAccess": "Comprobar /teams/{teamId}/members/{request.auth.uid} para cada subcolección del equipo.",
+    "privateData": "privateMembers solo puede ser leído por su titular, el admin y roles con permiso explícito de pagos o administración.",
+    "writePolicy": "Las operaciones que modifican dos fuentes de verdad deben usar transacciones o batches atómicos.",
+    "sensitiveFiscalData": "Los datos de renta no se persisten sin consentimiento explícito, fecha de expiración y registro de auditoría."
+  },
+  "migrationNotes": {
+    "currentRootCollectionsToMove": {
+      "works": "/teams/{teamId}/workEntries",
+      "team_payments": "/teams/{teamId}/payments",
+      "team_charges": "/teams/{teamId}/charges"
+    },
+    "migrationStrategy": [
+      "Añadir schemaVersion al equipo.",
+      "Escribir en ambas estructuras temporalmente mediante un repositorio de datos.",
+      "Migrar datos por lotes, validando conteos e importes por equipo.",
+      "Cambiar las lecturas a la estructura nueva.",
+      "Eliminar la doble escritura solo tras una copia de seguridad y auditoría."
+    ]
+  }
+}
