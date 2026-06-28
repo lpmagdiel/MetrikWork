@@ -47,6 +47,7 @@
   const legalRoutes = ["/terms", "/privacy", "/cookies", "/legal"];
   const publicRoutes = ["/hello", "/login", ...legalRoutes];
   const noNavRoutes = ["/hello", "/login", "/tour", ...legalRoutes];
+  let isPublicGalleryRoute = $derived(/^\/gallery\/[^/]+$/.test(cleanPath));
   const analyticsConsentReloadKey = "metricwork:analytics-consent-reload";
 
   onMount(() => {
@@ -204,6 +205,7 @@
     "/requests": () => import("./routes/requests.svelte"),
     "/notifications": () => import("./routes/notifications.svelte"),
     "/inventory": () => import("./routes/inventory.svelte"),
+    "/gallery": () => import("./routes/gallery-readonly.svelte"),
     "/calculator": () => import("./routes/calculator.svelte"),
     "/notes": () => import("./routes/notes.svelte"),
     "/locations": () => import("./routes/locations.svelte"),
@@ -220,6 +222,7 @@
   const teamRouteLoaders = {
     tasks: routeLoaders["/tasks"],
     inventory: routeLoaders["/inventory"],
+    gallery: () => import("./routes/gallery.svelte"),
     chat: routeLoaders["/chat"],
     payments: routeLoaders["/team-payments"],
     charges: () => import("./routes/team-charges.svelte"),
@@ -272,6 +275,10 @@
   }
 
   let routeInfo = $derived.by(() => {
+    if (isPublicGalleryRoute) {
+      return { loader: routeLoaders["/gallery"], teamId: null };
+    }
+
     // 1. Handle nested team routes: /teams/:teamId/:subpage
     if (cleanPath.startsWith("/teams/")) {
       const parts = cleanPath.split("/");
@@ -298,10 +305,10 @@
 
   let canRender = $derived(
     $authReady &&
-      ($userStore || publicRoutes.includes(cleanPath)),
+      ($userStore || publicRoutes.includes(cleanPath) || isPublicGalleryRoute),
   );
   let showNav = $derived(
-    $authReady && !noNavRoutes.includes(cleanPath),
+    $authReady && !noNavRoutes.includes(cleanPath) && !isPublicGalleryRoute,
   );
 
   // Sync selectedTeamId store
@@ -323,7 +330,8 @@
     if (!$authReady) return;
     if (
       !$userStore &&
-      !publicRoutes.includes(cleanPath)
+      !publicRoutes.includes(cleanPath) &&
+      !isPublicGalleryRoute
     ) {
       navigateTo("/hello");
     }
@@ -421,7 +429,7 @@
   }
 
   function isBirthDateGateOpenPath(path) {
-    return ["/hello", "/login", "/settings", ...legalRoutes].includes(path);
+    return isPublicGalleryRoute || ["/hello", "/login", "/settings", ...legalRoutes].includes(path);
   }
 
   async function checkUserBirthDateGate(uid) {

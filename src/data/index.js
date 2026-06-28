@@ -2,6 +2,7 @@ export * from './auth.js';
 export * from './teams.js';
 export * from './tasks.js';
 export * from './inventory.js';
+export * from './gallery.js';
 export * from './notes.js';
 export * from './locations.js';
 export * from './notifications.js';

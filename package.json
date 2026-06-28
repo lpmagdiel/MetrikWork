@@ -30,6 +30,7 @@
     "firebase": "^12.9.0",
     "lucide": "^0.563.0",
     "lucide-svelte": "^0.563.0",
+    "qrcode": "^1.5.4",
     "svelte-dnd-action": "^0.9.69",
     "svelte-gestures": "^5.2.2",
     "sweetalert2": "^11.26.24"

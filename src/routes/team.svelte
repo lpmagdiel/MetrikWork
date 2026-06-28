@@ -32,6 +32,7 @@
     User,
     Calendar1,
     MapPinned,
+    Images,
   } from "lucide-svelte";
   import {
     selectedTeam,
@@ -551,6 +552,15 @@
               <span>Tareas</span>
             </button>
           {/if}
+          <button
+            class="menu-card"
+            onclick={() => (navigateTo(`/teams/${team.id}/gallery`))}
+          >
+            <div class="menu-icon gallery">
+              <Images size={24} />
+            </div>
+            <span>Galería</span>
+          </button>
           <button class="menu-card" onclick={openWorkdayForm}>
             <div class="menu-icon workday">
               <Clock size={24} />
@@ -1254,6 +1264,10 @@
   .menu-icon.inventory {
     background: var(--bg-info-subtle);
     color: var(--info-color);
+  }
+  .menu-icon.gallery {
+    background: var(--bg-purple-subtle);
+    color: var(--purple-color);
   }
   .menu-icon.settings {
     background: var(--bg-input);

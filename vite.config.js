@@ -151,6 +151,9 @@ export default defineConfig(({ mode }) => {
       'import.meta.env.CLOUDINARY_PRESET_INVENTARY': JSON.stringify(
         env.CLOUDINARY_PRESET_INVENTARY || 'MetricWorkInventary'
       ),
+      'import.meta.env.CLOUDINARY_PRESET_GALLERY': JSON.stringify(
+        env.CLOUDINARY_PRESET_GALLERY || env.CLOUDINARY_PRESET || 'MetricWork'
+      ),
     },
     plugins: [
       svelte(),

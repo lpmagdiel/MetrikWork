@@ -799,6 +799,18 @@ service cloud.firestore {
         allow update, delete: if false;
       }
 
+      match /galleryFolders/{folderId} {
+        allow read, create, update, delete: if isTeamMember(teamId);
+      }
+
+      match /galleryImages/{imageId} {
+        allow read, create, update, delete: if isTeamMember(teamId);
+      }
+
+      match /galleryMeta/{metaId} {
+        allow read, create, update, delete: if isTeamMember(teamId);
+      }
+
       match /templates/{templateId} {
         allow read: if isTeamMember(teamId);
         allow create: if isTeamMember(teamId) &&
@@ -867,6 +879,20 @@ service cloud.firestore {
                         isTeamAdmin(teamId)
                       );
       }
+    }
+
+    // Cada enlace compartido usa un token aleatorio como id. Se permite obtener
+    // un documento concreto, pero nunca listar o enumerar las galerías públicas.
+    match /galleryShares/{shareToken} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if request.auth != null &&
+                    isTeamMember(request.resource.data.teamId);
+      allow update: if request.auth != null &&
+                    isTeamMember(resource.data.teamId) &&
+                    request.resource.data.teamId == resource.data.teamId;
+      allow delete: if request.auth != null &&
+                    isTeamMember(resource.data.teamId);
     }
 
     // --- CHATS PRIVADOS ---
