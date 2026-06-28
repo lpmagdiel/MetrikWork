@@ -1,5 +1,6 @@
 import { writable } from 'svelte/store';
 import { db } from './firebase.js';
+import { stripImageFileExtension } from '../helpers/image.js';
 import {
     addDoc,
     collection,
@@ -10,6 +11,7 @@ import {
     onSnapshot,
     query,
     setDoc,
+    updateDoc,
     where
 } from 'firebase/firestore';
 
@@ -98,7 +100,7 @@ export async function addGalleryImages(teamId, images = [], actorId = '') {
     const references = await Promise.all(validImages.map((image, index) => addDoc(
         collection(db, 'teams', teamId, 'galleryImages'),
         {
-            name: String(image.name || `Imagen ${index + 1}`).trim().slice(0, 120),
+            name: stripImageFileExtension(image.name, `Imagen ${index + 1}`).slice(0, 120),
             url: image.url,
             folderId: image.folderId || '',
             createdAt,
@@ -113,6 +115,18 @@ export async function addGalleryImages(teamId, images = [], actorId = '') {
 export async function deleteGalleryImage(teamId, imageId) {
     if (!teamId || !imageId) return;
     await deleteDoc(doc(db, 'teams', teamId, 'galleryImages', imageId));
+    await syncPublicGallery(teamId);
+}
+
+export async function updateGalleryImageName(teamId, imageId, name) {
+    const normalizedName = stripImageFileExtension(name, '').slice(0, 120);
+    if (!teamId || !imageId) throw new Error('Imagen no válida');
+    if (!normalizedName) throw new Error('Escribe un nombre para la imagen');
+
+    await updateDoc(doc(db, 'teams', teamId, 'galleryImages', imageId), {
+        name: normalizedName,
+        updatedAt: new Date().toISOString()
+    });
     await syncPublicGallery(teamId);
 }
 

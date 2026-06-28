@@ -1,8 +1,9 @@
 <script>
-  import { CalendarDays, Folder, ImageOff, Trash2 } from "lucide-svelte";
-  import { optimizeCloudinary } from "../helpers/image.js";
+  import { CalendarDays, Edit2, Folder, ImageOff, Trash2 } from "lucide-svelte";
+  import { optimizeCloudinary, stripImageFileExtension } from "../helpers/image.js";
 
-  const { image, folderName = "Sin carpeta", onOpen, onDelete } = $props();
+  const { image, folderName = "Sin carpeta", onOpen, onEdit, onDelete } = $props();
+  let displayName = $derived(stripImageFileExtension(image.name));
 
   function formatDate(value) {
     if (!value) return "";
@@ -20,13 +21,13 @@
   <button
     class="image-thumb"
     type="button"
-    aria-label={`Abrir ${image.name || "imagen"}`}
+    aria-label={`Abrir ${displayName}`}
     onclick={() => onOpen?.(image)}
   >
     {#if image.url}
       <img
         src={optimizeCloudinary(image.url, 260, { height: 260, crop: "fill" })}
-        alt={image.name || "Imagen de la galería"}
+        alt={displayName}
         width="104"
         height="104"
         loading="lazy"
@@ -38,7 +39,7 @@
   </button>
 
   <div class="image-description">
-    <h3>{image.name || "Imagen"}</h3>
+    <h3>{displayName}</h3>
     <div class="image-meta">
       <span class="badge"><Folder size={14} /> {folderName}</span>
       {#if formatDate(image.createdAt)}
@@ -47,17 +48,30 @@
     </div>
   </div>
 
-  {#if onDelete}
+  {#if onEdit || onDelete}
     <div class="image-actions">
-      <button
-        class="delete-button"
-        type="button"
-        aria-label={`Eliminar ${image.name || "imagen"}`}
-        title="Eliminar imagen"
-        onclick={() => onDelete(image)}
-      >
-        <Trash2 size={18} />
-      </button>
+      {#if onEdit}
+        <button
+          class="action-button edit-button"
+          type="button"
+          aria-label={`Cambiar nombre de ${displayName}`}
+          title="Cambiar nombre"
+          onclick={() => onEdit(image)}
+        >
+          <Edit2 size={18} />
+        </button>
+      {/if}
+      {#if onDelete}
+        <button
+          class="action-button delete-button"
+          type="button"
+          aria-label={`Eliminar ${displayName}`}
+          title="Eliminar imagen"
+          onclick={() => onDelete(image)}
+        >
+          <Trash2 size={18} />
+        </button>
+      {/if}
     </div>
   {/if}
 </article>
@@ -152,12 +166,14 @@
 
   .image-actions {
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 4px;
     padding-right: 8px;
   }
 
-  .delete-button {
+  .action-button {
     width: 34px;
     height: 34px;
     border: 0;
@@ -168,6 +184,11 @@
     align-items: center;
     justify-content: center;
     cursor: pointer;
+  }
+
+  .edit-button:hover {
+    color: var(--info-color);
+    background: var(--bg-info-subtle);
   }
 
   .delete-button:hover {

@@ -1,4 +1,5 @@
 <script>
+  import { onDestroy } from "svelte";
   import {
     Copy,
     Folder,
@@ -26,12 +27,14 @@
     selectedTeam,
     selectedTeamId,
     subscribeToTeamGallery,
+    updateGalleryImageName,
     userStore,
   } from "../data/stores.js";
   import { navigateTo } from "../router.js";
+  import { openSliceContainers } from "../data/ui.js";
   import { destroyer, resizeImageFile, uploader } from "../data/fileHelper.js";
   import { confirmAlert, promptAlert, showErrorAlert, showSuccessAlert } from "../data/alerts.js";
-  import { optimizeCloudinary } from "../helpers/image.js";
+  import { optimizeCloudinary, stripImageFileExtension } from "../helpers/image.js";
   import BadgetButton from "../components/BadgetButton.svelte";
   import GalleryImage from "../components/GalleryImage.svelte";
   import SliceContainer from "../components/SliceContainer.svelte";
@@ -53,6 +56,7 @@
   let qrCodeUrl = $state("");
   let isPreparingShare = $state(false);
   let lightboxImage = $state(null);
+  let lightboxRegistered = false;
 
   let selectedFolder = $derived(
     $galleryFoldersStore.find((folder) => folder.id === selectedFolderId) || null,
@@ -71,6 +75,21 @@
   $effect(() => {
     if (!teamId) return;
     return subscribeToTeamGallery(teamId);
+  });
+
+  $effect(() => {
+    const shouldRegister = Boolean(lightboxImage);
+    if (shouldRegister === lightboxRegistered) return;
+
+    openSliceContainers.update((count) =>
+      Math.max(0, count + (shouldRegister ? 1 : -1)),
+    );
+    lightboxRegistered = shouldRegister;
+  });
+
+  onDestroy(() => {
+    if (!lightboxRegistered) return;
+    openSliceContainers.update((count) => Math.max(0, count - 1));
   });
 
   function goToTeamHome() {
@@ -192,7 +211,10 @@
   async function removeImage(image) {
     const confirmed = await confirmAlert({
       title: "¿Eliminar esta imagen?",
-      text: image.name || "La imagen dejará de aparecer también en el enlace compartido.",
+      text: stripImageFileExtension(
+        image.name,
+        "La imagen dejará de aparecer también en el enlace compartido.",
+      ),
       confirmButtonText: "Eliminar imagen",
       danger: true,
     });
@@ -204,6 +226,24 @@
       if (lightboxImage?.id === image.id) lightboxImage = null;
     } catch (error) {
       showErrorAlert("No se pudo eliminar", error.message || "Inténtalo de nuevo");
+    }
+  }
+
+  async function renameImage(image) {
+    const name = await promptAlert({
+      title: "Cambiar nombre",
+      inputLabel: "Nombre de la imagen",
+      inputPlaceholder: "Escribe un nombre",
+      inputValue: stripImageFileExtension(image.name, ""),
+      confirmButtonText: "Guardar nombre",
+    });
+    if (!name || name === stripImageFileExtension(image.name, "")) return;
+
+    try {
+      await updateGalleryImageName(teamId, image.id, name);
+      showSuccessAlert("Nombre actualizado", "La galería compartida también se ha actualizado.", { timer: 1600 });
+    } catch (error) {
+      showErrorAlert("No se pudo cambiar el nombre", error.message || "Inténtalo de nuevo");
     }
   }
 
@@ -373,6 +413,7 @@
             {image}
             folderName={getFolderName(image.folderId)}
             onOpen={(selectedImage) => (lightboxImage = selectedImage)}
+            onEdit={renameImage}
             onDelete={removeImage}
           />
         {/each}
@@ -427,7 +468,7 @@
     </button>
     <img
       src={optimizeCloudinary(lightboxImage.url, 1800)}
-      alt={lightboxImage.name || "Imagen de la galería"}
+      alt={stripImageFileExtension(lightboxImage.name)}
     />
   </div>
 {/if}

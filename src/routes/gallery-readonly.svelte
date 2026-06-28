@@ -2,7 +2,7 @@
   import { Eye, Folder, Image as ImageIcon, Images, LoaderCircle, Search, X } from "lucide-svelte";
   import { currentPath } from "../router.js";
   import { getPublicGallery } from "../data/stores.js";
-  import { optimizeCloudinary } from "../helpers/image.js";
+  import { optimizeCloudinary, stripImageFileExtension } from "../helpers/image.js";
   import BadgetButton from "../components/BadgetButton.svelte";
   import GalleryImage from "../components/GalleryImage.svelte";
 
@@ -208,7 +208,7 @@
     </button>
     <img
       src={optimizeCloudinary(lightboxImage.url, 1800)}
-      alt={lightboxImage.name || "Imagen de la galería"}
+      alt={stripImageFileExtension(lightboxImage.name)}
     />
   </div>
 {/if}

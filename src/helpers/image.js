@@ -1,4 +1,5 @@
 const CLOUDINARY_UPLOAD_SEGMENT = '/image/upload/';
+const IMAGE_FILE_EXTENSION = /\.(?:avif|bmp|gif|heic|heif|jpe?g|png|svg|tiff?|webp)$/i;
 const TRANSFORMATION_PART = /^[a-z][a-z0-9]*_[^/]+$/i;
 const TRANSFORMATION_KEYS = new Set([
     'a',
@@ -51,6 +52,12 @@ const isIosStandalone = () => {
 
     return isIos && isStandalone;
 };
+
+export function stripImageFileExtension(value, fallback = 'Imagen') {
+    const name = String(value || '').trim();
+    if (!name) return fallback;
+    return name.replace(IMAGE_FILE_EXTENSION, '').trim() || fallback;
+}
 
 export function optimizeCloudinary(url, width = 150, options = {}) {
     if (!url || typeof url !== 'string') return url;
