@@ -7,6 +7,7 @@
     Coffee,
     Flag,
     Hourglass,
+    LoaderCircle,
     Play,
     RotateCcw,
     Save,
@@ -983,12 +984,17 @@
 
       <div class="actions">
         {#if isRunning || isSaving}
-          <button class="main-action stop" onclick={finishTimer} disabled={!canFinish || isSaving || isCapturingLocation}>
+          <button
+            class="main-action stop"
+            onclick={finishTimer}
+            disabled={!canFinish || isSaving || isCapturingLocation}
+            aria-busy={isSaving || isCapturingLocation}
+          >
             {#if isCapturingLocation}
-              <Save size={18} />
+              <span class="action-spinner" aria-hidden="true"><LoaderCircle size={18} /></span>
               Finalizando
             {:else if isSaving}
-              <Save size={18} />
+              <span class="action-spinner" aria-hidden="true"><LoaderCircle size={18} /></span>
               Guardando
             {:else}
               <Check size={18} />
@@ -1474,6 +1480,17 @@
     color: #ffffff;
     background: var(--success-color);
     box-shadow: none;
+  }
+
+  .action-spinner {
+    display: inline-flex;
+    animation: action-spin 0.85s linear infinite;
+  }
+
+  @keyframes action-spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .icon-action {

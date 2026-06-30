@@ -16,7 +16,6 @@ import { userStore } from './auth.js';
 import { teamsStore } from './teams.js';
 import { createNotification } from './notifications.js';
 import { normalizeTeamPermissions } from './permissions.js';
-import { assertTeamMemberLimit } from './teamSizes.js';
 
 export const REQUEST_STATUS = {
     pending: 'pendiente',
@@ -187,16 +186,6 @@ export async function updateTeamInvitationStatus(teamId, status) {
 
     if (status === REQUEST_STATUS.accepted) {
         const teamRef = doc(db, 'teams', teamId);
-        const teamSnapshot = await getDoc(teamRef);
-        if (!teamSnapshot.exists()) throw new Error('Equipo no encontrado');
-
-        const teamData = teamSnapshot.data();
-        const members = teamData.members || [];
-        if (members.includes(user.uid)) {
-            throw new Error('Ya eres miembro de este equipo');
-        }
-        assertTeamMemberLimit(teamData, members.length + 1);
-
         const memberImage = invitation.invitedUserPhotoURL || user.avatar || user.photoURL || '';
         batch.update(teamRef, {
             members: arrayUnion(user.uid),
