@@ -321,11 +321,14 @@
       await updateTeamCustomRoles(team.id, nextRoles);
       customRoles = normalizeCustomTeamRoles(nextRoles);
       closeCustomRoleForm();
-      await showSuccessAlert("Rol guardado", "El rol personalizado quedó disponible para el equipo.");
+      await showSuccessAlert(
+        "Plantilla guardada",
+        "La plantilla de permisos quedó disponible para invitaciones y miembros.",
+      );
     } catch (error) {
       await showErrorAlert(
-        "Error al guardar rol",
-        error?.message || "No se pudo guardar el rol personalizado.",
+        "Error al guardar plantilla",
+        error?.message || "No se pudo guardar la plantilla de permisos.",
       );
     } finally {
       isSavingCustomRole = false;
@@ -335,8 +338,8 @@
   async function handleDeleteCustomRole(role) {
     if (!team?.id || !canEditSettings || !role?.id) return;
     const confirmed = await confirmAlert({
-      title: "Eliminar rol",
-      text: `¿Eliminar el rol "${role.label}"?`,
+      title: "Eliminar plantilla",
+      text: `¿Eliminar la plantilla "${role.label}"?`,
       confirmButtonText: "Eliminar",
       danger: true,
     });
@@ -347,9 +350,55 @@
       await updateTeamCustomRoles(team.id, nextRoles);
       customRoles = normalizeCustomTeamRoles(nextRoles);
       if (editingCustomRoleId === role.id) closeCustomRoleForm();
-      await showSuccessAlert("Rol eliminado", "El rol personalizado se eliminó correctamente.");
+      await showSuccessAlert("Plantilla eliminada", "La plantilla de permisos se eliminó correctamente.");
     } catch (error) {
-      await showErrorAlert("Error al eliminar rol", error?.message || "No se pudo eliminar el rol.");
+      await showErrorAlert(
+        "Error al eliminar plantilla",
+        error?.message || "No se pudo eliminar la plantilla.",
+      );
+    }
+  }
+
+  async function handleCreateTemplateFromMember(member) {
+    if (!team?.id || !canEditSettings || !member?.id || isSavingCustomRole) return;
+
+    const memberName = member.name || member.email || "miembro";
+    const templateName = await promptAlert({
+      title: "Crear plantilla de permisos",
+      text: `Se copiarán los permisos configurados para ${memberName}.`,
+      inputLabel: "Nombre de la plantilla",
+      inputPlaceholder: "Supervisor de obra",
+      inputValue: `Permisos de ${memberName}`,
+      confirmButtonText: "Crear plantilla",
+    });
+    if (!templateName) return;
+
+    isSavingCustomRole = true;
+    try {
+      const now = new Date().toISOString();
+      const nextRole = {
+        id: createCustomRoleId(templateName, customRoles),
+        label: templateName,
+        description: `Creada a partir de los permisos de ${memberName}.`,
+        permissions: normalizeTeamPermissions(editingPermissions[member.id]),
+        createdAt: now,
+        updatedAt: now,
+      };
+      const nextRoles = [...customRoles, nextRole];
+
+      await updateTeamCustomRoles(team.id, nextRoles);
+      customRoles = normalizeCustomTeamRoles(nextRoles);
+      await showSuccessAlert(
+        "Plantilla creada",
+        "Ya puedes aplicarla al invitar o editar otros miembros.",
+      );
+    } catch (error) {
+      await showErrorAlert(
+        "Error al crear plantilla",
+        error?.message || "No se pudo crear la plantilla de permisos.",
+      );
+    } finally {
+      isSavingCustomRole = false;
     }
   }
 
@@ -908,18 +957,27 @@
         <summary class="section-summary">
           <span>
             <Users size={17} />
-            Roles personalizados
+            Plantillas de permisos
           </span>
-          <small>{customRoles.length} roles</small>
+          <small>{customRoles.length} plantillas</small>
           <ChevronDown size={18} />
         </summary>
         <div class="section-body">
           {#if canEditSettings}
-            <button type="button" class="secondary-btn compact-btn section-action" onclick={openCreateCustomRole}>
+            <button
+              type="button"
+              class="secondary-btn compact-btn section-action"
+              onclick={openCreateCustomRole}
+              disabled={isSavingCustomRole}
+            >
               <Plus size={16} />
-              <span>Nuevo rol</span>
+              <span>Nueva plantilla</span>
             </button>
           {/if}
+
+          <p class="field-help">
+            Guarda combinaciones de permisos para reutilizarlas al invitar o editar miembros.
+          </p>
 
           {#if customRoles.length > 0}
             <div class="custom-roles-list">
@@ -934,10 +992,10 @@
                     </div>
                     {#if canEditSettings}
                       <div class="custom-role-actions">
-                        <button type="button" class="icon-btn" onclick={() => openEditCustomRole(role)} aria-label="Editar rol">
+                        <button type="button" class="icon-btn" onclick={() => openEditCustomRole(role)} aria-label="Editar plantilla">
                           <Pencil size={16} />
                         </button>
-                        <button type="button" class="icon-btn danger" onclick={() => handleDeleteCustomRole(role)} aria-label="Eliminar rol">
+                        <button type="button" class="icon-btn danger" onclick={() => handleDeleteCustomRole(role)} aria-label="Eliminar plantilla">
                           <Trash2 size={16} />
                         </button>
                       </div>
@@ -952,18 +1010,18 @@
               {/each}
             </div>
           {:else}
-            <div class="compact-empty">Sin roles personalizados</div>
+            <div class="compact-empty">Sin plantillas personalizadas</div>
           {/if}
 
           {#if showCustomRoleForm && canEditSettings}
             <div class="custom-role-form">
               <div class="profile-fields settings-field">
-                <label for="customRoleName">Nombre del rol</label>
+                <label for="customRoleName">Nombre de la plantilla</label>
                 <input id="customRoleName" bind:value={customRoleName} placeholder="Supervisor de obra" />
               </div>
               <div class="profile-fields settings-field">
                 <label for="customRoleDescription">Descripción</label>
-                <input id="customRoleDescription" bind:value={customRoleDescription} placeholder="Permisos principales del rol" />
+                <input id="customRoleDescription" bind:value={customRoleDescription} placeholder="Cuándo utilizar esta plantilla" />
               </div>
 
               <div class="permissions-editor">
@@ -997,7 +1055,7 @@
                   disabled={isSavingCustomRole || !customRoleName.trim()}
                 >
                   <Save size={18} />
-                  <span>{isSavingCustomRole ? "Guardando..." : "Guardar rol"}</span>
+                  <span>{isSavingCustomRole ? "Guardando..." : "Guardar plantilla"}</span>
                 </button>
               </div>
             </div>
@@ -1035,7 +1093,7 @@
                 <div class="permissions-editor accordion-panel">
                   <div class="role-template-section">
                     <div class="role-template-heading">
-                      <h4>Roles</h4>
+                      <h4>Plantillas de permisos</h4>
                       <p>Rellena los permisos de una vez y ajusta cualquier checkbox después.</p>
                     </div>
                     <div class="role-template-grid">
@@ -1131,7 +1189,7 @@
                       {#if canEditSettings}
                         <div class="role-template-section">
                           <div class="role-template-heading">
-                            <h4>Roles</h4>
+                            <h4>Plantillas de permisos</h4>
                             <p>Aplicar una plantilla reemplaza los permisos visibles antes de guardar.</p>
                           </div>
                           <div class="role-template-grid">
@@ -1175,6 +1233,14 @@
 
                 <div class="member-actions">
                   {#if canEditSettings}
+                    <button
+                      class="secondary-btn"
+                      onclick={() => handleCreateTemplateFromMember(member)}
+                      disabled={isSavingCustomRole}
+                    >
+                      <Plus size={16} />
+                      <span>Crear plantilla</span>
+                    </button>
                     <button class="secondary-btn" onclick={() => handleSavePermissions(member.id)}>
                       <Save size={16} />
                       <span>Guardar</span>
