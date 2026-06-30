@@ -1,6 +1,8 @@
 import { defineConfig, loadEnv } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { VitePWA } from 'vite-plugin-pwa'
+import { resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 function cloudinaryApiPlugin() {
   let cloudName, apiKey, apiSecret;
@@ -86,7 +88,7 @@ function pushNotificationApiPlugin() {
       if (!(await readJsonBody(req, res))) return;
 
       try {
-        const { default: handler } = await import(modulePath);
+        const { default: handler } = await import(/* @vite-ignore */ modulePath);
         await handler(req, res);
       } catch (error) {
         console.error(`${label} API error:`, error);
@@ -110,8 +112,21 @@ function pushNotificationApiPlugin() {
       });
     },
     configureServer(server) {
-      mountApiHandler(server, '/api/send-push-notification', './api/send-push-notification.js', 'Push notification');
-      mountApiHandler(server, '/api/send-reminders', './api/send-reminders.js', 'Reminder');
+      const apiModuleUrl = (filename) =>
+        pathToFileURL(resolve(server.config.root, 'api', filename)).href;
+
+      mountApiHandler(
+        server,
+        '/api/send-push-notification',
+        apiModuleUrl('send-push-notification.js'),
+        'Push notification'
+      );
+      mountApiHandler(
+        server,
+        '/api/send-reminders',
+        apiModuleUrl('send-reminders.js'),
+        'Reminder'
+      );
     },
   };
 }
@@ -242,6 +257,12 @@ export default defineConfig(({ mode }) => {
     ],
     server: {
       historyApiFallback: true,
+      watch: {
+        // Evita que el servidor de desarrollo falle cuando VS Code agota
+        // el limite de observadores inotify de Linux.
+        usePolling: process.platform === 'linux',
+        interval: 300
+      }
     }
   };
 })
