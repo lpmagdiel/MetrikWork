@@ -218,6 +218,35 @@
             ["client.name", "dueDate"]
           ]
         },
+        "expenses": {
+          "path": "/teams/{teamId}/expenses/{expenseId}",
+          "purpose": "Gastos manuales del equipo. Los pagos e inventario se muestran como fuentes derivadas y no se duplican aquí.",
+          "document": {
+            "source": "manual",
+            "title": "Combustible",
+            "description": "Desplazamiento a obra",
+            "category": "transport",
+            "amount": 85.4,
+            "currency": "EUR",
+            "status": "paid | pending",
+            "method": "cash | transfer | card | bizum | direct_debit | other",
+            "date": "YYYY-MM-DD",
+            "dueDate": "YYYY-MM-DD | empty",
+            "paidAt": "YYYY-MM-DD | empty",
+            "vendorName": "Proveedor",
+            "vendorTaxId": "NIF/CIF",
+            "invoiceNumber": "Factura o ticket",
+            "locationId": "locationId | empty",
+            "deductible": true,
+            "createdBy": "userId",
+            "createdAt": "ISO-8601 timestamp",
+            "updatedAt": "ISO-8601 timestamp"
+          },
+          "recommendedIndexes": [
+            ["date", "status"],
+            ["category", "date"]
+          ]
+        },
         "stats": {
           "path": "/teams/{teamId}/stats/{periodId}",
           "purpose": "Resumen derivado por periodo para paneles rápidos. Debe recalcularse desde datos fuente.",

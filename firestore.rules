@@ -596,6 +596,162 @@ service cloud.firestore {
       ]);
     }
 
+    function isValidManualExpenseData(data) {
+      return data.keys().hasOnly([
+               "source",
+               "title",
+               "description",
+               "category",
+               "categoryLabel",
+               "amount",
+               "currency",
+               "status",
+               "method",
+               "date",
+               "dueDate",
+               "paidAt",
+               "vendorName",
+               "vendorTaxId",
+               "invoiceNumber",
+               "locationId",
+               "locationName",
+               "deductible",
+               "notes",
+               "createdBy",
+               "createdByName",
+               "createdAt",
+               "updatedAt"
+             ]) &&
+             data.keys().hasAll([
+               "source",
+               "title",
+               "description",
+               "category",
+               "categoryLabel",
+               "amount",
+               "currency",
+               "status",
+               "method",
+               "date",
+               "dueDate",
+               "paidAt",
+               "vendorName",
+               "vendorTaxId",
+               "invoiceNumber",
+               "locationId",
+               "locationName",
+               "deductible",
+               "notes",
+               "createdBy",
+               "createdByName",
+               "createdAt",
+               "updatedAt"
+             ]) &&
+             data.source == "manual" &&
+             data.title is string &&
+             data.title.size() > 0 &&
+             data.title.size() <= 120 &&
+             data.description is string &&
+             data.description.size() <= 600 &&
+             data.category in [
+               "supplies",
+               "transport",
+               "food",
+               "lodging",
+               "rent",
+               "utilities",
+               "taxes",
+               "tools",
+               "maintenance",
+               "insurance",
+               "professional",
+               "other"
+             ] &&
+             data.categoryLabel is string &&
+             data.categoryLabel.size() <= 80 &&
+             data.amount is number &&
+             data.amount > 0 &&
+             data.amount <= 1000000000 &&
+             data.currency is string &&
+             data.currency.matches("^[A-Z]{3}$") &&
+             data.status in ["paid", "pending"] &&
+             data.method in [
+               "cash",
+               "transfer",
+               "card",
+               "bizum",
+               "direct_debit",
+               "other"
+             ] &&
+             data.date is string &&
+             data.date.matches("^\\d{4}-\\d{2}-\\d{2}$") &&
+             data.dueDate is string &&
+             (
+               data.dueDate == "" ||
+               data.dueDate.matches("^\\d{4}-\\d{2}-\\d{2}$")
+             ) &&
+             data.paidAt is string &&
+             (
+               (
+                 data.status == "paid" &&
+                 data.paidAt.matches("^\\d{4}-\\d{2}-\\d{2}$")
+               ) ||
+               (
+                 data.status == "pending" &&
+                 data.paidAt == ""
+               )
+             ) &&
+             data.vendorName is string &&
+             data.vendorName.size() <= 120 &&
+             data.vendorTaxId is string &&
+             data.vendorTaxId.size() <= 40 &&
+             data.invoiceNumber is string &&
+             data.invoiceNumber.size() <= 80 &&
+             data.locationId is string &&
+             data.locationId.size() <= 120 &&
+             data.locationName is string &&
+             data.locationName.size() <= 120 &&
+             data.deductible is bool &&
+             data.notes is string &&
+             data.notes.size() <= 1000 &&
+             data.createdBy is string &&
+             data.createdBy.size() > 0 &&
+             data.createdByName is string &&
+             data.createdByName.size() <= 120 &&
+             data.createdAt is string &&
+             data.createdAt.size() <= 40 &&
+             data.updatedAt is string &&
+             data.updatedAt.size() <= 40;
+    }
+
+    function isValidTeamPaymentData(data) {
+      return data.keys().hasAll([
+               "teamId",
+               "userId",
+               "amount",
+               "type",
+               "method",
+               "date",
+               "createdAt",
+               "registeredBy",
+               "registeredByName"
+             ]) &&
+             data.teamId is string &&
+             teamExists(data.teamId) &&
+             data.userId is string &&
+             data.userId in teamData(data.teamId).members &&
+             data.amount is number &&
+             data.amount > 0 &&
+             data.amount <= 1000000000 &&
+             data.type in ["total", "partial"] &&
+             data.method in ["cash", "transfer", "bizum"] &&
+             data.date is string &&
+             data.createdAt is string &&
+             data.registeredBy is string &&
+             data.registeredByName is string &&
+             data.registeredByName.size() <= 120;
+    }
+
     function isNotificationPreferencesData(data) {
       return data.keys().hasOnly([
                "privateChats",
@@ -849,6 +1005,27 @@ service cloud.firestore {
         allow delete: if hasTeamPermission(teamId, "payments", "delete");
       }
 
+      match /expenses/{expenseId} {
+        allow read: if hasTeamPermission(teamId, "payments", "view") ||
+                    hasTeamPermission(teamId, "stats", "view");
+        allow create: if hasTeamPermission(teamId, "payments", "create") &&
+                      request.resource.data.createdBy == request.auth.uid &&
+                      isValidManualExpenseData(request.resource.data);
+        allow update: if (
+                        hasTeamPermission(teamId, "payments", "edit") ||
+                        (
+                          hasTeamPermission(teamId, "payments", "create") &&
+                          resource.data.createdBy == request.auth.uid
+                        )
+                      ) &&
+                      request.resource.data.source == resource.data.source &&
+                      request.resource.data.createdBy == resource.data.createdBy &&
+                      request.resource.data.createdByName == resource.data.createdByName &&
+                      request.resource.data.createdAt == resource.data.createdAt &&
+                      isValidManualExpenseData(request.resource.data);
+        allow delete: if hasTeamPermission(teamId, "payments", "delete");
+      }
+
       match /chargeTemplates/{templateId} {
         allow read: if hasTeamPermission(teamId, "payments", "view") ||
                     hasTeamPermission(teamId, "payments", "create");
@@ -1014,8 +1191,15 @@ service cloud.firestore {
                     hasTeamPermission(resource.data.teamId, "payments", "view") ||
                     hasTeamPermission(resource.data.teamId, "stats", "view")
                   );
-      allow create: if hasTeamPermission(request.resource.data.teamId, "payments", "create");
-      allow update: if hasTeamPermission(resource.data.teamId, "payments", "edit");
+      allow create: if hasTeamPermission(request.resource.data.teamId, "payments", "create") &&
+                    request.resource.data.registeredBy == request.auth.uid &&
+                    isValidTeamPaymentData(request.resource.data);
+      allow update: if hasTeamPermission(resource.data.teamId, "payments", "edit") &&
+                    request.resource.data.teamId == resource.data.teamId &&
+                    request.resource.data.userId == resource.data.userId &&
+                    request.resource.data.amount is number &&
+                    request.resource.data.amount > 0 &&
+                    request.resource.data.amount <= 1000000000;
       allow delete: if hasTeamPermission(resource.data.teamId, "payments", "delete");
     }
   }

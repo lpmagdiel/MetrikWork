@@ -225,6 +225,7 @@
     gallery: () => import("./routes/gallery.svelte"),
     chat: routeLoaders["/chat"],
     payments: routeLoaders["/team-payments"],
+    expenses: () => import("./routes/team-expenses.svelte"),
     charges: () => import("./routes/team-charges.svelte"),
     settings: () => import("./routes/team-settings.svelte"),
     stats: () => import("./routes/team-stats.svelte"),

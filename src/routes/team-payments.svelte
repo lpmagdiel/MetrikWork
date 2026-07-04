@@ -127,6 +127,10 @@
             showNotification("El monto debe ser mayor a 0", "error");
             return;
         }
+        if ((Number(paymentAmount) || 0) > (Number(selectedMember.balance) || 0) + 0.01) {
+            showNotification("El monto no puede superar el saldo pendiente", "error");
+            return;
+        }
         
         isSaving = true;
         let receiptWindow = null;
@@ -1036,6 +1040,7 @@
                             bind:value={paymentAmount} 
                             disabled={paymentType === 'total'}
                             min="0.01"
+                            max={selectedMember?.balance || 0}
                             step="0.01"
                         />
                     </div>

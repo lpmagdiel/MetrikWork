@@ -209,13 +209,23 @@ export async function getTeamPaymentsData(teamId) {
 
 export async function registerTeamPayment(teamId, userId, amount, type, registeredBy = null, method = 'cash', metadata = {}) {
     try {
+        if (!teamId || !userId) throw new Error('Equipo o miembro no válido');
+        if (!registeredBy?.uid) throw new Error('Usuario no autenticado');
+        const normalizedAmount = Math.round(Number(amount) * 100) / 100;
+        if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
+            throw new Error('El importe debe ser mayor que cero');
+        }
+        if (normalizedAmount > 1000000000) {
+            throw new Error('El importe supera el límite permitido');
+        }
         const normalizedMethod = ['cash', 'transfer', 'bizum'].includes(method) ? method : 'cash';
+        const normalizedType = ['total', 'partial'].includes(type) ? type : 'partial';
         const coveredWorks = normalizeCoveredWorks(metadata.coveredWorks);
         const paymentDoc = {
             teamId,
             userId,
-            amount: Number(amount) || 0,
-            type, // 'total' or 'partial'
+            amount: normalizedAmount,
+            type: normalizedType,
             method: normalizedMethod,
             date: new Date().toISOString(),
             createdAt: new Date().toISOString()
@@ -232,10 +242,10 @@ export async function registerTeamPayment(teamId, userId, amount, type, register
             }
         });
 
-        if (registeredBy?.uid) {
-            paymentDoc.registeredBy = registeredBy.uid;
-            paymentDoc.registeredByName = registeredBy.name || registeredBy.email || '';
-        }
+        paymentDoc.registeredBy = registeredBy.uid;
+        paymentDoc.registeredByName = String(registeredBy.name || registeredBy.email || '')
+            .trim()
+            .slice(0, 120);
 
         const docRef = await addDoc(collection(db, 'team_payments'), paymentDoc);
         return { id: docRef.id, ...paymentDoc };

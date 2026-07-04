@@ -33,6 +33,7 @@
     Calendar1,
     MapPinned,
     Images,
+    ReceiptText,
   } from "lucide-svelte";
   import {
     selectedTeam,
@@ -85,6 +86,7 @@
   let canViewPayments = $derived(hasTeamPermission(team, $userStore?.uid, "payments", "view"));
   let canViewMemberPrivate = $derived(isAdmin || canViewPayments);
   let canViewStats = $derived(hasTeamPermission(team, $userStore?.uid, "stats", "view"));
+  let canViewExpenses = $derived(canViewPayments || canViewStats);
   let canViewSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "view"));
   let canCreateSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "create"));
   let canEditSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "edit"));
@@ -627,6 +629,17 @@
                 <WalletCards size={24} />
               </div>
               <span>Cobros</span>
+            </button>
+          {/if}
+          {#if canViewExpenses}
+            <button
+              class="menu-card"
+              onclick={() => (navigateTo(`/teams/${team.id}/expenses`))}
+            >
+              <div class="menu-icon expenses">
+                <ReceiptText size={24} />
+              </div>
+              <span>Gastos</span>
             </button>
           {/if}
           {#if canViewLocations}
@@ -1280,6 +1293,10 @@
   .menu-icon.charges {
     background: var(--bg-warning-subtle);
     color: var(--warning-color);
+  }
+  .menu-icon.expenses {
+    background: var(--bg-danger-subtle);
+    color: var(--danger-color);
   }
   .menu-icon.locations {
     background: var(--bg-info-subtle);
