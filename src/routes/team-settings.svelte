@@ -92,7 +92,7 @@
   let teamPlanSize = $derived(team ? getTeamSizeValue(team) : "S");
   let teamPlanOption = $derived(getTeamSizeOption(teamPlanSize));
   let teamPaymentAmount = $derived(team ? getTeamMonthlyPrice(team) : 0);
-  let teamPaymentDate = $derived(formatPaymentDate(team?.billingDate || team?.teamAccessCode?.expiresAt));
+  let teamPaymentDate = $derived(formatPaymentDate(team?.billingDate));
   let teamMemberLimit = $derived(getTeamMemberLimitLabel(team || teamPlanSize));
 
   const currencyOptions = [

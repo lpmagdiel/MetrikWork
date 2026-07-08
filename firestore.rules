@@ -24,26 +24,14 @@ service cloud.firestore {
              request.auth.uid == teamData(teamId).admin;
     }
 
-    function hasActiveSystemAdminDoc(adminId) {
-      return adminId is string &&
-             exists(/databases/$(database)/documents/system_admins/$(adminId)) &&
-             get(/databases/$(database)/documents/system_admins/$(adminId)).data.active != false;
-    }
-
     function isSystemAdmin() {
       return request.auth != null &&
-             (
-               hasActiveSystemAdminDoc(request.auth.uid) ||
-               hasActiveSystemAdminDoc(request.auth.token.email)
-             );
-    }
-
-    function isOwnSystemAdminDoc(adminId) {
-      return request.auth != null &&
-             (
-               request.auth.uid == adminId ||
-               request.auth.token.email == adminId
-             );
+             request.auth.token.email is string &&
+             request.auth.token.email in [
+               "lpzcode@yahoo.com",
+               "lopmag.lopez@gmail.com",
+               "fabiansolares719@gmail.com"
+             ];
     }
 
     function hasTeamPermission(teamId, module, action) {
@@ -58,6 +46,7 @@ service cloud.firestore {
       return size is string &&
              maxMembers is number &&
              (
+               (size == "G" && maxMembers == 1) ||
                (size == "S" && maxMembers == 4) ||
                (size == "M" && maxMembers == 10) ||
                (size == "L" && maxMembers == 999)
@@ -77,29 +66,6 @@ service cloud.firestore {
              (
                teamDocument.maxMembers is number &&
                teamDocument.members.size() < teamDocument.maxMembers
-             );
-    }
-
-    function accessCodeSizeMatchesTeam(code) {
-      return (
-               get(/databases/$(database)/documents/team_access_codes/$(code)).data.keys()
-                 .hasAll(["size", "maxMembers"]) &&
-               request.resource.data.teamSize ==
-                 get(/databases/$(database)/documents/team_access_codes/$(code)).data.size &&
-               request.resource.data.maxMembers ==
-                 get(/databases/$(database)/documents/team_access_codes/$(code)).data.maxMembers &&
-               request.resource.data.teamAccessCode.size ==
-                 get(/databases/$(database)/documents/team_access_codes/$(code)).data.size &&
-               request.resource.data.teamAccessCode.maxMembers ==
-                 get(/databases/$(database)/documents/team_access_codes/$(code)).data.maxMembers
-             ) ||
-             (
-               !get(/databases/$(database)/documents/team_access_codes/$(code)).data.keys()
-                 .hasAny(["size", "maxMembers"]) &&
-               request.resource.data.teamSize == "S" &&
-               request.resource.data.maxMembers == 4 &&
-               request.resource.data.teamAccessCode.size == "S" &&
-               request.resource.data.teamAccessCode.maxMembers == 4
              );
     }
 
@@ -128,8 +94,6 @@ service cloud.firestore {
                "projectBudget",
                "projectBudgetCurrency",
                "billingDate",
-               "billingUpdatedAt",
-               "billingUpdatedBy",
                "customRoles",
                "memberSettings",
                "memberPermissions",
@@ -153,7 +117,6 @@ service cloud.firestore {
                "billingAmountEur",
                "teamSize",
                "maxMembers",
-               "teamAccessCode",
                "createdAt"
              ]) &&
              request.resource.data.keys().hasAll([
@@ -169,11 +132,10 @@ service cloud.firestore {
                "billingAmountEur",
                "teamSize",
                "maxMembers",
-               "teamAccessCode",
                "createdAt"
              ]) &&
              request.resource.data.team is string &&
-             request.resource.data.adminEmail is string &&
+             request.resource.data.adminEmail == request.auth.token.email &&
              request.resource.data.members.size() == 1 &&
              request.auth.uid in request.resource.data.members &&
              request.resource.data.projectBudget is number &&
@@ -184,163 +146,7 @@ service cloud.firestore {
              (
                request.resource.data.billingDate == null ||
                request.resource.data.billingDate is string
-             ) &&
-             request.resource.data.teamAccessCode is map &&
-             request.resource.data.teamAccessCode.keys().hasOnly([
-               "code",
-               "uniqueCode",
-               "expiresAt",
-               "size",
-               "maxMembers",
-               "priceEur",
-               "redeemedAt"
-             ]) &&
-             request.resource.data.teamAccessCode.priceEur is number &&
-             request.resource.data.teamAccessCode.size == request.resource.data.teamSize &&
-             request.resource.data.teamAccessCode.maxMembers == request.resource.data.maxMembers;
-    }
-
-    function isRedeemingAccessCodeForTeam(teamId) {
-      let code = request.resource.data.teamAccessCode.code;
-      return code is string &&
-             code.matches("^\\d{8}$") &&
-             exists(/databases/$(database)/documents/team_access_codes/$(code)) &&
-             get(/databases/$(database)/documents/team_access_codes/$(code)).data.used == false &&
-             get(/databases/$(database)/documents/team_access_codes/$(code)).data.expiresAt >= request.time &&
-             request.resource.data.teamAccessCode.uniqueCode ==
-               get(/databases/$(database)/documents/team_access_codes/$(code)).data.uniqueCode &&
-             accessCodeSizeMatchesTeam(code) &&
-             getAfter(/databases/$(database)/documents/team_access_codes/$(code)).data.used == true &&
-             getAfter(/databases/$(database)/documents/team_access_codes/$(code)).data.usedBy == request.auth.uid &&
-             getAfter(/databases/$(database)/documents/team_access_codes/$(code)).data.usedTeamId == teamId;
-    }
-
-    function isSystemAdminTeamBillingUpdate() {
-      return isSystemAdmin() &&
-             request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-               "billingDate",
-               "billingUpdatedAt",
-               "billingUpdatedBy"
-             ]) &&
-             request.resource.data.billingUpdatedBy == request.auth.uid;
-    }
-
-    function isSystemAdminApplyingAccessCode(teamId) {
-      let code = request.resource.data.teamAccessCode.code;
-      return isSystemAdmin() &&
-             code is string &&
-             code.matches("^\\d{8}$") &&
-             exists(/databases/$(database)/documents/team_access_codes/$(code)) &&
-             get(/databases/$(database)/documents/team_access_codes/$(code)).data.used == false &&
-             get(/databases/$(database)/documents/team_access_codes/$(code)).data.expiresAt >= request.time &&
-             request.resource.data.admin == resource.data.admin &&
-             request.resource.data.members == resource.data.members &&
-             resource.data.admin in request.resource.data.members &&
-             request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-               "billingDate",
-               "billingUpdatedAt",
-               "billingUpdatedBy",
-               "teamSize",
-               "maxMembers",
-               "teamAccessCode",
-               "updatedAt"
-             ]) &&
-             (
-               request.resource.data.billingDate == null ||
-               request.resource.data.billingDate is string
-             ) &&
-             request.resource.data.billingUpdatedBy == request.auth.uid &&
-             isValidTeamSize(request.resource.data.teamSize, request.resource.data.maxMembers) &&
-             request.resource.data.members.size() <= request.resource.data.maxMembers &&
-             request.resource.data.teamAccessCode is map &&
-             request.resource.data.teamAccessCode.keys().hasOnly([
-               "code",
-               "uniqueCode",
-               "expiresAt",
-               "size",
-               "maxMembers",
-               "appliedAt",
-               "appliedBy"
-             ]) &&
-             request.resource.data.teamAccessCode.keys().hasAll([
-               "code",
-               "uniqueCode",
-               "expiresAt",
-               "size",
-               "maxMembers",
-               "appliedAt",
-               "appliedBy"
-             ]) &&
-             request.resource.data.teamAccessCode.uniqueCode ==
-               get(/databases/$(database)/documents/team_access_codes/$(code)).data.uniqueCode &&
-             request.resource.data.teamAccessCode.expiresAt ==
-               get(/databases/$(database)/documents/team_access_codes/$(code)).data.expiresAt &&
-             request.resource.data.teamAccessCode.size == request.resource.data.teamSize &&
-             request.resource.data.teamAccessCode.maxMembers == request.resource.data.maxMembers &&
-             request.resource.data.teamAccessCode.appliedAt is string &&
-             request.resource.data.teamAccessCode.appliedBy == request.auth.uid &&
-             accessCodeSizeMatchesTeam(code) &&
-             getAfter(/databases/$(database)/documents/team_access_codes/$(code)).data.used == true &&
-             getAfter(/databases/$(database)/documents/team_access_codes/$(code)).data.usedBy == request.auth.uid &&
-             getAfter(/databases/$(database)/documents/team_access_codes/$(code)).data.usedTeamId == teamId;
-    }
-
-    function isValidAccessCodeCreate(code) {
-      return isSystemAdmin() &&
-             code.matches("^\\d{8}$") &&
-             request.resource.data.keys().hasOnly([
-               "code",
-               "uniqueCode",
-               "expiresAt",
-               "size",
-               "maxMembers",
-               "used",
-               "createdBy",
-               "createdByEmail",
-               "createdAt",
-               "updatedAt"
-             ]) &&
-             request.resource.data.keys().hasAll([
-               "code",
-               "uniqueCode",
-               "expiresAt",
-               "size",
-               "maxMembers",
-               "used",
-               "createdBy",
-               "createdAt",
-               "updatedAt"
-             ]) &&
-             request.resource.data.code == code &&
-             request.resource.data.uniqueCode is string &&
-             request.resource.data.expiresAt is timestamp &&
-             isValidTeamSize(request.resource.data.size, request.resource.data.maxMembers) &&
-             request.resource.data.expiresAt > request.time &&
-             request.resource.data.used == false &&
-             request.resource.data.createdBy == request.auth.uid;
-    }
-
-    function isRedeemingAccessCodeDocument(code) {
-      let teamId = request.resource.data.usedTeamId;
-      return request.auth != null &&
-             code.matches("^\\d{8}$") &&
-             resource.data.code == code &&
-             resource.data.used == false &&
-             resource.data.expiresAt >= request.time &&
-             request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-               "used",
-               "usedAt",
-               "usedBy",
-               "usedByEmail",
-               "usedTeamId",
-               "usedTeamName",
-               "updatedAt"
-             ]) &&
-             request.resource.data.used == true &&
-             request.resource.data.usedBy == request.auth.uid &&
-             request.resource.data.usedTeamId is string &&
-             getAfter(/databases/$(database)/documents/teams/$(teamId)).data.admin == request.auth.uid &&
-             getAfter(/databases/$(database)/documents/teams/$(teamId)).data.teamAccessCode.code == code;
+             );
     }
 
     function isPresenceDocumentOwner(userId) {
@@ -856,70 +662,40 @@ service cloud.firestore {
       allow delete: if request.auth != null && request.auth.uid == userId;
     }
 
-    // --- ADMINISTRADORES DEL SISTEMA ---
-    match /system_admins/{adminId} {
-      allow get: if request.auth != null &&
-                 (
-                   isOwnSystemAdminDoc(adminId) ||
-                   isSystemAdmin()
-                 );
-      allow list: if isSystemAdmin();
-      allow create, update, delete: if isSystemAdmin();
-    }
-
-    // --- CÓDIGOS DE ACCESO PARA CREAR EQUIPOS ---
-    match /team_access_codes/{code} {
-      allow get: if request.auth != null;
-      allow list: if isSystemAdmin();
-      allow create: if isValidAccessCodeCreate(code);
-      allow update: if isSystemAdmin() || isRedeemingAccessCodeDocument(code);
-      allow delete: if isSystemAdmin();
-    }
-
     // --- EQUIPOS ---
     match /teams/{teamId} {
       // Solo miembros pueden leer el equipo.
       allow read: if request.auth != null &&
-                  (
-                    request.auth.uid in resource.data.members ||
-                    isSystemAdmin()
-                  );
+                  request.auth.uid in resource.data.members;
 
-      // Al crear equipo, el creador debe quedar como admin y redimir un código.
-      allow create: if request.auth != null &&
+      // Solo los administradores configurados pueden crear equipos.
+      allow create: if isSystemAdmin() &&
                     request.resource.data.admin == request.auth.uid &&
                     request.auth.uid in request.resource.data.members &&
-                    isAllowedTeamCreateShape() &&
-                    isRedeemingAccessCodeForTeam(teamId);
+                    isAllowedTeamCreateShape();
 
       // El admin siempre puede actualizar. Miembros con permisos de ajustes
       // pueden agregar/editar configuración del equipo, pero no cambiar el admin.
       allow update: if request.auth != null &&
+                    isAllowedTeamUpdateShape() &&
                     (
+                      request.auth.uid == resource.data.admin ||
+                      hasTeamPermission(teamId, "settings", "create") ||
+                      hasTeamPermission(teamId, "settings", "edit") ||
+                      hasTeamPermission(teamId, "settings", "delete") ||
                       (
-                        isAllowedTeamUpdateShape() &&
-                        (
-                          request.auth.uid == resource.data.admin ||
-                          hasTeamPermission(teamId, "settings", "create") ||
-                          hasTeamPermission(teamId, "settings", "edit") ||
-                          hasTeamPermission(teamId, "settings", "delete") ||
-                          isSystemAdminTeamBillingUpdate() ||
-                          (
-                            hasTeamPermission(teamId, "stats", "edit") &&
-                            isStatsBudgetUpdate()
-                          ) ||
-                          (
-                            (
-                              hasTeamPermission(teamId, "payments", "create") ||
-                              hasTeamPermission(teamId, "payments", "edit")
-                            ) &&
-                            isStatsBudgetUpdate()
-                          ) ||
-                          isAcceptingTeamInvitation(teamId) ||
-                          isSelfLeavingTeam(teamId)
-                        )
+                        hasTeamPermission(teamId, "stats", "edit") &&
+                        isStatsBudgetUpdate()
                       ) ||
-                      isSystemAdminApplyingAccessCode(teamId)
+                      (
+                        (
+                          hasTeamPermission(teamId, "payments", "create") ||
+                          hasTeamPermission(teamId, "payments", "edit")
+                        ) &&
+                        isStatsBudgetUpdate()
+                      ) ||
+                      isAcceptingTeamInvitation(teamId) ||
+                      isSelfLeavingTeam(teamId)
                     );
 
       // Solo el administrador puede eliminar el equipo.

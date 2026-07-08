@@ -38,7 +38,7 @@ export const legalDocuments = {
             {
                 title: '3. Equipos, contenido y datos de trabajo',
                 paragraphs: [
-                    'Los usuarios pueden crear equipos, invitar miembros, asignar tareas, registrar jornadas, gestionar inventario, guardar ubicaciones y registrar pagos o cobros internos.',
+                    'Los administradores autorizados pueden crear equipos. Sus miembros, según los permisos asignados, pueden colaborar en tareas, jornadas, inventario, ubicaciones, pagos o cobros internos.',
                     'La persona o entidad que administra un equipo es responsable de contar con base legitima para introducir datos de sus miembros, trabajadores, colaboradores o clientes.'
                 ]
             },

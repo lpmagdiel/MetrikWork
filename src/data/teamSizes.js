@@ -59,8 +59,7 @@ export function getTeamMonthlyPrice(teamOrSize) {
         const storedPrice = Number(
             teamOrSize.billingAmountEur ??
             teamOrSize.priceEur ??
-            teamOrSize.monthlyPriceEur ??
-            teamOrSize.teamAccessCode?.priceEur
+            teamOrSize.monthlyPriceEur
         );
         if (Number.isFinite(storedPrice) && storedPrice >= 0) return storedPrice;
     }

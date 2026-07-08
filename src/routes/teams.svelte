@@ -1,6 +1,6 @@
 <script>
   import { Search, Plus, Users, ChevronRight, X } from "lucide-svelte";
-  import { teamsStore, selectedTeamId } from "../data/stores.js";
+  import { teamsStore, selectedTeamId, systemAdminStore } from "../data/stores.js";
   import { navigateTo } from "../router.js";
   import TitleHeader from "../components/TitleHeader.svelte";
   import { optimizeCloudinary } from "../helpers/image.js";
@@ -80,9 +80,11 @@
     {/if}
   </div>
 
-  <button class="fab" aria-label="Crear equipo" onclick={handleCreateTeam}>
-    <Plus size={30} />
-  </button>
+  {#if $systemAdminStore.isAdmin}
+    <button class="fab" aria-label="Crear equipo" onclick={handleCreateTeam}>
+      <Plus size={30} />
+    </button>
+  {/if}
 </div>
 
 <style>

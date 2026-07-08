@@ -54,3 +54,18 @@ describe('firestore expense rules contract', () => {
     expect(rules).toMatch(/request\.resource\.data\.userId == resource\.data\.userId/);
   });
 });
+
+describe('firestore team creation rules contract', () => {
+  it('reserva la creación directa a los administradores configurados', () => {
+    expect(rules).toContain('"lpzcode@yahoo.com"');
+    expect(rules).toContain('"lopmag.lopez@gmail.com"');
+    expect(rules).toContain('"fabiansolares719@gmail.com"');
+    expect(rules).toMatch(/allow create: if isSystemAdmin\(\) &&\s+request\.resource\.data\.admin == request\.auth\.uid/);
+  });
+
+  it('no conserva el flujo antiguo de códigos de acceso', () => {
+    expect(rules).not.toContain('team_access_codes');
+    expect(rules).not.toContain('teamAccessCode');
+    expect(rules).not.toContain('isRedeemingAccessCodeForTeam');
+  });
+});

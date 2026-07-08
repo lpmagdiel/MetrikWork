@@ -1,337 +1,62 @@
 <script>
   import {
-    BadgeCheck,
+    ArrowRight,
     BarChart3,
-    CalendarDays,
     ChevronLeft,
-    ChevronDown,
-    ChevronUp,
     CircleSlash,
-    Euro,
-    KeyRound,
-    List,
-    Mail,
+    DollarSign,
+    Plus,
+    ReceiptText,
     RefreshCw,
     Search,
     ShieldCheck,
-    Users
+    Users,
+    WalletCards,
+    X,
   } from "lucide-svelte";
   import TitleHeader from "../components/TitleHeader.svelte";
-  import Toast from "../components/Toast.svelte";
   import { navigateTo } from "../router.js";
   import {
     adminTeamsStore,
-    applyTeamAccessCodeToTeam,
-    createTeamAccessCode,
     getTeamMemberLimitLabel,
     getTeamMonthlyPrice,
     getTeamSizeValue,
-    getUserProfile,
     subscribeToAdminTeams,
-    subscribeToTeamAccessCodes,
     systemAdminStore,
-    TEAM_SIZE_OPTIONS,
-    teamAccessCodesStore,
-    updateTeamBillingDate
   } from "../data/stores.js";
 
-  let expiresAt = $state(defaultExpirationDate());
-  let selectedSize = $state("S");
-  let generatedCode = $state("");
-  let generatedCodeSize = $state("");
-  let generatedCodeRevenue = $state(0);
-  let creatingCode = $state(false);
-  let showCodes = $state(true);
-  let revenueView = $state("list");
   let teamSearch = $state("");
-  let applyingCodeTeamId = $state("");
-  let savingTeamId = $state("");
-  let billingInputs = $state({});
-  let codeInputs = $state({});
-  let adminProfiles = $state({});
-  let toastMessage = $state("");
-  let toastType = $state("success");
-  let showToast = $state(false);
-  const quickCodeOptions = [
-    { label: "1 mes", months: 1 },
-    { label: "3 meses", months: 3 },
-    { label: "6 meses", months: 6 },
-    { label: "1 año", months: 12 }
-  ];
 
-  let codeStats = $derived.by(() => {
-    const stats = { total: 0, available: 0, used: 0, expired: 0 };
-    for (const code of $teamAccessCodesStore) {
-      stats.total += 1;
-      const status = getAccessCodeStatus(code);
-      stats[status] += 1;
-    }
-    return stats;
-  });
-
-  let revenueStats = $derived.by(() => {
-    const breakdown = TEAM_SIZE_OPTIONS.map((option) => ({
-      size: option.value,
-      label: option.label,
-      price: option.priceEur,
-      count: 0,
-      revenue: 0
-    }));
-
-    for (const team of $adminTeamsStore) {
-      const size = getTeamSizeValue(team);
-      const item = breakdown.find((entry) => entry.size === size) || breakdown[0];
-      item.count += 1;
-      item.revenue += getTeamMonthlyPrice(team);
-    }
-
-    const total = breakdown.reduce((sum, item) => sum + item.revenue, 0);
-    const maxRevenue = Math.max(1, ...breakdown.map((item) => item.revenue));
-
-    return {
-      total,
-      maxRevenue,
-      teams: $adminTeamsStore.length,
-      breakdown
-    };
-  });
-
-  let availableAccessCodes = $derived.by(() =>
-    $teamAccessCodesStore.filter((code) => getAccessCodeStatus(code) === "available")
-  );
-
-  let filteredAdminTeams = $derived.by(() => {
+  let filteredTeams = $derived.by(() => {
     const search = normalizeSearch(teamSearch);
     if (!search) return $adminTeamsStore;
 
-    return $adminTeamsStore.filter((team) => {
-      const target = [
+    return $adminTeamsStore.filter((team) =>
+      normalizeSearch([
         team.name,
         team.team,
-        getAdminEmail(team),
+        team.adminEmail,
         getTeamSizeValue(team),
-        formatTeamBillingDate(team)
-      ].join(" ");
-
-      return normalizeSearch(target).includes(search);
-    });
+      ].join(" ")).includes(search),
+    );
   });
 
-  $effect(() => {
-    if (!$systemAdminStore.isAdmin) return;
-    const unsubscribeCodes = subscribeToTeamAccessCodes();
-    const unsubscribeTeams = subscribeToAdminTeams();
-
-    return () => {
-      unsubscribeCodes?.();
-      unsubscribeTeams?.();
+  let summary = $derived.by(() => {
+    const teams = $adminTeamsStore;
+    return {
+      teams: teams.length,
+      members: teams.reduce(
+        (total, team) => total + (Array.isArray(team.members) ? team.members.length : 0),
+        0,
+      ),
+      monthly: teams.reduce((total, team) => total + getTeamMonthlyPrice(team), 0),
     };
   });
 
   $effect(() => {
-    const nextInputs = { ...billingInputs };
-    let changed = false;
-
-    for (const team of $adminTeamsStore) {
-      if (!Object.prototype.hasOwnProperty.call(nextInputs, team.id)) {
-        nextInputs[team.id] = toDateInput(team.billingDate);
-        changed = true;
-      }
-    }
-
-    if (changed) billingInputs = nextInputs;
-  });
-
-  $effect(() => {
     if (!$systemAdminStore.isAdmin) return;
-    const missingAdminIds = [
-      ...new Set(
-        $adminTeamsStore
-          .map((team) => team.admin)
-          .filter((adminId) => adminId && !adminProfiles[adminId])
-      )
-    ];
-
-    if (missingAdminIds.length > 0) {
-      void loadAdminProfiles(missingAdminIds);
-    }
+    return subscribeToAdminTeams();
   });
-
-  async function loadAdminProfiles(adminIds) {
-    const entries = await Promise.all(
-      adminIds.map(async (adminId) => [adminId, await getUserProfile(adminId)])
-    );
-
-    const nextProfiles = { ...adminProfiles };
-    for (const [adminId, profile] of entries) {
-      nextProfiles[adminId] = profile || { id: adminId };
-    }
-    adminProfiles = nextProfiles;
-  }
-
-  async function handleCreateCode(customExpiresAt = expiresAt) {
-    creatingCode = true;
-    generatedCode = "";
-    generatedCodeSize = "";
-    generatedCodeRevenue = 0;
-
-    try {
-      const code = await createTeamAccessCode({ expiresAt: customExpiresAt, size: selectedSize });
-      expiresAt = customExpiresAt;
-      generatedCode = code.code;
-      generatedCodeSize = code.size || selectedSize;
-      generatedCodeRevenue = getCodeRevenue(code);
-      toastType = "success";
-      toastMessage = "Código creado correctamente";
-      showToast = true;
-    } catch (error) {
-      toastType = "error";
-      toastMessage = error?.message || "No se pudo crear el código";
-      showToast = true;
-    } finally {
-      creatingCode = false;
-    }
-  }
-
-  function handleCreateQuickCode(months) {
-    const quickExpiresAt = getExpirationDateFromMonths(months);
-    void handleCreateCode(quickExpiresAt);
-  }
-
-  async function handleSaveBillingDate(teamId) {
-    savingTeamId = teamId;
-
-    try {
-      await updateTeamBillingDate(teamId, billingInputs[teamId] || "");
-      toastType = "success";
-      toastMessage = "Fecha de cobro actualizada";
-      showToast = true;
-    } catch (error) {
-      toastType = "error";
-      toastMessage = error?.message || "No se pudo actualizar la fecha";
-      showToast = true;
-    } finally {
-      savingTeamId = "";
-    }
-  }
-
-  async function handleApplyAccessCode(team) {
-    if (!team?.id || applyingCodeTeamId) return;
-
-    const code = String(codeInputs[team.id] || "").trim();
-    applyingCodeTeamId = team.id;
-
-    try {
-      await applyTeamAccessCodeToTeam(team.id, code);
-      codeInputs[team.id] = "";
-      toastType = "success";
-      toastMessage = "Código aplicado al equipo";
-      showToast = true;
-    } catch (error) {
-      toastType = "error";
-      toastMessage = error?.message || "No se pudo aplicar el código";
-      showToast = true;
-    } finally {
-      applyingCodeTeamId = "";
-    }
-  }
-
-  function getAdminEmail(team) {
-    return team.adminEmail || adminProfiles[team.admin]?.email || team.admin || "Sin admin";
-  }
-
-  function getAccessCodeStatus(code) {
-    if (code?.used) return "used";
-    const expiration = toDate(code?.expiresAt);
-    if (expiration && expiration.getTime() < Date.now()) return "expired";
-    return "available";
-  }
-
-  function getAccessCodeStatusLabel(code) {
-    const status = getAccessCodeStatus(code);
-    if (status === "used") return "Usado";
-    if (status === "expired") return "Caducado";
-    return "Disponible";
-  }
-
-  function defaultExpirationDate() {
-    const date = new Date();
-    date.setDate(date.getDate() + 30);
-    return toDateInput(date);
-  }
-
-  function getExpirationDateFromMonths(months) {
-    const date = new Date();
-    date.setMonth(date.getMonth() + months);
-    return toDateInput(date);
-  }
-
-  function toDate(value) {
-    if (!value) return null;
-    if (value instanceof Date) return value;
-    if (typeof value.toDate === "function") return value.toDate();
-    if (typeof value.seconds === "number") return new Date(value.seconds * 1000);
-
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? null : date;
-  }
-
-  function toDateInput(value) {
-    const date = toDate(value);
-    if (!date) {
-      if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-      return "";
-    }
-
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  }
-
-  function formatDate(value) {
-    const date = toDate(value);
-    if (!date) return "Sin fecha";
-    return new Intl.DateTimeFormat("es", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric"
-    }).format(date);
-  }
-
-  function formatTeamBillingDate(team) {
-    if (!team.billingDate) return "Sin fecha de cobro";
-    return formatDate(team.billingDate);
-  }
-
-  function formatTeamMemberUsage(team) {
-    const currentMembers = Array.isArray(team?.members) ? team.members.length : 0;
-    return `${currentMembers} miembros - ${getTeamMemberLimitLabel(team)}`;
-  }
-
-  function formatCurrency(value) {
-    return new Intl.NumberFormat("es-ES", {
-      style: "currency",
-      currency: "EUR",
-      maximumFractionDigits: 0
-    }).format(Number(value) || 0);
-  }
-
-  function formatTeamRevenue(team) {
-    return formatCurrency(getTeamMonthlyPrice(team));
-  }
-
-  function getCodeRevenue(code) {
-    return getTeamMonthlyPrice(code);
-  }
-
-  function formatCodeRevenue(code) {
-    return formatCurrency(getCodeRevenue(code));
-  }
-
-  function getRevenueBarWidth(value) {
-    return Math.max(4, Math.round(((Number(value) || 0) / revenueStats.maxRevenue) * 100));
-  }
 
   function normalizeSearch(value) {
     return String(value || "")
@@ -340,364 +65,160 @@
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "");
   }
+
+  function formatCurrency(value) {
+    return new Intl.NumberFormat("es-ES", {
+      style: "currency",
+      currency: "EUR",
+      maximumFractionDigits: 0,
+    }).format(Number(value) || 0);
+  }
+
+  function getTeamName(team) {
+    return team.name || team.team || "Equipo sin nombre";
+  }
+
+  function getTeamMemberCount(team) {
+    return Array.isArray(team.members) ? team.members.length : 0;
+  }
+
+  function teamRoute(team, section = "") {
+    const base = `/teams/${encodeURIComponent(team.id)}`;
+    return section ? `${base}/${section}` : base;
+  }
+
+  const teamActions = [
+    { section: "stats", label: "Estadísticas", icon: BarChart3 },
+    { section: "payments", label: "Pagos", icon: WalletCards },
+    { section: "charges", label: "Cobros", icon: DollarSign },
+    { section: "expenses", label: "Gastos", icon: ReceiptText },
+  ];
 </script>
 
 <div class="admin-page">
-  <Toast message={toastMessage} type={toastType} bind:show={showToast} />
-  <datalist id="available-team-access-codes">
-    {#each availableAccessCodes as code (code.id)}
-      <option value={code.code} label={`${code.size || "S"} - ${formatCodeRevenue(code)} - ${formatDate(code.expiresAt)}`}></option>
-    {/each}
-  </datalist>
-
   <header class="admin-header">
     <button type="button" class="back-button" onclick={() => navigateTo("/settings")}>
       <ChevronLeft size={20} />
       <span>Volver</span>
     </button>
-    <TitleHeader title="Panel admin" description="Códigos y cobros" icon={ShieldCheck} iconPosition="right" />
+    <TitleHeader
+      title="Panel admin"
+      description="Equipos y finanzas"
+      icon={ShieldCheck}
+      iconPosition="right"
+    />
   </header>
 
   {#if $systemAdminStore.loading}
     <section class="state-panel">
-      <RefreshCw size={28} />
+      <span class="spin"><RefreshCw size={28} /></span>
       <p>Cargando acceso...</p>
     </section>
   {:else if !$systemAdminStore.isAdmin}
     <section class="state-panel denied">
-      <CircleSlash size={32} />
+      <span class="denied-icon"><CircleSlash size={34} /></span>
       <h2>Sin acceso</h2>
-      <p>Tu usuario no está configurado como administrador del sistema.</p>
+      <p>Tu cuenta no está configurada como administradora.</p>
     </section>
   {:else}
-    <section class="summary-grid" aria-label="Resumen de códigos">
-      <article class="summary-card">
-        <span>Total</span>
-        <strong>{codeStats.total}</strong>
+    <section class="hero-panel">
+      <div>
+        <span class="eyebrow">Administración</span>
+        <h2>Todos tus equipos, en un solo lugar</h2>
+        <p>Consulta estadísticas avanzadas y gestiona pagos, cobros y gastos por equipo.</p>
+      </div>
+      <button type="button" class="create-action" onclick={() => navigateTo("/teams/create")}>
+        <Plus size={20} />
+        <span>Crear equipo</span>
+      </button>
+    </section>
+
+    <section class="summary-grid" aria-label="Resumen de equipos administrados">
+      <article>
+        <span>Equipos</span>
+        <strong>{summary.teams}</strong>
       </article>
-      <article class="summary-card available">
-        <span>Disponibles</span>
-        <strong>{codeStats.available}</strong>
+      <article>
+        <span>Miembros</span>
+        <strong>{summary.members}</strong>
       </article>
-      <article class="summary-card used">
-        <span>En uso</span>
-        <strong>{codeStats.used}</strong>
-      </article>
-      <article class="summary-card expired">
-        <span>Caducados</span>
-        <strong>{codeStats.expired}</strong>
-      </article>
-      <article class="summary-card revenue">
-        <span>Ingresos</span>
-        <strong>{formatCurrency(revenueStats.total)}</strong>
+      <article>
+        <span>Planes mensuales</span>
+        <strong>{formatCurrency(summary.monthly)}</strong>
       </article>
     </section>
 
-    <section class="admin-section">
+    <section class="teams-section">
       <div class="section-heading">
         <div>
-          <h2>Generar código</h2>
-          <p>Código de 8 dígitos para crear un equipo.</p>
+          <h2>Equipos administrados</h2>
+          <p>{filteredTeams.length} de {$adminTeamsStore.length} equipos</p>
         </div>
-      </div>
-
-      <div class="create-code-form">
-        <span class="field-label">Plan del equipo</span>
-        <div class="size-options" aria-label="Tamaño del equipo">
-          {#each TEAM_SIZE_OPTIONS as option}
-            <button
-              type="button"
-              class:active={selectedSize === option.value}
-              aria-pressed={selectedSize === option.value}
-              onclick={() => (selectedSize = option.value)}
-              disabled={creatingCode}
-            >
-              <strong>{option.label}</strong>
-              <span>{option.description}</span>
+        <div class="team-search">
+          <Search size={18} />
+          <input
+            type="search"
+            bind:value={teamSearch}
+            placeholder="Buscar equipo"
+            aria-label="Buscar equipo"
+          />
+          {#if teamSearch}
+            <button type="button" onclick={() => (teamSearch = "")} aria-label="Limpiar búsqueda">
+              <X size={16} />
             </button>
-          {/each}
-        </div>
-
-        <div class="quick-actions" aria-label="Generar códigos rápidos">
-          {#each quickCodeOptions as option}
-            <button
-              type="button"
-              class="quick-action"
-              onclick={() => handleCreateQuickCode(option.months)}
-              disabled={creatingCode}
-            >
-              <CalendarDays size={16} />
-              <span>{option.label}</span>
-            </button>
-          {/each}
-        </div>
-
-        <label for="expires-at">Fecha de caducidad</label>
-        <div class="form-row">
-          <div class="input-wrapper">
-            <CalendarDays size={18} />
-            <input id="expires-at" type="date" bind:value={expiresAt} disabled={creatingCode} />
-          </div>
-          <button type="button" class="primary-action" onclick={() => handleCreateCode()} disabled={creatingCode}>
-            {#if creatingCode}
-              <RefreshCw size={18} />
-              <span>Generando</span>
-            {:else}
-              <KeyRound size={18} />
-              <span>Generar</span>
-            {/if}
-          </button>
-        </div>
-
-        {#if generatedCode}
-          <div class="generated-code">
-            <span>Nuevo código {generatedCodeSize} · {formatCurrency(generatedCodeRevenue)}</span>
-            <strong>{generatedCode}</strong>
-          </div>
-        {/if}
-      </div>
-    </section>
-
-    <section class="admin-section">
-      <div class="section-heading">
-        <div>
-          <h2>Ingresos</h2>
-          <p>{formatCurrency(revenueStats.total)} mensuales en {revenueStats.teams} equipos.</p>
-        </div>
-        <div class="view-toggle" aria-label="Vista de ingresos">
-          <button
-            type="button"
-            class:active={revenueView === "list"}
-            onclick={() => (revenueView = "list")}
-            aria-pressed={revenueView === "list"}
-          >
-            <List size={16} />
-            <span>Lista</span>
-          </button>
-          <button
-            type="button"
-            class:active={revenueView === "chart"}
-            onclick={() => (revenueView = "chart")}
-            aria-pressed={revenueView === "chart"}
-          >
-            <BarChart3 size={16} />
-            <span>Gráfico</span>
-          </button>
-        </div>
-      </div>
-
-      {#if revenueView === "chart"}
-        <div class="revenue-chart" aria-label="Gráfico de ingresos por tamaño">
-          {#each revenueStats.breakdown as item}
-            <div class="chart-row">
-              <div class="chart-label">
-                <strong>{item.label}</strong>
-                <span>{item.count} equipos</span>
-              </div>
-              <div class="chart-track">
-                <span style={`width: ${getRevenueBarWidth(item.revenue)}%`}></span>
-              </div>
-              <strong>{formatCurrency(item.revenue)}</strong>
-            </div>
-          {/each}
-        </div>
-      {:else}
-        <div class="revenue-grid">
-          {#each revenueStats.breakdown as item}
-            <article class="revenue-card">
-              <div>
-                <span>Plan {item.label}</span>
-                <strong>{formatCurrency(item.price)}</strong>
-              </div>
-              <div>
-                <span>{item.count} equipos</span>
-                <strong>{formatCurrency(item.revenue)}</strong>
-              </div>
-            </article>
-          {/each}
-        </div>
-      {/if}
-    </section>
-
-    <section class="admin-section">
-      <div class="section-heading">
-        <div>
-          <h2>Códigos</h2>
-          <p>{codeStats.available} disponibles, {codeStats.used} usados.</p>
-        </div>
-        <button
-          type="button"
-          class="ghost-action"
-          onclick={() => (showCodes = !showCodes)}
-          aria-expanded={showCodes}
-          aria-controls="admin-code-list"
-        >
-          {#if showCodes}
-            <ChevronUp size={18} />
-            <span>Ocultar</span>
-          {:else}
-            <ChevronDown size={18} />
-            <span>Mostrar</span>
-          {/if}
-        </button>
-      </div>
-
-      {#if showCodes}
-        <div id="admin-code-list" class="code-list">
-          {#if $teamAccessCodesStore.length === 0}
-            <article class="empty-card">No hay códigos creados.</article>
-          {:else}
-            {#each $teamAccessCodesStore as code (code.id)}
-              {@const status = getAccessCodeStatus(code)}
-              <article class="code-card {status}">
-                <div class="code-card-top">
-                  <div class="code-identity">
-                    <span>Código</span>
-                    <strong class="code-value">{code.code}</strong>
-                  </div>
-                  <span class="status-pill">{getAccessCodeStatusLabel(code)}</span>
-                </div>
-
-                <div class="code-metrics">
-                  <div class="code-metric plan">
-                    <span>Plan</span>
-                    <strong>{code.size || "S"}</strong>
-                    <small>{getTeamMemberLimitLabel(code)}</small>
-                  </div>
-                  <div class="code-metric">
-                    <span>Ingreso</span>
-                    <strong>{formatCodeRevenue(code)}</strong>
-                    <small>al mes</small>
-                  </div>
-                  <div class="code-metric">
-                    <span>Caduca</span>
-                    <strong>{formatDate(code.expiresAt)}</strong>
-                  </div>
-                </div>
-
-                <dl class="code-details">
-                  <div>
-                    <dt>Identificador</dt>
-                    <dd>{code.uniqueCode || "-"}</dd>
-                  </div>
-                  {#if code.used}
-                    <div>
-                      <dt>Equipo</dt>
-                      <dd>{code.usedTeamName || code.usedTeamId || "-"}</dd>
-                    </div>
-                    <div>
-                      <dt>Usado por</dt>
-                      <dd>{code.usedByEmail || code.usedBy || "-"}</dd>
-                    </div>
-                  {/if}
-                </dl>
-              </article>
-            {/each}
           {/if}
         </div>
-      {/if}
-    </section>
-
-    <section class="admin-section">
-      <div class="section-heading">
-        <div>
-          <h2>Equipos</h2>
-          <p>{filteredAdminTeams.length} de {$adminTeamsStore.length} equipos.</p>
-        </div>
       </div>
 
-      <div class="team-search">
-        <Search size={18} />
-        <input
-          type="search"
-          bind:value={teamSearch}
-          placeholder="Buscar equipo o admin"
-          aria-label="Buscar equipo o admin"
-        />
-      </div>
-
-      <div class="teams-table">
+      <div class="team-list">
         {#if $adminTeamsStore.length === 0}
-          <article class="empty-card">No hay equipos registrados.</article>
-        {:else if filteredAdminTeams.length === 0}
-          <article class="empty-card">No hay equipos con esa búsqueda.</article>
+          <article class="empty-card">
+            <Users size={34} />
+            <h3>Aún no administras equipos</h3>
+            <p>Crea el primero para empezar a organizar el trabajo.</p>
+            <button type="button" onclick={() => navigateTo("/teams/create")}>
+              <Plus size={18} />
+              <span>Crear equipo</span>
+            </button>
+          </article>
+        {:else if filteredTeams.length === 0}
+          <article class="empty-card compact">
+            <Search size={30} />
+            <p>No hay equipos que coincidan con la búsqueda.</p>
+          </article>
         {:else}
-          {#each filteredAdminTeams as team (team.id)}
-            <article class="team-row">
-              <div class="team-meta">
-                <div class="team-icon">
-                  <Users size={20} />
+          {#each filteredTeams as team (team.id)}
+            <article class="team-card">
+              <div class="team-heading">
+                <div class="team-avatar">
+                  <Users size={22} />
                 </div>
-                <div>
-                  <h3>{team.name || team.team || "Equipo sin nombre"}</h3>
+                <div class="team-title">
+                  <h3>{getTeamName(team)}</h3>
                   <p>
-                    <Mail size={14} />
-                    <span>{getAdminEmail(team)}</span>
+                    {getTeamMemberCount(team)}
+                    {getTeamMemberCount(team) === 1 ? "miembro" : "miembros"}
+                    <span aria-hidden="true">·</span>
+                    Plan {getTeamSizeValue(team)}
                   </p>
-                  <small>{formatTeamBillingDate(team)}</small>
-                  <small>{formatTeamMemberUsage(team)}</small>
+                  <small>{getTeamMemberLimitLabel(team)} · {formatCurrency(getTeamMonthlyPrice(team))}/mes</small>
                 </div>
+                <a class="open-team" href={teamRoute(team)} aria-label={`Abrir ${getTeamName(team)}`}>
+                  <span>Equipo</span>
+                  <ArrowRight size={18} />
+                </a>
               </div>
 
-              <div class="team-actions">
-                <div class="team-revenue">
-                  <Euro size={16} />
-                  <div>
-                    <span>Plan {getTeamSizeValue(team)}</span>
-                    <strong>{formatTeamRevenue(team)}</strong>
-                  </div>
-                </div>
-
-                <div class="code-applier">
-                  <input
-                    type="text"
-                    inputmode="numeric"
-                    maxlength="8"
-                    list="available-team-access-codes"
-                    value={codeInputs[team.id] || ""}
-                    disabled={applyingCodeTeamId === team.id}
-                    placeholder="Código"
-                    aria-label={`Código para ${team.name || team.team || "equipo"}`}
-                    oninput={(event) => (codeInputs[team.id] = event.currentTarget.value.replace(/\D/g, "").slice(0, 8))}
-                  />
-                  <button
-                    type="button"
-                    class="code-apply-action"
-                    onclick={() => handleApplyAccessCode(team)}
-                    disabled={applyingCodeTeamId === team.id || !(codeInputs[team.id] || "").trim()}
-                    aria-label={`Aplicar código a ${team.name || team.team || "equipo"}`}
-                  >
-                    {#if applyingCodeTeamId === team.id}
-                      <RefreshCw size={18} />
-                    {:else}
-                      <KeyRound size={18} />
-                    {/if}
-                  </button>
-                </div>
-
-                <div class="billing-editor">
-                  <input
-                    type="date"
-                    value={billingInputs[team.id] || ""}
-                    disabled={savingTeamId === team.id}
-                    onchange={(event) => (billingInputs[team.id] = event.currentTarget.value)}
-                    aria-label={`Fecha de cobro de ${team.name || team.team || "equipo"}`}
-                  />
-                  <button
-                    type="button"
-                    class="icon-action"
-                    onclick={() => handleSaveBillingDate(team.id)}
-                    disabled={savingTeamId === team.id}
-                    aria-label="Guardar fecha de cobro"
-                  >
-                    {#if savingTeamId === team.id}
-                      <RefreshCw size={18} />
-                    {:else}
-                      <BadgeCheck size={18} />
-                    {/if}
-                  </button>
-                </div>
-              </div>
+              <nav class="team-actions" aria-label={`Administrar ${getTeamName(team)}`}>
+                {#each teamActions as action}
+                  {@const ActionIcon = action.icon}
+                  <a href={teamRoute(team, action.section)}>
+                    <ActionIcon size={19} />
+                    <span>{action.label}</span>
+                    <span class="action-arrow"><ArrowRight size={15} /></span>
+                  </a>
+                {/each}
+              </nav>
             </article>
           {/each}
         {/if}
@@ -710,18 +231,23 @@
   .admin-page {
     height: 100%;
     box-sizing: border-box;
-    padding: 22px 18px var(--bottom-nav-clearance);
-    padding-top: var(--page-top-safe);
-    background: var(--bg-page);
     overflow-y: auto;
-    overflow-x: hidden;
-    overscroll-behavior: contain;
-    -webkit-overflow-scrolling: touch;
+    padding: var(--page-top-safe) 18px var(--bottom-nav-clearance);
+    background: var(--bg-page);
+  }
+
+  .admin-header,
+  .hero-panel,
+  .summary-grid,
+  .teams-section,
+  .state-panel {
+    width: min(100%, 980px);
+    margin-inline: auto;
+    box-sizing: border-box;
   }
 
   .admin-header {
-    max-width: 920px;
-    margin: 0 auto 22px;
+    margin-bottom: 20px;
   }
 
   .back-button {
@@ -740,901 +266,358 @@
     box-shadow: var(--shadow-card);
   }
 
-  .summary-grid,
-  .admin-section,
+  .hero-panel,
+  .teams-section,
   .state-panel {
-    max-width: 920px;
-    margin-left: auto;
-    margin-right: auto;
-  }
-
-  .summary-grid {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 8px;
-    margin-bottom: 20px;
-  }
-
-  .summary-card {
-    --card-accent: var(--accent-strong);
-    --card-soft: var(--bg-accent-subtle);
-    position: relative;
-    min-width: 0;
-    min-height: 70px;
-    padding: 12px 12px 11px;
     border: 1px solid var(--border-color);
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
     background: var(--bg-card);
     box-shadow: var(--shadow-card);
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-      "label accent"
-      "value value";
-    align-content: space-between;
-    gap: 8px;
-    overflow: hidden;
   }
 
-  .summary-card::before {
-    content: "";
-    grid-area: accent;
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    background: var(--card-accent);
-    align-self: center;
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--card-accent) 12%, transparent);
-  }
-
-  .summary-card span {
-    grid-area: label;
-    min-width: 0;
-    color: var(--text-secondary);
-    font-size: 11px;
-    font-weight: 900;
-    line-height: 1.1;
-    text-transform: uppercase;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .summary-card strong {
-    grid-area: value;
-    min-width: 0;
-    color: var(--text-primary);
-    font-size: 24px;
-    font-weight: 900;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .summary-card.revenue {
-    background: color-mix(in srgb, var(--card-soft) 18%, var(--bg-card));
-  }
-
-  .summary-card.revenue strong {
-    font-size: 21px;
-  }
-
-  .summary-card.available {
-    --card-accent: var(--success-color);
-    --card-soft: var(--bg-success-subtle);
-  }
-
-  .summary-card.used {
-    --card-accent: var(--info-color);
-    --card-soft: var(--bg-info-subtle);
-  }
-
-  .summary-card.expired {
-    --card-accent: var(--warning-color);
-    --card-soft: var(--bg-warning-subtle);
-  }
-
-  .admin-section {
-    margin-bottom: 30px;
-  }
-
-  .section-heading {
+  .hero-panel {
+    padding: 26px;
     display: flex;
+    align-items: center;
     justify-content: space-between;
-    align-items: end;
-    gap: 16px;
-    margin-bottom: 12px;
+    gap: 22px;
+    background:
+      radial-gradient(circle at 92% 10%, color-mix(in srgb, var(--accent-color) 28%, transparent), transparent 42%),
+      var(--bg-card);
   }
 
-  .section-heading h2 {
+  .eyebrow {
+    color: var(--accent-strong);
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+  }
+
+  .hero-panel h2,
+  .section-heading h2,
+  .state-panel h2,
+  .empty-card h3,
+  .team-title h3 {
     margin: 0;
-    font-size: 18px;
-    font-weight: 800;
-  }
-
-  .section-heading p {
-    margin: 4px 0 0;
-    color: var(--text-secondary);
-    font-size: 13px;
-  }
-
-  .ghost-action,
-  .view-toggle button {
-    min-height: 38px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    background: var(--bg-card);
     color: var(--text-primary);
-    cursor: pointer;
+  }
+
+  .hero-panel h2 {
+    margin-top: 7px;
+    font-size: clamp(22px, 4vw, 31px);
+  }
+
+  .hero-panel p,
+  .section-heading p,
+  .state-panel p,
+  .empty-card p,
+  .team-title p,
+  .team-title small {
+    color: var(--text-secondary);
+  }
+
+  .hero-panel p {
+    margin: 9px 0 0;
+    max-width: 580px;
+    line-height: 1.5;
+  }
+
+  .create-action,
+  .empty-card button {
+    flex: 0 0 auto;
+    min-height: 48px;
+    padding: 0 18px;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: var(--accent-strong);
+    color: white;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
-    font-size: 13px;
-    font-weight: 800;
+    font-weight: 900;
+    cursor: pointer;
   }
 
-  .ghost-action {
-    padding: 0 12px;
-  }
-
-  .view-toggle {
-    display: inline-grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px;
-    padding: 4px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    background: var(--bg-input);
-  }
-
-  .view-toggle button {
-    min-width: 94px;
-    border-color: transparent;
-    background: transparent;
-  }
-
-  .view-toggle button.active {
-    background: var(--bg-card);
-    color: var(--accent-ink);
-    box-shadow: var(--shadow-card);
-  }
-
-  .revenue-grid {
+  .summary-grid {
+    margin-top: 14px;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 10px;
-  }
-
-  .revenue-card,
-  .revenue-chart,
-  .team-search {
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    background: var(--bg-card);
-    box-shadow: var(--shadow-card);
-  }
-
-  .revenue-card {
-    min-height: 104px;
-    padding: 16px;
-    display: flex;
-    justify-content: space-between;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 12px;
   }
 
-  .revenue-card span,
-  .team-revenue span {
-    color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 800;
-  }
-
-  .revenue-card strong,
-  .team-revenue strong {
-    display: block;
-    margin-top: 4px;
-    color: var(--text-primary);
-    font-size: 20px;
-    font-weight: 900;
-  }
-
-  .revenue-chart {
-    padding: 16px;
-    display: grid;
-    gap: 14px;
-  }
-
-  .chart-row {
-    display: grid;
-    grid-template-columns: 92px minmax(0, 1fr) 92px;
-    gap: 12px;
-    align-items: center;
-  }
-
-  .chart-label {
-    min-width: 0;
-  }
-
-  .chart-label strong {
-    display: block;
-    color: var(--text-primary);
-    font-size: 15px;
-    font-weight: 900;
-  }
-
-  .chart-label span {
-    color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 800;
-  }
-
-  .chart-track {
-    height: 14px;
-    border-radius: 999px;
-    background: var(--bg-input);
-    overflow: hidden;
-  }
-
-  .chart-track span {
-    height: 100%;
-    border-radius: inherit;
-    background: var(--accent-strong);
-    display: block;
-  }
-
-  .chart-row > strong {
-    color: var(--text-primary);
-    font-size: 14px;
-    font-weight: 900;
-    text-align: right;
-  }
-
-  .create-code-form {
+  .summary-grid article {
+    min-height: 92px;
     padding: 18px;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     background: var(--bg-card);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
     box-shadow: var(--shadow-card);
   }
 
-  .create-code-form label,
-  .field-label {
-    display: block;
-    margin-bottom: 8px;
+  .summary-grid span {
     color: var(--text-secondary);
     font-size: 13px;
-    font-weight: 800;
-  }
-
-  .quick-actions {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 8px;
-    margin-bottom: 16px;
-  }
-
-  .size-options {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 8px;
-    margin-bottom: 16px;
-  }
-
-  .size-options button {
-    min-height: 58px;
-    padding: 10px 12px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    background: var(--bg-input);
-    color: var(--text-primary);
-    cursor: pointer;
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 10px;
-    align-items: center;
-    text-align: left;
-  }
-
-  .size-options button.active {
-    border-color: var(--accent-strong);
-    background: var(--bg-accent-subtle);
-    color: var(--accent-ink);
-  }
-
-  .size-options button:disabled {
-    opacity: 0.65;
-    cursor: not-allowed;
-  }
-
-  .size-options strong {
-    width: 32px;
-    height: 32px;
-    border-radius: var(--radius-sm);
-    background: var(--bg-card);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 16px;
-    font-weight: 900;
-  }
-
-  .size-options span {
-    min-width: 0;
-    color: inherit;
-    font-size: 12px;
-    font-weight: 800;
-    overflow-wrap: anywhere;
-  }
-
-  .quick-action {
-    min-height: 42px;
-    padding: 0 12px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    background: var(--bg-input);
-    color: var(--text-primary);
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    font-size: 13px;
-    font-weight: 800;
-  }
-
-  .quick-action:disabled {
-    opacity: 0.65;
-    cursor: not-allowed;
-  }
-
-  .form-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 12px;
-  }
-
-  .input-wrapper {
-    min-height: 48px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 0 14px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    background: var(--bg-input);
-    color: var(--text-secondary);
-  }
-
-  .input-wrapper input,
-  .billing-editor input {
-    width: 100%;
-    min-width: 0;
-    border: none;
-    outline: none;
-    background: transparent;
-    color: var(--text-primary);
     font-weight: 700;
   }
 
-  .primary-action,
-  .icon-action,
-  .code-apply-action {
-    border: none;
-    background: var(--accent-strong);
-    color: var(--bg-card);
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    font-weight: 800;
+  .summary-grid strong {
+    color: var(--text-primary);
+    font-size: 24px;
   }
 
-  .primary-action {
-    min-height: 48px;
-    padding: 0 18px;
-    border-radius: var(--radius-sm);
-  }
-
-  .primary-action:disabled,
-  .icon-action:disabled,
-  .code-apply-action:disabled {
-    opacity: 0.7;
-    cursor: not-allowed;
-  }
-
-  .generated-code {
+  .teams-section {
     margin-top: 14px;
-    padding: 14px;
-    border-radius: var(--radius-sm);
-    background: var(--bg-accent-subtle);
+    margin-bottom: 28px;
+    padding: 22px;
+  }
+
+  .section-heading {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: 16px;
+    margin-bottom: 16px;
   }
 
-  .generated-code span {
-    color: var(--accent-ink);
+  .section-heading p {
+    margin: 5px 0 0;
     font-size: 13px;
-    font-weight: 800;
-  }
-
-  .generated-code strong {
-    color: var(--accent-ink);
-    font-size: 24px;
-    letter-spacing: 0;
-  }
-
-  .code-list,
-  .teams-table {
-    display: grid;
-    gap: 10px;
-  }
-
-  .code-list {
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  }
-
-  .teams-table {
-    grid-template-columns: 1fr;
   }
 
   .team-search {
-    min-height: 46px;
-    margin-bottom: 12px;
-    padding: 0 14px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    color: var(--text-secondary);
-  }
-
-  .team-search input {
-    width: 100%;
-    min-width: 0;
-    border: none;
-    outline: none;
-    background: transparent;
-    color: var(--text-primary);
-    font-weight: 700;
-  }
-
-  .code-card,
-  .team-row,
-  .empty-card,
-  .state-panel {
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    background: var(--bg-card);
-    box-shadow: var(--shadow-card);
-  }
-
-  .code-card {
-    --status-accent: var(--text-muted);
-    --status-soft: var(--bg-input);
-    min-width: 0;
-    padding: 12px;
-    border-left: 4px solid var(--status-accent);
-    background:
-      linear-gradient(135deg, color-mix(in srgb, var(--status-soft) 62%, transparent), transparent 52%),
-      var(--bg-card);
-    display: grid;
-    gap: 10px;
-    overflow: hidden;
-  }
-
-  .code-card.available {
-    --status-accent: var(--success-color);
-    --status-soft: var(--bg-success-subtle);
-  }
-
-  .code-card.used {
-    --status-accent: var(--info-color);
-    --status-soft: var(--bg-info-subtle);
-  }
-
-  .code-card.expired {
-    --status-accent: var(--warning-color);
-    --status-soft: var(--bg-warning-subtle);
-  }
-
-  .code-card-top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    min-width: 0;
-  }
-
-  .code-identity {
-    min-width: 0;
-    display: grid;
-    gap: 2px;
-  }
-
-  .code-identity > span,
-  .code-metric span {
-    color: var(--text-secondary);
-    font-size: 10px;
-    font-weight: 900;
-    text-transform: uppercase;
-  }
-
-  .code-value {
-    color: var(--text-primary);
-    font-size: 22px;
-    font-weight: 900;
-    letter-spacing: 0;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-    overflow-wrap: anywhere;
-  }
-
-  .status-pill {
-    min-height: 26px;
-    padding: 0 9px;
-    border-radius: 999px;
-    background: var(--bg-input);
-    color: var(--text-secondary);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 11px;
-    font-weight: 800;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-
-  .code-card.available .status-pill {
-    background: var(--bg-success-subtle);
-    color: var(--success-color);
-  }
-
-  .code-card.used .status-pill {
-    background: var(--bg-info-subtle);
-    color: var(--info-color);
-  }
-
-  .code-card.expired .status-pill {
-    background: var(--bg-warning-subtle);
-    color: var(--warning-color);
-  }
-
-  .code-metrics {
-    display: grid;
-    grid-template-columns: 0.8fr 1fr 1.1fr;
-    gap: 7px;
-  }
-
-  .code-metric {
-    min-width: 0;
-    min-height: 60px;
-    padding: 9px;
-    border: 1px solid color-mix(in srgb, var(--status-accent) 16%, var(--border-color));
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--bg-card) 80%, var(--status-soft));
-    display: grid;
-    align-content: start;
-    gap: 2px;
-  }
-
-  .code-metric.plan {
-    background: var(--status-soft);
-  }
-
-  .code-metric strong {
-    min-width: 0;
-    color: var(--text-primary);
-    font-size: 14px;
-    font-weight: 900;
-    line-height: 1.15;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .code-metric.plan strong {
-    font-size: 22px;
-  }
-
-  .code-metric small {
-    min-width: 0;
-    color: var(--text-secondary);
-    font-size: 11px;
-    font-weight: 700;
-    line-height: 1.2;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .code-details {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 12px;
-    margin: 0;
-  }
-
-  .code-details div {
-    min-width: 0;
-    flex: 1 1 calc(50% - 12px);
-  }
-
-  .code-details dt {
-    color: var(--text-secondary);
-    font-size: 10px;
-    font-weight: 800;
-    text-transform: uppercase;
-  }
-
-  .code-details dd {
-    margin: 2px 0 0;
-    color: var(--text-primary);
-    font-size: 12px;
-    font-weight: 700;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .team-row {
-    padding: 14px;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 14px;
-    align-items: center;
-  }
-
-  .team-meta {
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .team-icon {
-    width: 44px;
-    height: 44px;
-    flex: 0 0 44px;
-    border-radius: var(--radius-sm);
-    background: var(--bg-accent-subtle);
-    color: var(--accent-ink);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .team-meta h3 {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 800;
-  }
-
-  .team-meta p,
-  .team-meta small {
-    margin: 3px 0 0;
-    color: var(--text-secondary);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-  }
-
-  .team-meta p span {
-    overflow-wrap: anywhere;
-  }
-
-  .billing-editor {
-    display: grid;
-    grid-template-columns: 150px 44px;
-    gap: 8px;
-    align-items: center;
-  }
-
-  .team-actions {
-    display: grid;
-    grid-template-columns: 136px minmax(188px, 1fr) auto;
-    gap: 10px;
-    align-items: center;
-  }
-
-  .team-revenue {
     min-height: 44px;
+    width: min(100%, 300px);
     padding: 0 12px;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
     background: var(--bg-input);
-    color: var(--accent-ink);
+    color: var(--text-secondary);
     display: flex;
     align-items: center;
     gap: 8px;
   }
 
-  .team-revenue strong {
-    margin-top: 0;
-    font-size: 16px;
+  .team-search:focus-within {
+    border-color: var(--accent-strong);
   }
 
-  .code-applier {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 44px;
-    gap: 8px;
-    align-items: center;
-  }
-
-  .code-applier input {
-    width: 100%;
+  .team-search input {
     min-width: 0;
-    min-height: 44px;
-    padding: 0 10px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    background: var(--bg-input);
+    width: 100%;
+    border: 0;
+    outline: 0;
+    background: transparent;
     color: var(--text-primary);
-    font-weight: 800;
-    letter-spacing: 0;
+    font: inherit;
   }
 
-  .billing-editor input {
-    min-height: 44px;
-    padding: 0 10px;
+  .team-search button {
+    padding: 5px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    display: inline-flex;
+    cursor: pointer;
+  }
+
+  .team-list {
+    display: grid;
+    gap: 12px;
+  }
+
+  .team-card {
+    padding: 18px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-page);
+  }
+
+  .team-heading {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 13px;
+  }
+
+  .team-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 15px;
+    background: var(--accent-color);
+    color: var(--accent-ink);
+    display: grid;
+    place-items: center;
+  }
+
+  .team-title {
+    min-width: 0;
+  }
+
+  .team-title h3 {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 17px;
+  }
+
+  .team-title p {
+    margin: 4px 0 2px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    font-size: 13px;
+  }
+
+  .team-title small {
+    font-size: 12px;
+  }
+
+  .open-team {
+    min-height: 40px;
+    padding: 0 12px;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
-    background: var(--bg-input);
+    color: var(--text-primary);
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 13px;
+    font-weight: 800;
+    text-decoration: none;
   }
 
-  .icon-action,
-  .code-apply-action {
-    width: 44px;
-    height: 44px;
+  .team-actions {
+    margin-top: 15px;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .team-actions a {
+    min-height: 45px;
+    padding: 0 11px;
+    border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 13px;
+    font-weight: 800;
+    text-decoration: none;
+  }
+
+  .action-arrow {
+    margin-left: auto;
+    color: var(--text-muted);
+    display: inline-flex;
+  }
+
+  .team-actions a:hover,
+  .open-team:hover {
+    border-color: var(--accent-strong);
+    color: var(--accent-strong);
   }
 
   .empty-card,
   .state-panel {
-    padding: 24px;
-    color: var(--text-secondary);
-    text-align: center;
-    font-weight: 700;
-  }
-
-  .state-panel {
-    min-height: 220px;
+    min-height: 260px;
+    padding: 30px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    text-align: center;
+  }
+
+  .empty-card {
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+  }
+
+  .empty-card.compact {
+    min-height: 150px;
+  }
+
+  .empty-card h3 {
+    margin-top: 12px;
+  }
+
+  .empty-card p,
+  .state-panel p {
+    margin: 7px 0 0;
+  }
+
+  .empty-card button {
+    margin-top: 18px;
+  }
+
+  .denied-icon {
+    color: #dc2626;
+    display: inline-flex;
   }
 
   .state-panel h2 {
-    margin: 0;
-    font-size: 20px;
+    margin-top: 12px;
   }
 
-  .state-panel p {
-    margin: 0;
+  .spin {
+    display: inline-flex;
+    animation: spin 0.9s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
 
   @media (max-width: 760px) {
-    .summary-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .summary-card.revenue {
-      grid-column: 1 / -1;
-    }
-
+    .hero-panel,
     .section-heading {
       align-items: stretch;
       flex-direction: column;
     }
 
-    .revenue-grid {
-      grid-template-columns: 1fr;
+    .create-action,
+    .team-search {
+      width: 100%;
+      box-sizing: border-box;
     }
 
-    .chart-row {
-      grid-template-columns: 72px minmax(0, 1fr);
-    }
-
-    .chart-row > strong {
-      grid-column: 2;
-      text-align: left;
-    }
-
-    .quick-actions {
+    .team-actions {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
+  }
 
-    .size-options {
+  @media (max-width: 520px) {
+    .summary-grid {
       grid-template-columns: 1fr;
     }
 
-    .form-row,
-    .team-row {
-      grid-template-columns: 1fr;
+    .hero-panel,
+    .teams-section {
+      padding: 18px;
     }
 
-    .code-list {
-      grid-template-columns: 1fr;
+    .team-heading {
+      grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .open-team {
+      grid-column: 1 / -1;
+      justify-content: center;
     }
 
     .team-actions {
       grid-template-columns: 1fr;
-    }
-
-    .billing-editor {
-      grid-template-columns: minmax(0, 1fr) 44px;
-    }
-  }
-
-  @media (max-width: 460px) {
-    .summary-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .code-card {
-      padding: 10px;
-      border-radius: 12px;
-      gap: 8px;
-    }
-
-    .code-value {
-      font-size: 20px;
-    }
-
-    .status-pill {
-      min-height: 24px;
-      padding: 0 8px;
-      font-size: 10px;
-    }
-
-    .code-metrics {
-      gap: 6px;
-    }
-
-    .code-metric {
-      min-height: 54px;
-      padding: 8px;
-      border-radius: 9px;
-    }
-
-    .code-metric strong {
-      font-size: 13px;
-    }
-
-    .code-metric.plan strong {
-      font-size: 20px;
-    }
-
-    .code-metric span,
-    .code-metric small,
-    .code-details dt {
-      font-size: 10px;
-    }
-
-    .code-details {
-      grid-template-columns: 1fr;
-      display: grid;
-      gap: 5px;
-    }
-
-    .code-details div {
-      display: grid;
-      grid-template-columns: 82px minmax(0, 1fr);
-      gap: 8px;
-      align-items: center;
-      flex-basis: auto;
-    }
-
-    .code-details dd {
-      margin: 0;
-      font-size: 12px;
     }
   }
 </style>

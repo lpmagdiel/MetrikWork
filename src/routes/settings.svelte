@@ -734,7 +734,7 @@
               </div>
               <div class="item-info">
                 <span>Panel admin</span>
-                <p>Códigos y fechas de cobro</p>
+                <p>Equipos, estadísticas y finanzas</p>
               </div>
               <ChevronRight size={18} class="chevron" />
             </button>

@@ -213,7 +213,7 @@
     "/team": () => import("./routes/team.svelte"),
     "/chat": () => import("./routes/chat.svelte"),
     "/team-payments": () => import("./routes/team-payments.svelte"),
-    "/pay": () => import("./routes/pay.svelte"),
+    "/teams/create": () => import("./routes/team-create.svelte"),
     "/timer": () => import("./routes/Timer.svelte"),
     "/basic": () => import("./routes/basic.svelte"),
     "/tour": () => import("./routes/tour.svelte"),
@@ -294,7 +294,7 @@
       }
 
       if (teamId === "create") {
-        return { loader: routeLoaders["/pay"], teamId: null };
+        return { loader: routeLoaders["/teams/create"], teamId: null };
       }
     }
 

@@ -299,24 +299,6 @@
           }
         }
       }
-    },
-    "system_admins": {
-      "path": "/system_admins/{userId}",
-      "purpose": "Administración global de la plataforma.",
-      "document": {
-        "active": true,
-        "createdAt": "ISO-8601 timestamp"
-      }
-    },
-    "team_access_codes": {
-      "path": "/team_access_codes/{code}",
-      "purpose": "Códigos de alta y facturación de equipos.",
-      "document": {
-        "code": "12345678",
-        "used": false,
-        "expiresAt": "ISO-8601 timestamp",
-        "size": "S | M | L"
-      }
     }
   },
   "securityModel": {

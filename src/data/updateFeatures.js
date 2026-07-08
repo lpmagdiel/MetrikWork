@@ -6,7 +6,7 @@ export const updateData = {
     "Pagos pendientes recalculados por jornadas reales sin volver a contar días que ya fueron pagados.",
     "Bloqueo reforzado para impedir dos jornadas completas o medias jornadas del mismo miembro en un mismo día.",
     "Comprobantes de pago actualizados para mostrar solo las jornadas cubiertas por el pago registrado.",
-    "Nuevo flujo de creación de equipos con configuración de pago y fecha de cobro desde el inicio.",
+    "Creación directa de equipos para administradores y nuevo panel unificado de estadísticas y finanzas.",
     "Pagos de equipo mejorados con saldo por miembro, historial, comprobantes y reportes exportables.",
     "Recordatorio diario para fichar jornada con hora, mensaje personalizado y zona horaria.",
     "Jornadas variables con GPS de entrada y salida, recuperación del timer activo y soporte Pomodoro.",

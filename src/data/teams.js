@@ -1,11 +1,12 @@
 import { writable, get, derived } from 'svelte/store';
 import { db } from './firebase.js';
-import { doc, onSnapshot, collection, query, where, updateDoc, getDoc, getDocs, setDoc, deleteField, deleteDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, updateDoc, getDoc, getDocs, setDoc, deleteField, deleteDoc } from 'firebase/firestore';
 import { userStore, getProfileImage } from './auth.js';
 import { createNotification } from './notifications.js';
 import { createTeamPermissions, normalizeCustomTeamRoles, normalizeTeamPermissions } from './permissions.js';
 import { assertTeamMemberLimit, getTeamMonthlyPrice, normalizeTeamSizeData } from './teamSizes.js';
 import { normalizeNonWorkingDays } from './workLimits.js';
+import { isConfiguredSystemAdmin } from './systemAdminConfig.js';
 
 export const teamsStore = writable([]);
 export const selectedTeamId = writable(null);
@@ -85,118 +86,55 @@ export function subscribeToTeams(uid, callback) {
 /**
  * 
  * @param {string} teamName 
- * @param {string} accessCode
+ * @param {{ size?: string }} options
  * @returns 
  */
-export async function createTeam(teamName, accessCode = '') {
+export async function createTeam(teamName, { size = 'S' } = {}) {
     const user = get(userStore);
     if (!user) throw new Error("Usuario no autenticado");
-
-    const normalizedName = String(teamName || '').trim();
-    const normalizedCode = normalizeAccessCode(accessCode);
-    if (!normalizedName) throw new Error("Escribe un nombre para el equipo");
-    if (!/^\d{8}$/.test(normalizedCode)) {
-        throw new Error("El código de acceso debe tener 8 dígitos");
+    if (!isConfiguredSystemAdmin(user.email)) {
+        throw new Error("Solo un administrador puede crear equipos");
     }
 
+    const normalizedName = String(teamName || '').trim();
+    if (!normalizedName) throw new Error("Escribe un nombre para el equipo");
+    const teamSizeData = normalizeTeamSizeData(size);
+    const billingAmountEur = getTeamMonthlyPrice(teamSizeData.teamSize);
+
     try {
-        return await runTransaction(db, async (transaction) => {
-            const accessCodeRef = doc(db, 'team_access_codes', normalizedCode);
-            const accessCodeSnapshot = await transaction.get(accessCodeRef);
-            if (!accessCodeSnapshot.exists()) {
-                throw new Error("Código de acceso no encontrado");
-            }
+        const now = new Date().toISOString();
+        const teamRef = doc(collection(db, 'teams'));
+        const profileImage = getProfileImage(user);
+        const teamDoc = {
+            team: normalizedName,
+            admin: user.uid,
+            adminEmail: user.email || '',
+            members: [user.uid],
+            membersData: [{
+                id: user.uid,
+                name: user.name || user.email,
+                email: user.email || '',
+                avatar: profileImage,
+                photoURL: profileImage
+            }],
+            memberPermissions: {
+                [user.uid]: createTeamPermissions(true)
+            },
+            projectBudget: 0,
+            projectBudgetCurrency: 'MXN',
+            billingDate: null,
+            billingAmountEur,
+            teamSize: teamSizeData.teamSize,
+            maxMembers: teamSizeData.maxMembers,
+            createdAt: now
+        };
 
-            const accessCodeData = accessCodeSnapshot.data();
-            if (accessCodeData.used) {
-                throw new Error("Este código ya fue utilizado");
-            }
-
-            const expiresAt = toDate(accessCodeData.expiresAt);
-            if (expiresAt && expiresAt.getTime() < Date.now()) {
-                throw new Error("Este código de acceso caducó");
-            }
-
-            const teamSizeData = normalizeTeamSizeData(accessCodeData.size, accessCodeData.maxMembers);
-            const accessCodePriceEur = getTeamMonthlyPrice(accessCodeData);
-            const now = new Date().toISOString();
-            const billingDate = toDateInput(expiresAt);
-            const teamRef = doc(collection(db, 'teams'));
-            const profileImage = getProfileImage(user);
-            const teamDoc = {
-                team: normalizedName,
-                admin: user.uid,
-                adminEmail: user.email || '',
-                members: [user.uid],
-                membersData: [{
-                    id: user.uid,
-                    name: user.name || user.email,
-                    email: user.email || '',
-                    avatar: profileImage,
-                    photoURL: profileImage
-                }],
-                memberPermissions: {
-                    [user.uid]: createTeamPermissions(true)
-                },
-                projectBudget: 0,
-                projectBudgetCurrency: 'MXN',
-                billingDate,
-                billingAmountEur: accessCodePriceEur,
-                teamSize: teamSizeData.teamSize,
-                maxMembers: teamSizeData.maxMembers,
-                teamAccessCode: {
-                    code: normalizedCode,
-                    uniqueCode: accessCodeData.uniqueCode || '',
-                    expiresAt: accessCodeData.expiresAt || null,
-                    size: teamSizeData.teamSize,
-                    maxMembers: teamSizeData.maxMembers,
-                    priceEur: accessCodePriceEur,
-                    redeemedAt: now
-                },
-                createdAt: now
-            };
-
-            transaction.set(teamRef, teamDoc);
-            transaction.update(accessCodeRef, {
-                used: true,
-                usedAt: serverTimestamp(),
-                usedBy: user.uid,
-                usedByEmail: user.email || '',
-                usedTeamId: teamRef.id,
-                usedTeamName: normalizedName,
-                updatedAt: serverTimestamp()
-            });
-
-            return teamRef.id;
-        });
+        await setDoc(teamRef, teamDoc);
+        return teamRef.id;
     } catch (error) {
         console.error("Error creating team:", error);
         throw error;
     }
-}
-
-function normalizeAccessCode(value) {
-    return String(value || '').replace(/\D/g, '').slice(0, 8);
-}
-
-function toDate(value) {
-    if (!value) return null;
-    if (value instanceof Date) return value;
-    if (typeof value.toDate === 'function') return value.toDate();
-    if (typeof value.seconds === 'number') return new Date(value.seconds * 1000);
-
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function toDateInput(value) {
-    const date = toDate(value);
-    if (!date) return null;
-
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
 }
 
 /**
