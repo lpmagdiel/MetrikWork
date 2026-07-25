@@ -1,5 +1,5 @@
 export const updateData = {
-  version: "0.9.86", // Actualiza este valor en cada release
+  version: "0.9.87", // Actualiza este valor en cada release
   message: "Novedades de MetricWork 0.9.86 - Beta",
   features: [
     "Nueva pantalla Basic para registrar jornada con un solo botón cuando el usuario pertenece a un único equipo.",
