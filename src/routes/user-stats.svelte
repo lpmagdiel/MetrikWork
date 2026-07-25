@@ -13,6 +13,7 @@
   import Toast from "../components/Toast.svelte";
   import TitleHeader from "../components/TitleHeader.svelte";
   import { getUserTeamPayments } from "../data/teamPayments.js";
+  import { getOutstandingAmount, getWorkEarnings } from "../data/userStats.js";
   import { navigateTo } from "../router.js";
   import { getUserTeamWorks, selectedTeam, selectedTeamId, userStore } from "../data/stores.js";
 
@@ -60,6 +61,12 @@
     payments.filter((payment) => dateInRange(payment.date || payment.createdAt, range)),
   );
 
+  // Unlike the period metrics below, this is the member's actual team balance.
+  // Filtering it by month hid debts generated in earlier months.
+  let outstandingAmount = $derived(
+    getOutstandingAmount(userWorks, payments, dailyRate, extraHourRate),
+  );
+
   let stats = $derived.by(() => {
     let fullDays = 0;
     let halfDays = 0;
@@ -88,15 +95,13 @@
 
     const totalWorkDays = fullDays + halfDays / 2 + variableHours / 8;
     const estimatedEarnings = filteredWorks.reduce(
-      (sum, work) => sum + getWorkEarnings(work),
+      (sum, work) => sum + getWorkEarnings(work, dailyRate, extraHourRate),
       0,
     );
     const totalPaid = filteredPayments.reduce(
       (sum, payment) => sum + (Number(payment.amount) || 0),
       0,
     );
-    const pendingAmount = Math.max(estimatedEarnings - totalPaid, 0);
-
     return {
       fullDays,
       halfDays,
@@ -110,7 +115,6 @@
       totalWorkDays,
       estimatedEarnings,
       totalPaid,
-      pendingAmount,
       paymentCount: filteredPayments.length,
       averagePerActiveDay: activeDates.size ? estimatedEarnings / activeDates.size : 0,
     };
@@ -129,7 +133,7 @@
       const key = getWorkDateKey(work).slice(0, 7);
       if (!key) return;
       const previous = buckets.get(key) || { key, label: formatMonthKey(key), earnings: 0 };
-      previous.earnings += getWorkEarnings(work);
+      previous.earnings += getWorkEarnings(work, dailyRate, extraHourRate);
       buckets.set(key, previous);
     });
     return Array.from(buckets.values())
@@ -231,11 +235,6 @@
     }).format(Number(value) || 0);
   }
 
-  function getWorkEarnings(work) {
-    const base = getWorkUnits(work) * dailyRate;
-    return base + (Number(work.overtimeHours) || 0) * extraHourRate;
-  }
-
   function getWorkUnits(work) {
     if (work.type === "full-day") return 1;
     if (work.type === "half-day") return 0.5;
@@ -323,8 +322,8 @@
       <section class="summary-band">
         <div>
           <p>Pendiente por cobrar</p>
-          <strong>{formatMoney(stats.pendingAmount)}</strong>
-          <span>{formatDate(range.start)} - {formatDate(range.end)}</span>
+          <strong>{formatMoney(outstandingAmount)}</strong>
+          <span>Saldo acumulado del equipo</span>
         </div>
         <div class="summary-icon">
           <TrendingUp size={28} />
@@ -405,9 +404,9 @@
 
           <article class="metric-card">
             <div class="metric-icon pending"><WalletCards size={20} /></div>
-            <span>Pendiente</span>
-            <strong>{formatMoney(stats.pendingAmount)}</strong>
-            <small>después de pagos registrados</small>
+            <span>Pendiente total</span>
+            <strong>{formatMoney(outstandingAmount)}</strong>
+            <small>incluye todos los periodos</small>
           </article>
         </section>
 
@@ -515,7 +514,7 @@
                       <small>{work.note}</small>
                     {/if}
                   </div>
-                  <strong>{formatMoney(getWorkEarnings(work))}</strong>
+                  <strong>{formatMoney(getWorkEarnings(work, dailyRate, extraHourRate))}</strong>
                 </article>
               {/each}
             </div>
