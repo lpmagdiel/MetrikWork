@@ -968,7 +968,11 @@
 
 <style>
   .team-expenses-page {
-    min-height: 100%;
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
     padding: var(--page-top-safe) 20px var(--bottom-nav-clearance);
     box-sizing: border-box;
     background: var(--bg-page);
