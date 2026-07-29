@@ -113,6 +113,17 @@ export function validateManualExpenseInput(input = {}) {
     return '';
 }
 
+export function normalizeExpenseReceipts(receipts) {
+    if (!Array.isArray(receipts)) return [];
+    return receipts
+        .filter((receipt) => receipt && typeof receipt.url === 'string' && receipt.url)
+        .slice(0, 10)
+        .map((receipt) => ({
+            url: String(receipt.url).slice(0, 600),
+            name: normalizeText(receipt.name, 160) || 'Recibo'
+        }));
+}
+
 export function normalizeManualExpenseInput(input = {}, options = {}) {
     const now = options.now instanceof Date ? options.now : new Date(options.now || Date.now());
     const today = getExpenseDateKey(now);
@@ -142,7 +153,8 @@ export function normalizeManualExpenseInput(input = {}, options = {}) {
         locationId: normalizeText(input.locationId, 120),
         locationName: normalizeText(input.locationName, 120),
         deductible: input.deductible !== false,
-        notes: normalizeText(input.notes, 1000)
+        notes: normalizeText(input.notes, 1000),
+        receipts: normalizeExpenseReceipts(input.receipts)
     };
 }
 
@@ -160,7 +172,8 @@ function mapManualExpense(expense = {}, currency = 'EUR') {
         editable: true,
         date: getExpenseDateKey(expense.date || expense.createdAt),
         createdAt: expense.createdAt || '',
-        updatedAt: expense.updatedAt || ''
+        updatedAt: expense.updatedAt || '',
+        receipts: normalizeExpenseReceipts(expense.receipts)
     };
 }
 
@@ -285,7 +298,8 @@ export function filterExpenseLedger(expenses = [], filters = {}) {
             expense.vendorName,
             expense.invoiceNumber,
             expense.locationName,
-            expense.createdByName
+            expense.createdByName,
+            Array.isArray(expense.receipts) ? expense.receipts.map((receipt) => receipt.name).join(' ') : ''
         ].filter(Boolean).join(' '));
         return haystack.includes(search);
     });

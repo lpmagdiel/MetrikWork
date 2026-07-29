@@ -1,12 +1,15 @@
 <script>
+  import { onDestroy } from "svelte";
   import {
     AlertCircle,
     CalendarDays,
     CheckCircle2,
     Clock,
     DollarSign,
+    FileImage,
     FileText,
     Filter,
+    LoaderCircle,
     Package,
     Pencil,
     Plus,
@@ -14,8 +17,10 @@
     Save,
     Search,
     Trash2,
+    Upload,
     Users,
     WalletCards,
+    X,
   } from "lucide-svelte";
   import {
     EXPENSE_CATEGORIES,
@@ -39,12 +44,24 @@
     userStore,
     validateManualExpenseInput,
   } from "../data/stores.js";
-  import { confirmAlert } from "../data/alerts.js";
+  import { confirmAlert, showErrorAlert, showInfoAlert } from "../data/alerts.js";
   import { navigateTo } from "../router.js";
+  import { destroyer, resizeImageFile, uploader } from "../data/fileHelper.js";
+  import { optimizeCloudinary, stripImageFileExtension } from "../helpers/image.js";
+  import { openSliceContainers } from "../data/ui.js";
   import CircleAddButton from "../components/CircleAddButton.svelte";
   import SliceContainer from "../components/SliceContainer.svelte";
   import TitleHeader from "../components/TitleHeader.svelte";
   import Toast from "../components/Toast.svelte";
+
+  const CLOUDINARY_PRESET_EXPENSES =
+    import.meta.env.VITE_CLOUDINARY_PRESET_EXPENSES ||
+    import.meta.env.CLOUDINARY_PRESET_EXPENSES ||
+    import.meta.env.VITE_CLOUDINARY_PRESET_GALLERY ||
+    import.meta.env.CLOUDINARY_PRESET_GALLERY ||
+    "MetricWork";
+
+  const MAX_RECEIPTS = 10;
 
   const sourceLabels = {
     manual: "Manual",
@@ -86,6 +103,14 @@
   let messageToast = $state("");
   let typeToast = $state("success");
   let showToast = $state(false);
+
+  let receipts = $state([]);
+  let removedReceipts = $state([]);
+  let isUploadingReceipts = $state(false);
+  let receiptFileInput;
+  let lightboxReceipts = $state(null);
+  let lightboxIndex = $state(0);
+  let lightboxRegistered = $state(false);
 
   let period = $state("month");
   let startDate = $state(getMonthRange().start);
@@ -164,6 +189,21 @@
     return () => subscribeToTeamLocations(null);
   });
 
+  $effect(() => {
+    const shouldRegister = Boolean(lightboxReceipts);
+    if (shouldRegister === lightboxRegistered) return;
+
+    openSliceContainers.update((count) =>
+      Math.max(0, count + (shouldRegister ? 1 : -1)),
+    );
+    lightboxRegistered = shouldRegister;
+  });
+
+  onDestroy(() => {
+    if (!lightboxRegistered) return;
+    openSliceContainers.update((count) => Math.max(0, count - 1));
+  });
+
   function getLocalDateKey(date = new Date()) {
     return [
       date.getFullYear(),
@@ -231,6 +271,8 @@
     editingExpense = null;
     formError = "";
     expenseForm = createDefaultExpenseForm(currency);
+    receipts = [];
+    removedReceipts = [];
     showExpenseForm = true;
   }
 
@@ -257,7 +299,103 @@
       deductible: expense.deductible !== false,
       notes: expense.notes || "",
     };
+    receipts = Array.isArray(expense.receipts) ? expense.receipts.map((receipt) => ({ ...receipt })) : [];
+    removedReceipts = [];
     showExpenseForm = true;
+  }
+
+  $effect(() => {
+    if (!showExpenseForm && (editingExpense || receipts.length || removedReceipts.length)) {
+      editingExpense = null;
+      formError = "";
+      receipts = [];
+      removedReceipts = [];
+      isUploadingReceipts = false;
+      if (receiptFileInput) receiptFileInput.value = "";
+    }
+  });
+
+  function openReceiptPicker() {
+    if (isUploadingReceipts) return;
+    if (receipts.length >= MAX_RECEIPTS) {
+      showInfoAlert(
+        "Límite alcanzado",
+        `Solo puedes adjuntar hasta ${MAX_RECEIPTS} recibos por gasto.`,
+      );
+      return;
+    }
+    receiptFileInput?.click();
+  }
+
+  async function handleReceiptsChange(event) {
+    const files = Array.from(event.currentTarget.files || []);
+    event.currentTarget.value = "";
+    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+    if (!imageFiles.length) {
+      showErrorAlert("Archivos no válidos", "Selecciona una o varias imágenes.");
+      return;
+    }
+
+    const slotsLeft = MAX_RECEIPTS - receipts.length;
+    if (slotsLeft <= 0) {
+      showInfoAlert(
+        "Límite alcanzado",
+        `Solo puedes adjuntar hasta ${MAX_RECEIPTS} recibos por gasto.`,
+      );
+      return;
+    }
+
+    const filesToUpload = imageFiles.slice(0, slotsLeft);
+    isUploadingReceipts = true;
+    try {
+      for (const file of filesToUpload) {
+        try {
+          const resized = await resizeImageFile(file, 1600, {
+            type: "image/webp",
+            quality: 0.85,
+          });
+          const url = await uploader(resized, CLOUDINARY_PRESET_EXPENSES);
+          receipts = [...receipts, { url, name: file.name }];
+        } catch (error) {
+          console.error("Error uploading expense receipt:", error);
+          showErrorAlert(
+            "No se pudo subir el recibo",
+            error?.message || "Inténtalo de nuevo con otra imagen.",
+          );
+        }
+      }
+    } finally {
+      isUploadingReceipts = false;
+    }
+  }
+
+  function removeReceipt(index) {
+    const target = receipts[index];
+    if (!target) return;
+    if (!target.uploaded) {
+      removedReceipts = [...removedReceipts, target.url];
+    } else if (editingExpense?.id) {
+      removedReceipts = [...removedReceipts, target.url];
+    }
+    receipts = receipts.filter((_, itemIndex) => itemIndex !== index);
+  }
+
+  function openReceiptLightbox(expense, index = 0) {
+    if (!expense?.receipts?.length) return;
+    lightboxReceipts = expense;
+    lightboxIndex = Math.min(Math.max(0, index), expense.receipts.length - 1);
+  }
+
+  function closeReceiptLightbox() {
+    lightboxReceipts = null;
+    lightboxIndex = 0;
+  }
+
+  function nextReceipt(delta) {
+    if (!lightboxReceipts) return;
+    const total = lightboxReceipts.receipts.length;
+    if (total <= 1) return;
+    lightboxIndex = (lightboxIndex + delta + total) % total;
   }
 
   function handleStatusChange() {
@@ -275,20 +413,40 @@
     );
   }
 
+  async function cleanupRemovedReceipts(urls) {
+    if (!Array.isArray(urls) || !urls.length) return;
+    await Promise.all(
+      urls.map(async (url) => {
+        if (!url || !url.includes("cloudinary.com")) return;
+        try {
+          await destroyer(url);
+        } catch (error) {
+          console.warn("No se pudo eliminar el recibo de Cloudinary:", error);
+        }
+      }),
+    );
+  }
+
   async function saveExpense(event) {
     event?.preventDefault();
     if (!teamId || isSaving || !canCreateExpenses && !editingExpense) return;
     if (editingExpense && !canManageExpense(editingExpense)) return;
 
     const selectedLocation = $teamLocationsStore.find((location) => location.id === expenseForm.locationId);
+    const sanitizedReceipts = receipts
+      .filter((receipt) => receipt && typeof receipt.url === "string" && receipt.url)
+      .slice(0, MAX_RECEIPTS)
+      .map((receipt) => ({ url: receipt.url, name: receipt.name || "Recibo" }));
     const payload = {
       ...expenseForm,
       currency,
       locationName: selectedLocation?.name || "",
+      receipts: sanitizedReceipts,
     };
     formError = validateManualExpenseInput(payload);
     if (formError) return;
 
+    const receiptsToDelete = [...removedReceipts];
     isSaving = true;
     try {
       if (editingExpense) {
@@ -298,8 +456,11 @@
         await addManualTeamExpense(teamId, payload, $userStore);
         showNotification("Gasto manual añadido.");
       }
+      await cleanupRemovedReceipts(receiptsToDelete);
       showExpenseForm = false;
       editingExpense = null;
+      receipts = [];
+      removedReceipts = [];
     } catch (error) {
       formError = error?.message || "No se pudo guardar el gasto.";
     } finally {
@@ -309,9 +470,13 @@
 
   async function removeExpense(expense) {
     if (!canDeleteExpenses || expense?.source !== "manual" || deletingExpenseId) return;
+    const hasReceipts = Array.isArray(expense.receipts) && expense.receipts.length > 0;
+    const text = hasReceipts
+      ? `Se eliminará “${expense.title}” y sus ${expense.receipts.length} recibos adjuntos. Esta acción no modifica pagos ni inventario.`
+      : `Se eliminará “${expense.title}”. Esta acción no modifica pagos ni inventario.`;
     const confirmed = await confirmAlert({
       title: "Eliminar gasto",
-      text: `Se eliminará “${expense.title}”. Esta acción no modifica pagos ni inventario.`,
+      text,
       confirmButtonText: "Sí, eliminar",
       danger: true,
     });
@@ -320,6 +485,7 @@
     deletingExpenseId = expense.id;
     try {
       await deleteManualTeamExpense(teamId, expense.id);
+      await cleanupRemovedReceipts(hasReceipts ? expense.receipts.map((receipt) => receipt.url) : []);
       showNotification("Gasto eliminado.");
     } catch (error) {
       showNotification(error?.message || "No se pudo eliminar el gasto.", "error");
@@ -541,6 +707,28 @@
                   {/if}
                   {#if expense.createdByName}<span>Por {expense.createdByName}</span>{/if}
                 </div>
+                {#if Array.isArray(expense.receipts) && expense.receipts.length}
+                  <div class="expense-receipts">
+                    {#each expense.receipts.slice(0, 4) as receipt, index (receipt.url)}
+                      <button
+                        type="button"
+                        class="expense-receipt-thumb"
+                        aria-label={`Ver ${receipt.name}`}
+                        onclick={() => openReceiptLightbox(expense, index)}
+                      >
+                        <img src={optimizeCloudinary(receipt.url, 96, { height: 96, crop: "fill" })} alt={receipt.name} loading="lazy" decoding="async" />
+                      </button>
+                    {/each}
+                    {#if expense.receipts.length > 4}
+                      <button type="button" class="expense-receipt-more" onclick={() => openReceiptLightbox(expense, 4)}>
+                        +{expense.receipts.length - 4}
+                      </button>
+                    {/if}
+                    <span class="expense-receipt-count">
+                      <FileImage size={13} /> {expense.receipts.length} {expense.receipts.length === 1 ? "recibo" : "recibos"}
+                    </span>
+                  </div>
+                {/if}
               </div>
               <div class="expense-side">
                 <strong>{formatMoney(expense.amount, expense.currency)}</strong>
@@ -655,6 +843,48 @@
             <input type="checkbox" bind:checked={expenseForm.deductible} />
             <span>Marcar como potencialmente deducible</span>
           </label>
+          <div class="receipts-field full-field">
+            <div class="receipts-heading">
+              <span><FileImage size={16} /> Tickets / facturas adjuntos</span>
+              <small>{receipts.length}/{MAX_RECEIPTS}</small>
+            </div>
+            {#if receipts.length}
+              <ul class="receipts-list" aria-label="Recibos adjuntos">
+                {#each receipts as receipt, index (receipt.url)}
+                  <li class="receipt-chip">
+                    <div class="receipt-thumb">
+                      <img src={optimizeCloudinary(receipt.url, 80, { height: 80, crop: "fill" })} alt={receipt.name} loading="lazy" decoding="async" />
+                    </div>
+                    <div class="receipt-meta">
+                      <strong>{stripImageFileExtension(receipt.name, "Recibo")}</strong>
+                      <small>{receipt.name}</small>
+                    </div>
+                    <button type="button" class="receipt-remove" aria-label={`Quitar ${receipt.name}`} onclick={() => removeReceipt(index)} disabled={isSaving}>
+                      <X size={16} />
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+            <div class="receipts-actions">
+              <button type="button" class="receipt-add" onclick={openReceiptPicker} disabled={isUploadingReceipts || isSaving || receipts.length >= MAX_RECEIPTS}>
+                {#if isUploadingReceipts}
+                  <LoaderCircle size={17} class="spin" /> Subiendo...
+                {:else}
+                  <Upload size={17} /> Adjuntar imagen
+                {/if}
+              </button>
+              <p class="receipts-hint">Fotos de tickets o facturas. Se guardan al confirmar el gasto.</p>
+            </div>
+            <input
+              bind:this={receiptFileInput}
+              type="file"
+              accept="image/*"
+              multiple
+              onchange={handleReceiptsChange}
+              style="display:none"
+            />
+          </div>
           <label class="full-field">
             <span>Notas internas</span>
             <textarea rows="3" maxlength="1000" bind:value={expenseForm.notes} placeholder="Observaciones para el equipo"></textarea>
@@ -667,6 +897,58 @@
         </button>
       </form>
     </SliceContainer>
+
+    {#if lightboxReceipts}
+      <div
+        class="receipt-lightbox"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Recibo"
+        onclick={closeReceiptLightbox}
+      >
+        <button
+          type="button"
+          class="receipt-lightbox-close"
+          aria-label="Cerrar"
+          onclick={(event) => { event.stopPropagation(); closeReceiptLightbox(); }}
+        >
+          <X size={22} />
+        </button>
+        <div class="receipt-lightbox-content" onclick={(event) => event.stopPropagation()}>
+          {#if lightboxReceipts.receipts.length > 1}
+            <button
+              type="button"
+              class="receipt-lightbox-nav prev"
+              aria-label="Anterior"
+              onclick={() => nextReceipt(-1)}
+            >
+              ‹
+            </button>
+          {/if}
+          {#key `${lightboxReceipts.id || 'new'}-${lightboxIndex}`}
+            <img
+              class="receipt-lightbox-image"
+              src={optimizeCloudinary(lightboxReceipts.receipts[lightboxIndex].url, 1600)}
+              alt={lightboxReceipts.receipts[lightboxIndex].name}
+            />
+          {/key}
+          {#if lightboxReceipts.receipts.length > 1}
+            <button
+              type="button"
+              class="receipt-lightbox-nav next"
+              aria-label="Siguiente"
+              onclick={() => nextReceipt(1)}
+            >
+              ›
+            </button>
+          {/if}
+          <div class="receipt-lightbox-meta">
+            <strong>{stripImageFileExtension(lightboxReceipts.receipts[lightboxIndex].name, "Recibo")}</strong>
+            <small>{lightboxIndex + 1} de {lightboxReceipts.receipts.length}</small>
+          </div>
+        </div>
+      </div>
+    {/if}
   {:else if team}
     <section class="empty-state page-state">
       <Users size={52} />
@@ -955,6 +1237,204 @@
   .save-expense-button { width: 100%; min-height: 48px; }
   .save-expense-button:disabled { opacity: 0.6; cursor: wait; }
 
+  .receipts-field {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border: 1px dashed color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
+    border-radius: var(--radius-md);
+    background: var(--bg-input);
+  }
+  .receipts-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 800;
+  }
+  .receipts-heading span { display: inline-flex; align-items: center; gap: 6px; }
+  .receipts-heading small { font-weight: 700; }
+  .receipts-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 8px;
+  }
+  .receipt-chip {
+    display: grid;
+    grid-template-columns: 56px 1fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+  }
+  .receipt-thumb {
+    width: 56px;
+    height: 56px;
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--bg-input);
+    display: grid;
+    place-items: center;
+  }
+  .receipt-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .receipt-meta { min-width: 0; display: grid; gap: 2px; }
+  .receipt-meta strong {
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .receipt-meta small {
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 650;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .receipt-remove {
+    width: 32px;
+    height: 32px;
+    border: 1px solid color-mix(in srgb, var(--danger-color) 35%, var(--border-color));
+    border-radius: 10px;
+    background: var(--bg-danger-subtle);
+    color: var(--danger-color);
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+  }
+  .receipt-remove:disabled { opacity: 0.5; cursor: not-allowed; }
+  .receipts-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+  }
+  .receipt-add {
+    min-height: 40px;
+    padding: 0 14px;
+    border: 1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
+    border-radius: var(--radius-md);
+    background: var(--accent-color);
+    color: var(--accent-ink);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 800;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    cursor: pointer;
+  }
+  .receipt-add:disabled { opacity: 0.55; cursor: not-allowed; }
+  .receipts-hint { margin: 0; color: var(--text-secondary); font-size: 11px; font-weight: 650; }
+
+  .expense-receipts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 2px;
+  }
+  .expense-receipt-thumb,
+  .expense-receipt-more {
+    width: 40px;
+    height: 40px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    overflow: hidden;
+    padding: 0;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 800;
+  }
+  .expense-receipt-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .expense-receipt-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .receipt-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 160;
+    background: rgba(0, 0, 0, 0.78);
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    box-sizing: border-box;
+  }
+  .receipt-lightbox-content {
+    position: relative;
+    width: min(100%, 900px);
+    display: grid;
+    place-items: center;
+    gap: 12px;
+  }
+  .receipt-lightbox-image {
+    max-width: 100%;
+    max-height: 78vh;
+    border-radius: 14px;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+    background: var(--bg-card);
+    object-fit: contain;
+  }
+  .receipt-lightbox-close {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 40px;
+    height: 40px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--bg-card);
+    color: var(--text-primary);
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  }
+  .receipt-lightbox-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 42px;
+    height: 42px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--bg-card);
+    color: var(--text-primary);
+    font-size: 22px;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  }
+  .receipt-lightbox-nav.prev { left: -8px; }
+  .receipt-lightbox-nav.next { right: -8px; }
+  .receipt-lightbox-meta {
+    display: grid;
+    gap: 2px;
+    text-align: center;
+    color: #fff;
+  }
+  .receipt-lightbox-meta strong { font-size: 14px; font-weight: 800; }
+  .receipt-lightbox-meta small { font-size: 11px; opacity: 0.85; font-weight: 700; }
+
   @keyframes spin { to { transform: rotate(360deg); } }
 
   @media (max-width: 850px) {
@@ -980,5 +1460,11 @@
     .expense-actions { justify-self: end; }
     .expense-title-row h3 { flex-basis: 100%; }
     .form-heading { align-items: flex-start; flex-direction: column; }
+    .receipts-list { grid-template-columns: 1fr; }
+    .receipts-actions { flex-direction: column; align-items: stretch; }
+    .receipt-add { width: 100%; justify-content: center; }
+    .receipt-lightbox { padding: 12px; }
+    .receipt-lightbox-nav.prev { left: 4px; }
+    .receipt-lightbox-nav.next { right: 4px; }
   }
 </style>

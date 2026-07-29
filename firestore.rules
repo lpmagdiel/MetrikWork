@@ -423,6 +423,7 @@ service cloud.firestore {
                "locationName",
                "deductible",
                "notes",
+               "receipts",
                "createdBy",
                "createdByName",
                "createdAt",
@@ -448,6 +449,7 @@ service cloud.firestore {
                "locationName",
                "deductible",
                "notes",
+               "receipts",
                "createdBy",
                "createdByName",
                "createdAt",
@@ -520,6 +522,16 @@ service cloud.firestore {
              data.deductible is bool &&
              data.notes is string &&
              data.notes.size() <= 1000 &&
+             data.receipts is list &&
+             data.receipts.size() <= 10 &&
+             data.receipts.all(receipt,
+               receipt.keys().hasOnly(["url", "name"]) &&
+               receipt.url is string &&
+               receipt.url.size() > 0 &&
+               receipt.url.size() <= 600 &&
+               receipt.name is string &&
+               receipt.name.size() <= 160
+             ) &&
              data.createdBy is string &&
              data.createdBy.size() > 0 &&
              data.createdByName is string &&

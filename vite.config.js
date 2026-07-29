@@ -210,6 +210,18 @@ export default defineConfig(({ mode }) => {
         workbox: {
           cleanupOutdatedCaches: true,
           navigateFallback: '/index.html',
+          // Evita que el fallback SPA se aplique a endpoints de Firebase.
+          // Si Workbox los tratara como navegaciones devolvería index.html
+          // y rompería las conexiones HTTP/2 streaming de Firestore.
+          navigateFallbackDenylist: [
+            /^\/api\//,
+            /^https:\/\/firestore\.googleapis\.com\//,
+            /^https:\/\/fcm\.googleapis\.com\//,
+            /^https:\/\/fcmregistrations\.googleapis\.com\//,
+            /^https:\/\/identitytoolkit\.googleapis\.com\//,
+            /^https:\/\/securetoken\.googleapis\.com\//,
+            /^https:\/\/firebasestorage\.googleapis\.com\//
+          ],
           globPatterns: ['**/*.{js,css,html,ico,png,svg,webp}'],
           runtimeCaching: [
             {
@@ -245,6 +257,35 @@ export default defineConfig(({ mode }) => {
                   maxAgeSeconds: 60 * 60 * 24 * 30
                 }
               }
+            },
+            // Las peticiones a Firebase usan HTTP/2 streaming (canales
+            // /Write/channel) que los Service Workers no pueden cachear.
+            // Las dejamos pasar tal cual con NetworkOnly para evitar el
+            // error "A ServiceWorker intercepted the request and encountered
+            // an unexpected error".
+            {
+              urlPattern: ({ url }) => (
+                url.hostname === 'firestore.googleapis.com' ||
+                url.hostname === 'fcm.googleapis.com' ||
+                url.hostname === 'fcmregistrations.googleapis.com' ||
+                url.hostname === 'identitytoolkit.googleapis.com' ||
+                url.hostname === 'securetoken.googleapis.com' ||
+                url.hostname === 'firebasestorage.googleapis.com'
+              ),
+              handler: 'NetworkOnly',
+              method: 'GET'
+            },
+            {
+              urlPattern: ({ url }) => (
+                url.hostname === 'firestore.googleapis.com' ||
+                url.hostname === 'fcm.googleapis.com' ||
+                url.hostname === 'fcmregistrations.googleapis.com' ||
+                url.hostname === 'identitytoolkit.googleapis.com' ||
+                url.hostname === 'securetoken.googleapis.com' ||
+                url.hostname === 'firebasestorage.googleapis.com'
+              ),
+              handler: 'NetworkOnly',
+              method: 'POST'
             }
           ]
         },

@@ -109,4 +109,72 @@ describe('team expense ledger', () => {
       count: 3
     });
   });
+
+  it('normaliza y limita los recibos adjuntos al guardar gastos manuales', () => {
+    const longName = 'x'.repeat(300);
+    const receipts = [
+      { url: 'https://res.cloudinary.com/demo/image/upload/ticket-1.jpg', name: 'ticket-1.jpg' },
+      { url: 'https://res.cloudinary.com/demo/image/upload/factura.pdf', name: longName },
+      { url: '', name: 'invalido' },
+      null,
+      { url: 'sin-nombre' },
+      { name: 'sin-url' }
+    ];
+
+    const normalized = normalizeManualExpenseInput({
+      title: 'Comida',
+      amount: 25,
+      date: '2026-07-02',
+      receipts
+    });
+
+    expect(normalized.receipts).toHaveLength(3);
+    expect(normalized.receipts[0]).toEqual({
+      url: 'https://res.cloudinary.com/demo/image/upload/ticket-1.jpg',
+      name: 'ticket-1.jpg'
+    });
+    expect(normalized.receipts[1].name.length).toBe(160);
+    expect(normalized.receipts[2]).toEqual({ url: 'sin-nombre', name: 'Recibo' });
+  });
+
+  it('incluye los recibos al construir el libro de gastos manuales', () => {
+    const ledger = buildExpenseLedger({
+      currency: 'EUR',
+      manual: [{
+        id: 'm1',
+        title: 'Peaje',
+        amount: 8,
+        date: '2026-07-01',
+        category: 'transport',
+        status: 'paid',
+        method: 'card',
+        receipts: [
+          { url: 'https://res.cloudinary.com/demo/image/upload/peaje.jpg', name: 'peaje.jpg' }
+        ]
+      }],
+      payments: [],
+      inventoryMovements: []
+    });
+
+    expect(ledger[0].receipts).toEqual([
+      { url: 'https://res.cloudinary.com/demo/image/upload/peaje.jpg', name: 'peaje.jpg' }
+    ]);
+  });
+
+  it('encuentra gastos por el nombre de un recibo adjunto', () => {
+    const expenses = [
+      {
+        source: 'manual',
+        status: 'paid',
+        category: 'food',
+        date: '2026-07-02',
+        title: 'Comida cliente',
+        amount: 20,
+        receipts: [{ url: 'https://res.cloudinary.com/demo/image/upload/ticket-123.jpg', name: 'ticket-123.jpg' }]
+      }
+    ];
+
+    expect(filterExpenseLedger(expenses, { search: 'ticket-123' })).toHaveLength(1);
+    expect(filterExpenseLedger(expenses, { search: 'no-existe' })).toEqual([]);
+  });
 });
