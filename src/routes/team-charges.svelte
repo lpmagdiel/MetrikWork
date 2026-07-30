@@ -1007,13 +1007,16 @@
 
 <style>
   .team-charges-page {
-    min-height: 100%;
+    height: 100%;
     padding: 24px 20px var(--bottom-nav-clearance);
     padding-top: var(--page-top-safe);
     box-sizing: border-box;
     background: var(--bg-page);
     color: var(--text-primary);
     overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
 
   .charges-content {

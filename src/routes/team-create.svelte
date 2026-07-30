@@ -140,9 +140,12 @@
 
 <style>
   .create-team-page {
-    min-height: 100%;
+    height: 100%;
     box-sizing: border-box;
     overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
     padding: var(--page-top-safe) 18px calc(var(--bottom-nav-clearance) + 28px);
     background: var(--bg-page);
   }
