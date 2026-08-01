@@ -21,7 +21,7 @@ export function subscribeToNotes(uid) {
     });
 }
 
-export async function addNote(uid, content, date, title = '', type = 'text', items = [], color = '#ffffff') {
+export async function addNote(uid, content, date, title = '', type = 'text', items = [], color = '#ffffff', extraData = {}) {
     if (!uid) return;
     try {
         const noteData = {
@@ -31,7 +31,8 @@ export async function addNote(uid, content, date, title = '', type = 'text', ite
             type,
             items,
             color,
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            ...extraData
         };
         const docRef = await addDoc(collection(db, 'users', uid, 'notes'), noteData);
         return docRef.id;

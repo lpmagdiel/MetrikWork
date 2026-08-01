@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Budget PDF Test</title></head>
+<body>
+<div id="output">Loading...</div>
+<script type="module">
+try {
+  const response = await fetch('/assets/budgets-D6Exd4WU.js');
+  if (!response.ok) throw new Error('fetch failed: ' + response.status);
+  const code = await response.text();
+  document.getElementById('output').innerText = 'OK, bundle size: ' + code.length + ' bytes. Has renderSection: ' + code.includes('renderSection') + ', has psLogo: ' + code.includes('C_lPBJFl');
+} catch (e) {
+  document.getElementById('output').innerText = 'Error: ' + e.message;
+}
+</script>
+</body></html>
