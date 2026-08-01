@@ -3,18 +3,23 @@
     AlertCircle,
     Camera,
     CalendarDays,
+    CheckCircle2,
     ChevronDown,
     CreditCard,
+    Eye,
+    EyeOff,
     Mail,
     Palette,
     Pencil,
     Plus,
+    Power,
     Save,
     Trash2,
     UserMinus,
     UserPlus,
     Users,
-  } from "lucide-svelte";
+    XCircle,
+} from "lucide-svelte";
   import {
     selectedTeam,
     selectedTeamId,
@@ -30,6 +35,8 @@
     removeTeamMember,
     leaveTeam,
     deleteTeam,
+    setTeamActive,
+    setTeamHidden,
     createCustomRoleId,
     createDefaultMemberPermissions,
     createPermissionsFromTeamRole,
@@ -83,9 +90,13 @@
   let customRoleName = $state("");
   let customRoleDescription = $state("");
   let customRolePermissions = $state(createDefaultMemberPermissions());
+  let teamActive = $state(true);
+  let teamHidden = $state(false);
   let isSavingProfile = $state(false);
   let isSavingCustomRole = $state(false);
   let isAddingMember = $state(false);
+  let isTogglingActive = $state(false);
+  let isTogglingHidden = $state(false);
   let showNewMemberPermissions = $state(false);
   let openPermissionMemberId = $state(null);
   let roleTemplates = $derived(getTeamRoleTemplates({ customRoles }));
@@ -136,6 +147,8 @@
       photoPreview = team.photoURL || "";
       pendingPhoto = "";
       customRoles = normalizeCustomTeamRoles(team.customRoles);
+      teamActive = team.active !== false;
+      teamHidden = team.hidden === true;
       const nextEditingPermissions = {};
       const nextSelectedMemberRoles = {};
       for (const memberId of team.members || []) {
@@ -562,6 +575,70 @@
     }
   }
 
+  async function handleToggleActive() {
+    if (!team?.id || !isAdmin || isTogglingActive) return;
+    const nextState = !teamActive;
+    const confirmed = await confirmAlert({
+      title: nextState ? "Activar equipo" : "Desactivar equipo",
+      text: nextState
+        ? "El equipo volverá a aparecer en tu lista de equipos activos."
+        : "El equipo se ocultará de tu lista de equipos activos. Los datos y miembros se conservan.",
+      confirmButtonText: nextState ? "Activar" : "Desactivar",
+    });
+    if (!confirmed) return;
+
+    isTogglingActive = true;
+    try {
+      await setTeamActive(team.id, nextState);
+      teamActive = nextState;
+      await showSuccessAlert(
+        nextState ? "Equipo activado" : "Equipo desactivado",
+        nextState
+          ? "El equipo ya es visible en la lista principal."
+          : "Se ocultó de la lista. Puedes mostrarlo desde la vista de equipos.",
+      );
+    } catch (error) {
+      await showErrorAlert(
+        "Error al cambiar el estado",
+        error?.message || "No se pudo cambiar el estado del equipo.",
+      );
+    } finally {
+      isTogglingActive = false;
+    }
+  }
+
+  async function handleToggleHidden() {
+    if (!team?.id || !isAdmin || isTogglingHidden) return;
+    const willHide = !teamHidden;
+    const confirmed = await confirmAlert({
+      title: willHide ? "Ocultar este equipo" : "Mostrar este equipo",
+      text: willHide
+        ? "El equipo no aparecerá en tu lista principal hasta que lo vuelvas a mostrar. Los datos y miembros se conservan intactos."
+        : "El equipo volverá a aparecer en tu lista principal.",
+      confirmButtonText: willHide ? "Ocultar" : "Mostrar",
+    });
+    if (!confirmed) return;
+
+    isTogglingHidden = true;
+    try {
+      await setTeamHidden(team.id, willHide);
+      teamHidden = willHide;
+      await showSuccessAlert(
+        willHide ? "Equipo oculto" : "Equipo visible",
+        willHide
+          ? "El equipo ya no aparece en tu lista. Puedes mostrarlo desde la vista de equipos con el icono del ojo."
+          : "El equipo vuelve a aparecer en tu lista principal.",
+      );
+    } catch (error) {
+      await showErrorAlert(
+        "Error al cambiar la visibilidad",
+        error?.message || "No se pudo cambiar la visibilidad del equipo.",
+      );
+    } finally {
+      isTogglingHidden = false;
+    }
+  }
+
   async function handleSavePermissions(memberId) {
     if (!team?.id || !canEditSettings || memberId === team.admin) return;
     try {
@@ -777,6 +854,82 @@
             Se usará para pagos, presupuestos, ubicaciones, inventario y estadísticas del equipo.
           </p>
         </div>
+
+        {#if isAdmin}
+          <div class="profile-fields settings-field compact-field">
+            <label for="teamActive">Estado del equipo</label>
+
+            <article class="flag-card" class:flag-card-active={teamActive} class:flag-card-inactive={!teamActive}>
+              <div class="flag-icon">
+                {#if teamActive}
+                  <CheckCircle2 size={20} />
+                {:else}
+                  <Power size={20} />
+                {/if}
+              </div>
+              <div class="flag-body">
+                <strong>{teamActive ? "Equipo activo" : "Equipo inactivo"}</strong>
+                <small>
+                  {teamActive
+                    ? "La obra está en marcha. El equipo aparece en la lista principal."
+                    : "La obra está cerrada. El equipo se ocultará de tu lista por defecto."}
+                </small>
+              </div>
+              <button
+                type="button"
+                class="ios-switch"
+                class:on={teamActive}
+                onclick={handleToggleActive}
+                disabled={isTogglingActive}
+                aria-pressed={teamActive}
+                aria-label={teamActive ? "Desactivar equipo" : "Activar equipo"}
+              >
+                <span class="ios-switch-handle"></span>
+              </button>
+            </article>
+
+            <p class="field-help">
+              Los equipos inactivos se ocultan de tu lista por defecto. Puedes verlos pulsando el icono del ojo en la página de equipos.
+            </p>
+          </div>
+
+          <div class="profile-fields settings-field compact-field">
+            <label for="teamHidden">Visibilidad en tu lista</label>
+
+            <article class="flag-card" class:flag-card-visible={!teamHidden} class:flag-card-hidden={teamHidden}>
+              <div class="flag-icon">
+                {#if teamHidden}
+                  <EyeOff size={20} />
+                {:else}
+                  <Eye size={20} />
+                {/if}
+              </div>
+              <div class="flag-body">
+                <strong>{teamHidden ? "Oculto de tu lista" : "Visible en tu lista"}</strong>
+                <small>
+                  {teamHidden
+                    ? "Solo aparecerá cuando actives el icono del ojo en la página de equipos."
+                    : "Este equipo aparece en tu lista principal junto al resto."}
+                </small>
+              </div>
+              <button
+                type="button"
+                class="ios-switch"
+                class:on={!teamHidden}
+                onclick={handleToggleHidden}
+                disabled={isTogglingHidden}
+                aria-pressed={!teamHidden}
+                aria-label={teamHidden ? "Mostrar en la lista" : "Ocultar de la lista"}
+              >
+                <span class="ios-switch-handle"></span>
+              </button>
+            </article>
+
+            <p class="field-help">
+              Puedes ocultar este equipo concreto de tu lista principal sin cambiar su estado. Útil para obras ya cerradas que solo quieres consultar de vez en cuando.
+            </p>
+          </div>
+        {/if}
 
         <details class="settings-panel">
           <summary class="settings-summary">
@@ -1703,6 +1856,156 @@
     background: transparent;
     margin: 0;
     padding-left: 0;
+  }
+
+  .flag-card {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    margin-top: 6px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+    transition: border-color 0.18s ease, background 0.18s ease;
+  }
+
+  .flag-card-active {
+    background: color-mix(in srgb, var(--success-color) 6%, var(--bg-card));
+    border-color: color-mix(in srgb, var(--success-color) 32%, var(--border-color));
+  }
+
+  .flag-card-inactive {
+    background: color-mix(in srgb, var(--warning-color) 6%, var(--bg-card));
+    border-color: color-mix(in srgb, var(--warning-color) 32%, var(--border-color));
+  }
+
+  .flag-card-visible {
+    background: color-mix(in srgb, var(--info-color) 6%, var(--bg-card));
+    border-color: color-mix(in srgb, var(--info-color) 32%, var(--border-color));
+  }
+
+  .flag-card-hidden {
+    background: var(--bg-input);
+    border-color: var(--border-color);
+    border-style: dashed;
+  }
+
+  .flag-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    transition: background 0.18s ease, color 0.18s ease;
+  }
+
+  .flag-card-active .flag-icon {
+    background: var(--bg-success-subtle);
+    color: var(--success-color);
+  }
+
+  .flag-card-inactive .flag-icon {
+    background: var(--bg-warning-subtle);
+    color: var(--warning-color);
+  }
+
+  .flag-card-visible .flag-icon {
+    background: var(--bg-info-subtle);
+    color: var(--info-color);
+  }
+
+  .flag-card-hidden .flag-icon {
+    background: var(--bg-card);
+    color: var(--text-secondary);
+  }
+
+  .flag-body {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .flag-body strong {
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1.2;
+  }
+
+  .flag-body small {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.35;
+  }
+
+  .ios-switch {
+    position: relative;
+    width: 52px;
+    height: 30px;
+    flex-shrink: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--text-secondary) 32%, var(--bg-card));
+    cursor: pointer;
+    transition: background 0.22s ease;
+    appearance: none;
+  }
+
+  .ios-switch:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--text-secondary) 42%, var(--bg-card));
+  }
+
+  .ios-switch.on {
+    background: var(--success-color);
+  }
+
+  .flag-card-visible .ios-switch.on,
+  .flag-card-hidden .ios-switch.on {
+    background: var(--success-color);
+  }
+
+  .flag-card-inactive .ios-switch.on {
+    background: var(--warning-color);
+  }
+
+  .ios-switch:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .ios-switch-handle {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 24px;
+    height: 24px;
+    background: #ffffff;
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.18);
+    transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.2, 1.2);
+    will-change: transform;
+  }
+
+  .ios-switch.on .ios-switch-handle {
+    transform: translateX(22px);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ios-switch,
+    .ios-switch-handle,
+    .flag-card,
+    .flag-icon {
+      transition: none;
+    }
   }
 
   .section-heading-row,

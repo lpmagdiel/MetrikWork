@@ -16,6 +16,7 @@
   import {
     Bell,
     BellRing,
+    Briefcase,
     Calendar,
     CalendarCheck,
     CheckCircle2,
@@ -35,6 +36,7 @@
     Inbox,
     TriangleAlert,
     UserPlus,
+    ScrollText,
   } from "lucide-svelte";
   import { collection, getDocs } from "firebase/firestore";
   import { db } from "../data/firebase.js";
@@ -899,12 +901,18 @@
 
     <!-- Quick Actions Row -->
     <div class="quick-actions-row">
-      <a href="/teams" class="action-btn">
-        <div class="action-icon-box teams">
-          <Users size={28} />
+      <button type="button" class="action-btn" onclick={() => navigateTo("/clients")}>
+        <div class="action-icon-box clients">
+          <Briefcase size={28} />
         </div>
-        <span class="action-label">Equipos</span>
-      </a>
+        <span class="action-label">Clientes</span>
+      </button>
+      <button type="button" class="action-btn" onclick={() => navigateTo("/budgets")}>
+        <div class="action-icon-box budgets">
+          <ScrollText size={28} />
+        </div>
+        <span class="action-label">Presupuestos</span>
+      </button>
       <button type="button" class="action-btn" onclick={openMyStats}>
         <div class="action-icon-box stats">
           <TrendingUp size={28} />
@@ -1972,6 +1980,16 @@
   .action-icon-box.teams {
     background: var(--bg-purple-subtle);
     color: var(--purple-color);
+  }
+
+  .action-icon-box.clients {
+    background: var(--bg-info-subtle);
+    color: var(--info-color);
+  }
+
+  .action-icon-box.budgets {
+    background: var(--bg-warning-subtle);
+    color: var(--warning-color);
   }
 
   .action-icon-box.stats {

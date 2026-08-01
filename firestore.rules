@@ -99,8 +99,50 @@ service cloud.firestore {
                "memberPermissions",
                "members",
                "membersData",
+               "active",
+               "hidden",
                "updatedAt"
              ]);
+    }
+
+    function isValidClientData(data) {
+      return data.name is string &&
+             data.name.size() > 0 &&
+             data.name.size() <= 120 &&
+             (!("taxId" in data) || data.taxId is string) &&
+             (!("email" in data) || data.email is string) &&
+             (!("phone" in data) || data.phone is string) &&
+             (!("address" in data) || data.address is string) &&
+             (!("contactName" in data) || data.contactName is string) &&
+             (!("notes" in data) || data.notes is string) &&
+             (!("active" in data) || data.active is bool);
+    }
+
+    function isValidBudgetData(data) {
+      return data.title is string &&
+             data.title.size() > 0 &&
+             data.amount is number &&
+             data.amount >= 0 &&
+             (!("description" in data) || data.description is string) &&
+             (!("clientId" in data) || data.clientId is string) &&
+             (!("clientName" in data) || data.clientName is string) &&
+             (!("validUntil" in data) || data.validUntil is string) &&
+             data.status in ["pending", "accepted", "rejected", "expired"];
+    }
+
+    function isValidChecklistItemData(data) {
+      return data.title is string &&
+             data.title.size() >= 2 &&
+             data.title.size() <= 240 &&
+             data.status in ["pending", "done"] &&
+             data.includesLabor is bool &&
+             data.includesMaterials is bool &&
+             data.order is number &&
+             (!("notes" in data) || data.notes is string) &&
+             (!("assignedTo" in data) || data.assignedTo is string) &&
+             (!("assignedToName" in data) || data.assignedToName is string) &&
+             (!("completedAt" in data) || data.completedAt is string) &&
+             (!("completedBy" in data) || data.completedBy is string);
     }
 
     function isAllowedTeamCreateShape() {
@@ -117,6 +159,7 @@ service cloud.firestore {
                "billingAmountEur",
                "teamSize",
                "maxMembers",
+               "active",
                "createdAt"
              ]) &&
              request.resource.data.keys().hasAll([
@@ -132,6 +175,7 @@ service cloud.firestore {
                "billingAmountEur",
                "teamSize",
                "maxMembers",
+               "active",
                "createdAt"
              ]) &&
              request.resource.data.team is string &&
@@ -989,6 +1033,48 @@ service cloud.firestore {
                     request.resource.data.amount > 0 &&
                     request.resource.data.amount <= 1000000000;
       allow delete: if hasTeamPermission(resource.data.teamId, "payments", "delete");
+    }
+
+    // --- CLIENTES DE LA EMPRESA (globales, no ligados a un equipo) ---
+    // La app pertenece a una sola empresa constructora. Los clientes son
+    // relaciones comerciales compartidas y todos los miembros de los
+    // equipos pueden consultarlos. La creación/edición/eliminación está
+    // reservada al administrador de la empresa para evitar duplicados
+    // y mantener la calidad del maestro de clientes.
+    match /clients/{clientId} {
+      allow read: if request.auth != null;
+      allow create: if isSystemAdmin() &&
+                    isValidClientData(request.resource.data);
+      allow update: if isSystemAdmin() &&
+                    isValidClientData(request.resource.data);
+      allow delete: if isSystemAdmin();
+    }
+
+    // --- PRESUPUESTOS DE LA EMPRESA (globales, no ligados a un equipo) ---
+    // Los presupuestos son documentos comerciales compartidos. Cualquier
+    // miembro puede verlos para entender las ofertas activas. Solo el
+    // administrador de la empresa puede crearlos, editarlos o
+    // eliminarlos para garantizar coherencia.
+    match /budgets/{budgetId} {
+      allow read: if request.auth != null;
+      allow create: if isSystemAdmin() &&
+                    isValidBudgetData(request.resource.data);
+      allow update: if isSystemAdmin() &&
+                    isValidBudgetData(request.resource.data);
+      allow delete: if isSystemAdmin();
+
+      // Checklist asociado al presupuesto. Solo el system admin puede
+      // crear/editar/eliminar items para mantener la coherencia con la
+      // política del documento padre. Los items se renderizan también
+      // en el PDF exportado del presupuesto.
+      match /checklist/{itemId} {
+        allow read: if request.auth != null;
+        allow create: if isSystemAdmin() &&
+                      isValidChecklistItemData(request.resource.data);
+        allow update: if isSystemAdmin() &&
+                      isValidChecklistItemData(request.resource.data);
+        allow delete: if isSystemAdmin();
+      }
     }
   }
 }

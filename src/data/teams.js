@@ -126,6 +126,8 @@ export async function createTeam(teamName, { size = 'S' } = {}) {
             billingAmountEur,
             teamSize: teamSizeData.teamSize,
             maxMembers: teamSizeData.maxMembers,
+            active: true,
+            hidden: false,
             createdAt: now
         };
 
@@ -412,6 +414,46 @@ export async function deleteTeam(teamId) {
         await deleteDoc(doc(db, 'teams', teamId));
     } catch (error) {
         console.error("Error deleting team:", error);
+        throw error;
+    }
+}
+
+export async function setTeamActive(teamId, active) {
+    const user = get(userStore);
+    if (!user || !teamId) throw new Error("Datos no válidos");
+    const teamSnapshot = await getDoc(doc(db, 'teams', teamId));
+    if (!teamSnapshot.exists()) throw new Error("Equipo no encontrado");
+    const teamData = teamSnapshot.data();
+    if (teamData.admin !== user.uid) {
+        throw new Error("Solo el administrador puede cambiar el estado del equipo");
+    }
+    try {
+        await updateDoc(doc(db, 'teams', teamId), {
+            active: Boolean(active),
+            updatedAt: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error("Error updating team active state:", error);
+        throw error;
+    }
+}
+
+export async function setTeamHidden(teamId, hidden) {
+    const user = get(userStore);
+    if (!user || !teamId) throw new Error("Datos no válidos");
+    const teamSnapshot = await getDoc(doc(db, 'teams', teamId));
+    if (!teamSnapshot.exists()) throw new Error("Equipo no encontrado");
+    const teamData = teamSnapshot.data();
+    if (teamData.admin !== user.uid) {
+        throw new Error("Solo el administrador puede ocultar el equipo");
+    }
+    try {
+        await updateDoc(doc(db, 'teams', teamId), {
+            hidden: Boolean(hidden),
+            updatedAt: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error("Error updating team hidden state:", error);
         throw error;
     }
 }

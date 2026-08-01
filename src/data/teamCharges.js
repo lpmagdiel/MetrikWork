@@ -93,6 +93,11 @@ function buildChargeDoc(data = {}, user = {}) {
         title: normalizeText(data.title, 'Cobro'),
         description: normalizeText(data.description),
         amount,
+        taxRate: (() => {
+            const value = Number(data.taxRate);
+            if (!Number.isFinite(value) || value < 0) return 0;
+            return Math.round(value * 100) / 100;
+        })(),
         currency: normalizeText(data.currency, 'MXN').toUpperCase(),
         method: normalizeMethod(data.method),
         status,

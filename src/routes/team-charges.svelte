@@ -32,12 +32,15 @@
     addTeamChargeTemplate,
     deleteTeamChargeTemplate,
     hasTeamPermission,
+    subscribeToCompanyClients,
+    companyClientsStore,
   } from "../data/stores.js";
   import { createNotification } from "../data/notifications.js";
   import { navigateTo } from "../router.js";
   import { confirmAlert } from "../data/alerts.js";
-  import { openPrintableReport } from "../helpers/reportExport.js";
+  import { openInvoiceReport } from "../helpers/invoiceReport.js";
   import CircleAddButton from "../components/CircleAddButton.svelte";
+  import ClientPicker from "../components/ClientPicker.svelte";
   import SliceContainer from "../components/SliceContainer.svelte";
   import TitleHeader from "../components/TitleHeader.svelte";
   import Toast from "../components/Toast.svelte";
@@ -86,6 +89,7 @@
   let typeToast = $state("success");
   let showToast = $state(false);
   let chargeForm = $state(createDefaultChargeForm());
+  let selectedClientFromPicker = $state(null);
   let reminderInFlight = new Set();
 
   let filteredCharges = $derived.by(() => {
@@ -128,6 +132,13 @@
     } else {
       subscribeToTeamLocations(null);
     }
+  });
+
+  $effect(() => {
+    if (teamId && canViewCharges) {
+      return subscribeToCompanyClients();
+    }
+    return subscribeToCompanyClients();
   });
 
   $effect(() => {
@@ -189,6 +200,7 @@
       title: "",
       description: "",
       amount: "",
+      taxRate: "",
       method: "transfer",
       status: "paid",
       rangeType: "days",
@@ -274,6 +286,7 @@
         ...loadCompanyDefaults(),
       },
     };
+    selectedClientFromPicker = null;
     formError = "";
     showChargeForm = true;
   }
@@ -282,6 +295,33 @@
     showChargeForm = false;
     formError = "";
     isSaving = false;
+    selectedClientFromPicker = null;
+  }
+
+  function applyClientToForm(client) {
+    if (!client) return;
+    selectedClientFromPicker = client;
+    chargeForm.client = {
+      name: client.name || "",
+      taxId: client.taxId || "",
+      email: client.email || "",
+      phone: client.phone || "",
+      address: client.address || "",
+    };
+  }
+
+  function clearClientFromForm() {
+    selectedClientFromPicker = null;
+    chargeForm.client = createDefaultChargeForm().client;
+  }
+
+  function handleCreateClientRequested() {
+    // Solo el admin de la empresa puede crear clientes. Pedimos al usuario
+    // que vaya a la sección de Clientes para registrar uno nuevo.
+    showNotification(
+      "Pide al administrador de la empresa que cree el cliente en la sección Clientes.",
+      "info"
+    );
   }
 
   function clone(value) {
@@ -318,10 +358,12 @@
   function getChargePayloadFromForm() {
     const selectedLocation = getSelectedLocation();
     const isRecurring = chargeForm.rangeType === "recurring" || chargeForm.recurrence.enabled;
+    const taxRateNumber = Number(chargeForm.taxRate);
     return {
       title: chargeForm.title.trim() || `Cobro ${chargeForm.client.name || "cliente"}`,
       description: chargeForm.description.trim(),
       amount: Number(chargeForm.amount) || 0,
+      taxRate: Number.isFinite(taxRateNumber) && taxRateNumber >= 0 ? taxRateNumber : 0,
       currency,
       method: chargeForm.method,
       status: chargeForm.status,
@@ -580,60 +622,7 @@
   }
 
   function generateInvoice(charge) {
-    const company = charge.company || {};
-    const client = charge.client || {};
-    const companyName = company.name || team?.name || "Empresa";
-    const clientName = client.name || "Cliente";
-
-    const ok = openPrintableReport({
-      title: `Factura ${charge.invoiceNumber || ""}`.trim(),
-      subtitle: companyName,
-      meta: [
-        { label: "Empresa", value: companyName },
-        { label: "NIF/CIF empresa", value: company.taxId || "Sin dato" },
-        { label: "Cliente", value: clientName },
-        { label: "NIF/CIF cliente", value: client.taxId || "Sin dato" },
-        { label: "Fecha de cobro", value: formatDate(charge.dueDate || charge.endDate || charge.startDate) },
-        { label: "Método", value: methodLabels[charge.method] || charge.method || "Sin método" },
-      ],
-      sections: [
-        {
-          title: "Datos de contacto",
-          headers: ["Parte", "Email", "Teléfono", "Dirección"],
-          rows: [
-            ["Empresa", company.email || "", company.phone || "", company.address || ""],
-            ["Cliente", client.email || "", client.phone || "", client.address || ""],
-          ],
-        },
-        {
-          title: "Datos de pago",
-          headers: ["Método", "Banco", "IBAN / cuenta", "Bizum"],
-          rows: [[methodLabels[charge.method] || charge.method || "", company.bankName || "", company.iban || "", company.bizum || ""]],
-        },
-        {
-          title: "Detalle del cobro",
-          headers: ["Concepto", "Periodo", "Estado", "Importe"],
-          rows: [
-            [
-              charge.title || "Cobro",
-              getPeriodLabel(charge),
-              statusLabels[charge.status] || "Pendiente",
-              formatMoney(charge.amount),
-            ],
-          ],
-        },
-        {
-          title: "Total",
-          headers: ["Moneda", "Total"],
-          rows: [[charge.currency || currency, formatMoney(charge.amount)]],
-        },
-      ],
-      signatures: [
-        { label: "Firma de la empresa", name: companyName },
-        { label: "Firma del cliente", name: clientName },
-      ],
-    });
-
+    const ok = openInvoiceReport({ charge, team });
     if (!ok) {
       showNotification("Permite ventanas emergentes para generar la factura.", "error");
     }
@@ -796,6 +785,17 @@
 
         <div class="form-section">
           <h3>Cliente</h3>
+          {#if canCreatePayments}
+            <ClientPicker
+              clients={$companyClientsStore}
+              selectedClient={selectedClientFromPicker}
+              onSelect={applyClientToForm}
+              onClear={clearClientFromForm}
+              onCreateNew={handleCreateClientRequested}
+              label="Cliente registrado en la empresa"
+              allowCreate={true}
+            />
+          {/if}
           <div class="form-grid">
             <label>
               <span>Nombre</span>
@@ -834,6 +834,17 @@
             <label>
               <span>Importe</span>
               <input type="number" min="0" step="0.01" bind:value={chargeForm.amount} placeholder="0.00" />
+            </label>
+            <label>
+              <span>IVA (%)</span>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                bind:value={chargeForm.taxRate}
+                placeholder="21"
+              />
             </label>
             <label>
               <span>Método</span>

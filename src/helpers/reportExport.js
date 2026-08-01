@@ -30,6 +30,9 @@ function buildRows(rows = []) {
 }
 
 function buildSection(section) {
+  if (typeof section.renderSection === "function") {
+    return section.renderSection(section);
+  }
   const headers = section.headers || [];
   const rows = section.rows?.length ? section.rows : [["Sin datos"]];
   const colspan = Math.max(headers.length, rows[0]?.length || 1);
@@ -55,6 +58,11 @@ function buildSection(section) {
   `;
 }
 
+function renderMetaValue(item) {
+  if (item?.html) return item.value || "";
+  return escapeHtml(item.value ?? "");
+}
+
 function buildSignatures(signatures = []) {
   if (!signatures.length) return "";
 
@@ -76,9 +84,20 @@ function buildSignatures(signatures = []) {
   `;
 }
 
-function buildReportHtml({ title, subtitle = "", meta = [], sections = [], signatures = [] }, options = {}) {
+function buildReportHtml({
+  title,
+  subtitle = "",
+  meta = [],
+  sections = [],
+  signatures = [],
+  customStyles = "",
+  footerHtml = "",
+  headerHtml = ""
+}, options = {}) {
   const generatedAt = new Date().toLocaleString("es-ES");
   const includeActions = options.includeActions !== false;
+  // generatedAt se inyecta dentro de `headerHtml` cuando hace falta;
+  // el header por defecto ya no lo usa.
   return `<!doctype html>
 <html lang="es">
 <head>
@@ -203,6 +222,7 @@ function buildReportHtml({ title, subtitle = "", meta = [], sections = [], signa
       .page { border: 0; max-width: none; }
       .actions { display: none; }
     }
+    ${customStyles}
   </style>
 </head>
 <body>
@@ -215,13 +235,17 @@ function buildReportHtml({ title, subtitle = "", meta = [], sections = [], signa
       : ""
   }
   <main class="page">
-    <header>
-      <div>
-        <h1>${escapeHtml(title)}</h1>
-        ${subtitle ? `<p class="muted">${escapeHtml(subtitle)}</p>` : ""}
-      </div>
-      <p class="muted">Generado: ${escapeHtml(generatedAt)}</p>
-    </header>
+    ${
+      headerHtml
+        ? headerHtml
+        : `<header>
+            <div>
+              <h1>${escapeHtml(title)}</h1>
+              ${subtitle ? `<p class="muted">${escapeHtml(subtitle)}</p>` : ""}
+            </div>
+            <p class="muted">Generado: ${escapeHtml(generatedAt)}</p>
+          </header>`
+    }
     ${
       meta.length
         ? `<section class="meta">${meta
@@ -229,7 +253,7 @@ function buildReportHtml({ title, subtitle = "", meta = [], sections = [], signa
               (item) => `
                 <div>
                   <span class="label">${escapeHtml(item.label)}</span>
-                  <span class="value">${escapeHtml(item.value)}</span>
+                  <span class="value">${renderMetaValue(item)}</span>
                 </div>
               `,
             )
@@ -237,6 +261,7 @@ function buildReportHtml({ title, subtitle = "", meta = [], sections = [], signa
         : ""
     }
     ${sections.map(buildSection).join("")}
+    ${footerHtml}
     ${buildSignatures(signatures)}
   </main>
 </body>

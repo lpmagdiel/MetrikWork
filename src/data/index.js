@@ -26,4 +26,8 @@ export * from './offlineQueue.js';
 export * from './offlineActions.js';
 export * from './ui.js';
 export * from './cookieConsent.js';
+export * from './clients.js';
+export * from './budgets.js';
+export * from './budgetChecklist.js';
+export * from './invoices.js';
 export { auth, db, googleProvider } from './firebase.js';

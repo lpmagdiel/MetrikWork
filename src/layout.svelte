@@ -193,6 +193,8 @@
   const routeLoaders = {
     "/": () => import("./routes/home.svelte"),
     "/teams": () => import("./routes/teams.svelte"),
+    "/clients": () => import("./routes/clients.svelte"),
+    "/budgets": () => import("./routes/budgets.svelte"),
     "/login": () => import("./routes/login.svelte"),
     "/hello": () => import("./routes/hello.svelte"),
     "/terms": () => import("./routes/terms.svelte"),
