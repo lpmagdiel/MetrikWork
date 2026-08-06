@@ -7,20 +7,18 @@
  * `localStorage.lastUpdateFeaturesVersion`.
  */
 export const updateData = {
-    version: "1.0.0", // Actualiza este valor en cada release
-    message: "MetricWork 1.0 - Empresa unica con equipos de obra",
+    version: "1.1.0", // Actualiza este valor en cada release
+    message: "MetricWork 1.1 - Creacion de equipos simplificada y sin planes",
     features: [
-        "Nuevo modelo de empresa: la aplicacion pasa a ser de una sola empresa constructora. Los clientes y presupuestos ya no dependen de un equipo, son globales y los comparten todos los equipos de trabajo.",
-        "Modulo de Clientes (/clients) con busqueda fuzzy, validacion de email, normalizacion de telefonos y soporte para clientes activos e inactivos. Solo el administrador puede crear o modificar clientes.",
-        "Modulo de Presupuestos (/budgets) ligado a clientes globales. Incluye titulo, importe, moneda, fecha de validez y motivo de rechazo. Puedes aceptar o rechazar cada presupuesto.",
-        "Aceptar un presupuesto crea automaticamente un cobro en el equipo que elijas, con rollback si la operacion falla. Los presupuestos aceptados quedan ocultos en la lista principal.",
-        "Nuevo selector de equipo al aceptar presupuestos: si solo tienes un equipo elegible se aplica directamente, si tienes varios aparece un picker.",
-        "Equipos: nuevo campo 'activo' para distinguir obras en curso de cerradas, y campo 'oculto' para esconder proyectos finalizados sin perder datos.",
-        "Lista de equipos con icono de ojo en la parte superior: muestra u oculta los equipos no visibles mediante un badge con el conteo.",
-        "Buscador de clientes en el formulario de cobros (ClientPicker) con debounce, teclado completo (Enter, Arrow, Escape) y soporte para crearlos desde alli.",
-        "Refactor de la arquitectura de datos: cobros siguen siendo por equipo, pero clientes y presupuestos son colecciones top-level con reglas de Firestore mas simples y seguras.",
-        "Permisos: lectura de clientes y presupuestos abierta a cualquier usuario autenticado, CRUD reservado al system admin para mantener el maestro de clientes limpio y coherente.",
-        "Rediseño de los flags de configuracion del equipo con cards horizontales e interruptores estilo iOS, en armonia con el resto del diseno general de la aplicacion.",
-        "Suite de tests ampliada de 60 a 116 tests cubriendo normalizacion, suscripciones, validaciones, rollback transaccional y reglas de Firestore.",
+        "Creacion de equipos mas simple: ahora solo necesitas escribir un nombre para crear un equipo nuevo. Ya no hay que elegir plan ni capacidad al dar de alta un equipo.",
+        "Eliminamos los planes G/S/M/L y los campos de facturacion (teamSize, maxMembers, billingAmountEur, billingDate) del flujo de alta. Los equipos ya no tienen limite rigido de miembros impuesto por la aplicacion.",
+        "Permisos confirmados para fabiansolares719@gmail.com como administrador del sistema, junto al resto de correos administradores ya configurados.",
+        "Panel de administracion (/system-admin) actualizado: la tarjeta 'Planes mensuales' desaparece y las fichas de equipo ya no muestran el plan, solo el nombre y el numero de miembros.",
+        "Ajustes de equipo (/teams/:id/settings) rediseñados: se retiran las tarjetas de 'Plan actual', 'Fecha de pago' y 'Cantidad a pagar' para evitar referencias a planes que ya no se utilizan.",
+        "Reglas de Firestore actualizadas: isAllowedTeamCreateShape deja de exigir campos de plan y solo valida el nombre del equipo (1-80 caracteres), el admin y los miembros. Los campos restantes son opcionales pero se siguen validando si llegan en el documento.",
+        "isValidTeamSize y hasAvailableTeamMemberSlot son tolerantes con equipos sin campos de plan, evitando rechazos en equipos creados con el nuevo flujo.",
+        "Helpers de teamSizes.js neutralizados para mantener la compatibilidad con vistas legacy: getTeamSizeValue/getTeamMonthlyPrice/getTeamSizeOption/getTeamMemberLimit devuelven valores neutros (sin plan, sin precio, sin limite).",
+        "Cobertura de tests ampliada: nuevos tests para createTeam (nombre vacio, sin auth, no admin, fabiansolares719, sin campos de plan) y para las reglas de Firestore (no se exigen campos de plan, billingAmountEur y maxMembers son opcionales).",
+        "Suite de tests al dia: 193/193 tests pasan y el build de produccion se genera sin errores ni warnings nuevos.",
     ]
 };

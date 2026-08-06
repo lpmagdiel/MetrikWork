@@ -42,14 +42,19 @@ service cloud.firestore {
              );
     }
 
+    // Los planes ya no se utilizan. Esta función se conserva por compatibilidad
+    // histórica: si el documento no incluye campos de plan, simplemente devuelve true.
     function isValidTeamSize(size, maxMembers) {
-      return size is string &&
-             maxMembers is number &&
+      return (!("size" in request.resource.data) && !("teamSize" in request.resource.data)) ||
              (
-               (size == "G" && maxMembers == 1) ||
-               (size == "S" && maxMembers == 4) ||
-               (size == "M" && maxMembers == 10) ||
-               (size == "L" && maxMembers == 999)
+               size is string &&
+               maxMembers is number &&
+               (
+                 (size == "G" && maxMembers == 1) ||
+                 (size == "S" && maxMembers == 4) ||
+                 (size == "M" && maxMembers == 10) ||
+                 (size == "L" && maxMembers == 999)
+               )
              );
     }
 
@@ -62,6 +67,7 @@ service cloud.firestore {
     }
 
     function hasAvailableTeamMemberSlot(teamDocument) {
+      // Si no hay límite definido, siempre hay hueco disponible.
       return !teamDocument.keys().hasAny(["maxMembers"]) ||
              (
                teamDocument.maxMembers is number &&
@@ -153,13 +159,17 @@ service cloud.firestore {
                "members",
                "membersData",
                "memberPermissions",
+               "memberSettings",
                "projectBudget",
                "projectBudgetCurrency",
                "billingDate",
                "billingAmountEur",
                "teamSize",
                "maxMembers",
+               "photoURL",
+               "themePrimaryColor",
                "active",
+               "hidden",
                "createdAt"
              ]) &&
              request.resource.data.keys().hasAll([
@@ -171,25 +181,42 @@ service cloud.firestore {
                "memberPermissions",
                "projectBudget",
                "projectBudgetCurrency",
-               "billingDate",
-               "billingAmountEur",
-               "teamSize",
-               "maxMembers",
                "active",
                "createdAt"
              ]) &&
              request.resource.data.team is string &&
+             request.resource.data.team.size() > 0 &&
+             request.resource.data.team.size() <= 80 &&
              request.resource.data.adminEmail == request.auth.token.email &&
              request.resource.data.members.size() == 1 &&
              request.auth.uid in request.resource.data.members &&
+             request.resource.data.admin == request.auth.uid &&
              request.resource.data.projectBudget is number &&
              request.resource.data.projectBudgetCurrency is string &&
-             request.resource.data.billingAmountEur is number &&
-             isValidTeamSize(request.resource.data.teamSize, request.resource.data.maxMembers) &&
-             request.resource.data.members.size() <= request.resource.data.maxMembers &&
              (
+               !("billingAmountEur" in request.resource.data) ||
+               request.resource.data.billingAmountEur is number
+             ) &&
+             (
+               !("teamSize" in request.resource.data) ||
+               request.resource.data.teamSize is string
+             ) &&
+             (
+               !("maxMembers" in request.resource.data) ||
+               request.resource.data.maxMembers is number
+             ) &&
+             (
+               !("billingDate" in request.resource.data) ||
                request.resource.data.billingDate == null ||
                request.resource.data.billingDate is string
+             ) &&
+             (
+               !("active" in request.resource.data) ||
+               request.resource.data.active is bool
+             ) &&
+             (
+               !("hidden" in request.resource.data) ||
+               request.resource.data.hidden is bool
              );
     }
 

@@ -10,14 +10,11 @@
   import { navigateTo } from "../router.js";
   import {
     createTeam,
-    getTeamMonthlyPrice,
     selectedTeamId,
     systemAdminStore,
-    TEAM_SIZE_OPTIONS,
   } from "../data/stores.js";
 
   let teamName = $state("");
-  let selectedSize = $state("S");
   let creating = $state(false);
   let error = $state("");
 
@@ -38,7 +35,7 @@
 
     creating = true;
     try {
-      const id = await createTeam(name, { size: selectedSize });
+      const id = await createTeam(name);
       selectedTeamId.set(id);
       navigateTo(`/teams/${id}`);
     } catch (creationError) {
@@ -46,14 +43,6 @@
     } finally {
       creating = false;
     }
-  }
-
-  function formatPrice(size) {
-    return new Intl.NumberFormat("es-ES", {
-      style: "currency",
-      currency: "EUR",
-      maximumFractionDigits: 0,
-    }).format(getTeamMonthlyPrice(size));
   }
 </script>
 
@@ -85,7 +74,7 @@
     <section class="intro-card">
       <span class="eyebrow">Nuevo equipo</span>
       <h1>Crear equipo de trabajo</h1>
-      <p>El equipo quedará listo al instante y tú serás su administrador.</p>
+      <p>Elige un nombre para tu equipo. El equipo quedará listo al instante y tú serás su administrador.</p>
     </section>
 
     <form class="team-form" onsubmit={handleCreateTeam}>
@@ -103,29 +92,11 @@
         />
       </div>
 
-      <fieldset disabled={creating}>
-        <legend>Plan y capacidad</legend>
-        <div class="plan-grid">
-          {#each TEAM_SIZE_OPTIONS as option}
-            <button
-              type="button"
-              class:active={selectedSize === option.value}
-              aria-pressed={selectedSize === option.value}
-              onclick={() => (selectedSize = option.value)}
-            >
-              <span class="plan-name">Plan {option.label}</span>
-              <strong>{formatPrice(option.value)}</strong>
-              <small>{option.description}</small>
-            </button>
-          {/each}
-        </div>
-      </fieldset>
-
       {#if error}
         <p class="form-error" role="alert">{error}</p>
       {/if}
 
-      <button type="submit" class="primary-action" disabled={creating}>
+      <button type="submit" class="primary-action" disabled={creating || !teamName.trim()}>
         {#if creating}
           <span class="spin"><RefreshCw size={18} /></span>
           <span>Creando...</span>
@@ -238,8 +209,7 @@
     padding: 24px;
   }
 
-  label,
-  legend {
+  label {
     color: var(--text-primary);
     font-size: 14px;
     font-weight: 800;
@@ -272,53 +242,6 @@
     font: inherit;
   }
 
-  fieldset {
-    margin: 24px 0 0;
-    padding: 0;
-    border: 0;
-  }
-
-  .plan-grid {
-    margin-top: 10px;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-  }
-
-  .plan-grid button {
-    min-height: 112px;
-    padding: 15px;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 5px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    background: var(--bg-input);
-    color: var(--text-primary);
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .plan-grid button.active {
-    border-color: var(--accent-strong);
-    background: var(--bg-accent-subtle);
-    box-shadow: inset 0 0 0 1px var(--accent-strong);
-  }
-
-  .plan-name,
-  .plan-grid small {
-    color: var(--text-secondary);
-  }
-
-  .plan-grid strong {
-    font-size: 20px;
-  }
-
-  .plan-grid small {
-    line-height: 1.3;
-  }
-
   .form-error {
     margin: 16px 0 0;
     padding: 11px 13px;
@@ -346,8 +269,7 @@
     cursor: pointer;
   }
 
-  .primary-action:disabled,
-  fieldset:disabled button {
+  .primary-action:disabled {
     opacity: 0.6;
     cursor: wait;
   }
@@ -386,10 +308,6 @@
   }
 
   @media (max-width: 520px) {
-    .plan-grid {
-      grid-template-columns: 1fr;
-    }
-
     .team-form,
     .intro-card {
       padding: 20px;

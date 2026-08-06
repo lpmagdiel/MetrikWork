@@ -20,6 +20,26 @@ function expectBalanced(source, open, close) {
   expect(depth).toBe(0);
 }
 
+function extractFunctionBody(source, name) {
+  const startMarker = `function ${name}(`;
+  const startIdx = source.indexOf(startMarker);
+  expect(startIdx).toBeGreaterThanOrEqual(0);
+  const openBraceIdx = source.indexOf('{', startIdx + startMarker.length);
+  expect(openBraceIdx).toBeGreaterThan(startIdx);
+  let depth = 1;
+  for (let i = openBraceIdx + 1; i < source.length; i += 1) {
+    const ch = source[i];
+    if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(openBraceIdx + 1, i);
+      }
+    }
+  }
+  throw new Error(`No se encontró el cierre de la función ${name}`);
+}
+
 describe('firestore expense rules contract', () => {
   it('mantiene delimitadores balanceados en el archivo completo', () => {
     const normalized = stripCommentsAndStrings(rules);
@@ -67,6 +87,37 @@ describe('firestore team creation rules contract', () => {
     expect(rules).not.toContain('team_access_codes');
     expect(rules).not.toContain('teamAccessCode');
     expect(rules).not.toContain('isRedeemingAccessCodeForTeam');
+  });
+
+  it('ya NO exige campos de plan al crear un equipo', () => {
+    const body = extractFunctionBody(rules, 'isAllowedTeamCreateShape');
+    // hasAll ya no incluye teamSize ni maxMembers ni billingAmountEur ni billingDate.
+    const hasAllMatch = body.match(/keys\(\)\.hasAll\(([\s\S]*?)\)/);
+    expect(hasAllMatch).not.toBeNull();
+    const hasAllContent = hasAllMatch[1];
+    expect(hasAllContent).not.toMatch(/teamSize/);
+    expect(hasAllContent).not.toMatch(/maxMembers/);
+    expect(hasAllContent).not.toMatch(/billingAmountEur/);
+    expect(hasAllContent).not.toMatch(/billingDate/);
+    expect(body).toMatch(/request\.resource\.data\.team is string/);
+    expect(body).toMatch(/request\.resource\.data\.team\.size\(\) > 0/);
+    expect(body).toMatch(/request\.resource\.data\.team\.size\(\) <= 80/);
+  });
+
+  it('no obliga a billingAmountEur pero lo valida si existe', () => {
+    const body = extractFunctionBody(rules, 'isAllowedTeamCreateShape');
+    expect(body).toMatch(/!\("billingAmountEur" in request\.resource\.data\)/);
+    expect(body).toMatch(/request\.resource\.data\.billingAmountEur is number/);
+  });
+
+  it('no obliga a maxMembers pero lo valida si existe', () => {
+    const body = extractFunctionBody(rules, 'isAllowedTeamCreateShape');
+    expect(body).toMatch(/!\("maxMembers" in request\.resource\.data\)/);
+    expect(body).toMatch(/request\.resource\.data\.maxMembers is number/);
+  });
+
+  it('fabiansolares719 sigue siendo administrador del sistema', () => {
+    expect(rules).toContain('"fabiansolares719@gmail.com"');
   });
 });
 
@@ -168,10 +219,9 @@ describe('firestore team active/hidden rules contract', () => {
     expect(rules).toMatch(/"active",\s+"hidden"/);
   });
 
-  it('incluye active en isAllowedTeamCreateShape', () => {
-    // Verifica que "active" está en la lista de claves válidas al crear.
-    const createShapeMatch = rules.match(/function isAllowedTeamCreateShape\(\)[\s\S]*?\)\s*&&/);
-    expect(createShapeMatch).not.toBeNull();
-    expect(createShapeMatch[0]).toContain('"active"');
+  it('sigue aceptando active y hidden al crear un equipo', () => {
+    const body = extractFunctionBody(rules, 'isAllowedTeamCreateShape');
+    expect(body).toContain('"active"');
+    expect(body).toContain('"hidden"');
   });
 });

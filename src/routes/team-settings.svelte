@@ -2,7 +2,6 @@
   import {
     AlertCircle,
     Camera,
-    CalendarDays,
     CheckCircle2,
     ChevronDown,
     CreditCard,
@@ -44,10 +43,6 @@
     normalizeCustomTeamRoles,
     normalizeTeamPermissions,
     hasTeamPermission,
-    getTeamMemberLimitLabel,
-    getTeamMonthlyPrice,
-    getTeamSizeOption,
-    getTeamSizeValue,
     TEAM_PERMISSION_LABELS,
     TEAM_PERMISSION_ACTION_LABELS,
     WEEKDAY_OPTIONS,
@@ -100,11 +95,6 @@
   let showNewMemberPermissions = $state(false);
   let openPermissionMemberId = $state(null);
   let roleTemplates = $derived(getTeamRoleTemplates({ customRoles }));
-  let teamPlanSize = $derived(team ? getTeamSizeValue(team) : "S");
-  let teamPlanOption = $derived(getTeamSizeOption(teamPlanSize));
-  let teamPaymentAmount = $derived(team ? getTeamMonthlyPrice(team) : 0);
-  let teamPaymentDate = $derived(formatPaymentDate(team?.billingDate));
-  let teamMemberLimit = $derived(getTeamMemberLimitLabel(team || teamPlanSize));
 
   const currencyOptions = [
     { code: "MXN", label: "Peso mexicano" },
@@ -272,25 +262,6 @@
       .filter(([module]) => permissionActions.some(([action]) => normalized[module]?.[action]))
       .map(([, moduleLabel]) => moduleLabel);
     return enabledModules.length > 0 ? enabledModules : ["Sin permisos"];
-  }
-
-  function formatPaymentDate(value) {
-    const date = toDisplayDate(value);
-    if (!date) return "Sin fecha";
-
-    return new Intl.DateTimeFormat("es-ES", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }).format(date);
-  }
-
-  function formatPaymentAmount(value) {
-    return new Intl.NumberFormat("es-ES", {
-      style: "currency",
-      currency: "EUR",
-      maximumFractionDigits: 0,
-    }).format(Number(value) || 0);
   }
 
   function toDisplayDate(value) {
@@ -818,25 +789,6 @@
             <label for="teamName">Nombre del equipo</label>
             <input id="teamName" bind:value={teamName} disabled={!canEditSettings} />
           </div>
-        </div>
-
-        <div class="billing-summary" aria-label="Plan y pago del equipo">
-          <article class="billing-card plan">
-            <span>Plan actual</span>
-            <strong>{teamPlanSize}</strong>
-            <small>{teamPlanOption.description} · {teamMemberLimit}</small>
-          </article>
-          <article class="billing-card">
-            <CalendarDays size={18} />
-            <span>Fecha de pago</span>
-            <strong>{teamPaymentDate}</strong>
-          </article>
-          <article class="billing-card">
-            <CreditCard size={18} />
-            <span>Cantidad a pagar</span>
-            <strong>{formatPaymentAmount(teamPaymentAmount)}</strong>
-            <small>al mes</small>
-          </article>
         </div>
 
         <div class="profile-fields settings-field compact-field">
@@ -1577,68 +1529,6 @@
     font-size: 13px;
     line-height: 1.35;
     margin-top: 3px;
-  }
-
-  .billing-summary {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-    margin-bottom: 12px;
-  }
-
-  .billing-card {
-    min-width: 0;
-    min-height: 76px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    background: var(--bg-input);
-    color: var(--text-primary);
-    padding: 10px;
-    display: grid;
-    align-content: center;
-    gap: 4px;
-  }
-
-  .billing-card.plan {
-    background: var(--bg-accent-subtle);
-    color: var(--accent-ink);
-  }
-
-  .billing-card :global(svg) {
-    color: var(--text-secondary);
-  }
-
-  .billing-card span {
-    color: var(--text-secondary);
-    font-size: 11px;
-    font-weight: 800;
-  }
-
-  .billing-card.plan span,
-  .billing-card.plan small {
-    color: inherit;
-  }
-
-  .billing-card strong {
-    min-width: 0;
-    color: inherit;
-    font-size: 17px;
-    font-weight: 900;
-    line-height: 1.1;
-    overflow-wrap: anywhere;
-  }
-
-  .billing-card.plan strong {
-    font-size: 24px;
-  }
-
-  .billing-card small {
-    min-width: 0;
-    color: var(--text-secondary);
-    font-size: 11px;
-    font-weight: 700;
-    line-height: 1.35;
-    overflow-wrap: anywhere;
   }
 
   .team-photo {

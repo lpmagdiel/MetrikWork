@@ -1,57 +1,30 @@
-export const TEAM_SIZE_OPTIONS = Object.freeze([
-    {
-        value: 'G',
-        label: 'G',
-        description: 'Gratuito, 1 usuario',
-        maxMembers: 1,
-        priceEur: 0
-    },
-    {
-        value: 'S',
-        label: 'S',
-        description: 'Menos de 5 usuarios',
-        maxMembers: 4,
-        priceEur: 25
-    },
-    {
-        value: 'M',
-        label: 'M',
-        description: '10 usuarios o menos',
-        maxMembers: 10,
-        priceEur: 35
-    },
-    {
-        value: 'L',
-        label: 'L',
-        description: '11+ usuarios',
-        maxMembers: 999,
-        priceEur: 50
-    }
-]);
+// Los planes ya no se utilizan para crear equipos. Este módulo conserva los
+// helpers de lectura para no romper vistas legacy (p. ej. panel admin que
+// mostraba el plan histórico), pero devuelve valores neutros cuando un
+// equipo no tiene plan asignado.
+
+export const TEAM_SIZE_OPTIONS = Object.freeze([]);
 
 export function getTeamSizeOption(value) {
-    const normalizedValue = String(value || '').trim().toUpperCase();
-    return TEAM_SIZE_OPTIONS.find((option) => option.value === normalizedValue) || TEAM_SIZE_OPTIONS[0];
+    return { value: '', label: '', description: '', maxMembers: Infinity, priceEur: 0 };
 }
 
 export function normalizeTeamSizeData(size, maxMembers) {
-    const option = getTeamSizeOption(size);
-    const parsedMaxMembers = Number(maxMembers);
-
     return {
-        teamSize: option.value,
-        maxMembers: Number.isFinite(parsedMaxMembers) && parsedMaxMembers > 0
-            ? Math.floor(parsedMaxMembers)
-            : option.maxMembers
+        teamSize: '',
+        maxMembers: Number.isFinite(Number(maxMembers)) && Number(maxMembers) > 0
+            ? Math.floor(Number(maxMembers))
+            : Infinity
     };
 }
 
 export function getTeamSizeValue(teamOrSize) {
     if (typeof teamOrSize === 'object' && teamOrSize !== null) {
-        return getTeamSizeOption(teamOrSize.teamSize || teamOrSize.size).value;
+        const stored = teamOrSize?.teamSize || teamOrSize?.size;
+        if (stored) return String(stored);
+        return '';
     }
-
-    return getTeamSizeOption(teamOrSize).value;
+    return teamOrSize ? String(teamOrSize) : '';
 }
 
 export function getTeamMonthlyPrice(teamOrSize) {
@@ -63,8 +36,7 @@ export function getTeamMonthlyPrice(teamOrSize) {
         );
         if (Number.isFinite(storedPrice) && storedPrice >= 0) return storedPrice;
     }
-
-    return getTeamSizeOption(getTeamSizeValue(teamOrSize)).priceEur;
+    return 0;
 }
 
 export function getTeamMemberLimit(team) {
@@ -73,31 +45,28 @@ export function getTeamMemberLimit(team) {
         return Math.floor(directLimit);
     }
 
-    const size = team?.teamSize || team?.size;
-    if (size) return getTeamSizeOption(size).maxMembers;
-
     return Infinity;
 }
 
 export function getTeamMemberLimitLabel(teamOrSize, maxMembers) {
-    const isObjectValue = typeof teamOrSize === 'object' && teamOrSize !== null;
-    const size = isObjectValue ? teamOrSize.teamSize || teamOrSize.size : teamOrSize;
-    const limit = isObjectValue
+    if (!teamOrSize) return 'Sin límite';
+
+    const limit = typeof teamOrSize === 'object' && teamOrSize !== null
         ? getTeamMemberLimit(teamOrSize)
-        : normalizeTeamSizeData(size, maxMembers).maxMembers;
+        : normalizeTeamSizeData(teamOrSize, maxMembers).maxMembers;
 
-    if (!Number.isFinite(limit)) return 'Sin limite registrado';
+    if (!Number.isFinite(limit)) return 'Sin límite';
 
-    const option = getTeamSizeOption(size);
-    if (option.value === 'L') return '11+ usuarios';
-    if (limit === 1) return '1 usuario maximo';
-
-    return `${limit} usuarios maximo`;
+    if (limit === 1) return '1 usuario máximo';
+    return `${limit} usuarios máximo`;
 }
 
+/**
+ * @deprecated Los planes ya no limitan los miembros. Se conserva por
+ * compatibilidad con llamadas existentes pero no bloquea nada.
+ */
 export function assertTeamMemberLimit(team, nextMemberCount) {
     const limit = getTeamMemberLimit(team);
     if (!Number.isFinite(limit) || nextMemberCount <= limit) return;
-
     throw new Error(`Este equipo admite ${getTeamMemberLimitLabel(team)}.`);
 }

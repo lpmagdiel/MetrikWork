@@ -19,8 +19,6 @@
   import {
     adminTeamsStore,
     getTeamMemberLimitLabel,
-    getTeamMonthlyPrice,
-    getTeamSizeValue,
     subscribeToAdminTeams,
     systemAdminStore,
   } from "../data/stores.js";
@@ -36,7 +34,6 @@
         team.name,
         team.team,
         team.adminEmail,
-        getTeamSizeValue(team),
       ].join(" ")).includes(search),
     );
   });
@@ -49,7 +46,6 @@
         (total, team) => total + (Array.isArray(team.members) ? team.members.length : 0),
         0,
       ),
-      monthly: teams.reduce((total, team) => total + getTeamMonthlyPrice(team), 0),
     };
   });
 
@@ -142,10 +138,6 @@
         <span>Miembros</span>
         <strong>{summary.members}</strong>
       </article>
-      <article>
-        <span>Planes mensuales</span>
-        <strong>{formatCurrency(summary.monthly)}</strong>
-      </article>
     </section>
 
     <section class="teams-section">
@@ -198,10 +190,8 @@
                   <p>
                     {getTeamMemberCount(team)}
                     {getTeamMemberCount(team) === 1 ? "miembro" : "miembros"}
-                    <span aria-hidden="true">·</span>
-                    Plan {getTeamSizeValue(team)}
                   </p>
-                  <small>{getTeamMemberLimitLabel(team)} · {formatCurrency(getTeamMonthlyPrice(team))}/mes</small>
+                  <small>{getTeamMemberLimitLabel(team)}</small>
                 </div>
                 <a class="open-team" href={teamRoute(team)} aria-label={`Abrir ${getTeamName(team)}`}>
                   <span>Equipo</span>

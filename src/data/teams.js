@@ -4,7 +4,6 @@ import { doc, onSnapshot, collection, query, where, updateDoc, getDoc, getDocs, 
 import { userStore, getProfileImage } from './auth.js';
 import { createNotification } from './notifications.js';
 import { createTeamPermissions, normalizeCustomTeamRoles, normalizeTeamPermissions } from './permissions.js';
-import { assertTeamMemberLimit, getTeamMonthlyPrice, normalizeTeamSizeData } from './teamSizes.js';
 import { normalizeNonWorkingDays } from './workLimits.js';
 import { isConfiguredSystemAdmin } from './systemAdminConfig.js';
 
@@ -30,7 +29,7 @@ function normalizeCompanyProfile(profile = {}) {
 export function getTeamMembers() {
     const teamData = get(selectedTeam);
     if (!teamData || !teamData.memberSettings) return [];
-    
+
     const teamMembers = [];
     for(let memberId in teamData.memberSettings){
         teamMembers.push({...teamData.memberSettings[memberId], id: memberId});
@@ -38,33 +37,22 @@ export function getTeamMembers() {
     return teamMembers;
 }
 
-/**
- * 
- * @param {string} teamId 
- * @returns 
- */
 export async function getTeamMembersData(teamId) {
     const team = get(teamsStore);
     const teamData = team.find(t => t.id === teamId);
     return teamData?.membersData || [];
 }
 
-/**
- * 
- * @param {string} uid 
- * @param {function} callback 
- * @returns 
- */
 export function subscribeToTeams(uid, callback) {
     if (teamsUnsubscribe) teamsUnsubscribe();
-    
+
     if (!uid) {
         teamsStore.set([]);
         return;
     }
 
     const teamsQuery = query(collection(db, 'teams'), where('members', 'array-contains', uid));
-    
+
     teamsUnsubscribe = onSnapshot(teamsQuery, (snapshot) => {
         const teams = [];
         snapshot.forEach((doc) => {
@@ -84,12 +72,12 @@ export function subscribeToTeams(uid, callback) {
 }
 
 /**
- * 
- * @param {string} teamName 
- * @param {{ size?: string }} options
- * @returns 
+ * Crea un nuevo equipo. Solo requiere un nombre: ya no se elige plan.
+ *
+ * @param {string} teamName
+ * @returns {Promise<string>} id del equipo creado
  */
-export async function createTeam(teamName, { size = 'S' } = {}) {
+export async function createTeam(teamName) {
     const user = get(userStore);
     if (!user) throw new Error("Usuario no autenticado");
     if (!isConfiguredSystemAdmin(user.email)) {
@@ -98,8 +86,6 @@ export async function createTeam(teamName, { size = 'S' } = {}) {
 
     const normalizedName = String(teamName || '').trim();
     if (!normalizedName) throw new Error("Escribe un nombre para el equipo");
-    const teamSizeData = normalizeTeamSizeData(size);
-    const billingAmountEur = getTeamMonthlyPrice(teamSizeData.teamSize);
 
     try {
         const now = new Date().toISOString();
@@ -122,10 +108,6 @@ export async function createTeam(teamName, { size = 'S' } = {}) {
             },
             projectBudget: 0,
             projectBudgetCurrency: 'MXN',
-            billingDate: null,
-            billingAmountEur,
-            teamSize: teamSizeData.teamSize,
-            maxMembers: teamSizeData.maxMembers,
             active: true,
             hidden: false,
             createdAt: now
@@ -139,18 +121,11 @@ export async function createTeam(teamName, { size = 'S' } = {}) {
     }
 }
 
-/**
- * 
- * @param {string} teamId 
- * @param {string} email 
- * @returns 
- */
 export async function addMemberByEmail(teamId, email, permissions = {}) {
     try {
         const user = get(userStore);
         if (!user?.uid) throw new Error("Usuario no autenticado");
 
-        // 1. Search for user by email
         const normalizedEmail = email.trim().toLowerCase();
         const usersRef = collection(db, 'users');
         let querySnapshot = await getDocs(query(usersRef, where('emailNormalized', '==', normalizedEmail)));
@@ -173,9 +148,8 @@ export async function addMemberByEmail(teamId, email, permissions = {}) {
         const memberName = memberProfile.name || email;
         const memberImage = getProfileImage(memberProfile);
 
-        // 2. Create an invitation instead of adding the member directly.
         const teamRef = doc(db, 'teams', teamId);
-        
+
         const teamSnapshot = await getDoc(teamRef);
         if (!teamSnapshot.exists()) {
             throw new Error("Equipo no encontrado");
@@ -186,7 +160,6 @@ export async function addMemberByEmail(teamId, email, permissions = {}) {
         if (members.includes(memberUid)) {
             throw new Error("El usuario ya es miembro de este equipo");
         }
-        assertTeamMemberLimit(teamData, members.length + 1);
 
         const teamName = teamData?.team || "un equipo";
         const invitationRef = doc(db, 'users', memberUid, 'teamInvitations', teamId);
@@ -219,7 +192,7 @@ export async function addMemberByEmail(teamId, email, permissions = {}) {
         });
 
         await createNotification(
-            memberUid, 
+            memberUid,
             "Invitación a equipo",
             `${user.name || user.email || 'Un administrador'} te invitó a unirte a "${teamName}".`,
             {
@@ -237,14 +210,6 @@ export async function addMemberByEmail(teamId, email, permissions = {}) {
     }
 }
 
-/**
- * 
- * @param {string} teamId 
- * @param {string} memberId 
- * @param {number} dailyRate 
- * @param {number} extraHourRate 
- * @returns 
- */
 export async function updateMemberSettings(teamId, memberId, dailyRate, extraHourRate) {
     const user = get(userStore);
     if (!user) return;
@@ -358,11 +323,19 @@ export async function removeTeamMember(teamId, memberId) {
             throw new Error("No puedes quitar al administrador del equipo");
         }
 
+        const members = teamData.members || [];
+        const membersData = teamData.membersData || [];
+
+        if (!members.includes(memberId)) {
+            throw new Error("El usuario no es miembro del equipo");
+        }
+
+        const updatedMembers = members.filter((id) => id !== memberId);
+        const updatedMembersData = membersData.filter((m) => m.id !== memberId);
+
         await updateDoc(teamRef, {
-            members: (teamData.members || []).filter((id) => id !== memberId),
-            membersData: (teamData.membersData || []).filter((member) => member.id !== memberId),
-            [`memberSettings.${memberId}`]: deleteField(),
-            [`memberPermissions.${memberId}`]: deleteField(),
+            members: updatedMembers,
+            membersData: updatedMembersData,
             updatedAt: new Date().toISOString()
         });
     } catch (error) {
@@ -382,24 +355,28 @@ export async function leaveTeam(teamId) {
 
         const teamData = teamSnapshot.data();
         if (teamData.admin === user.uid) {
-            throw new Error("El administrador debe eliminar el equipo para abandonarlo");
+            throw new Error("El administrador no puede abandonar el equipo");
         }
 
-        if (!(teamData.members || []).includes(user.uid)) {
-            throw new Error("No perteneces a este equipo");
-        }
+        const members = teamData.members || [];
+        const membersData = teamData.membersData || [];
+        const memberSettings = teamData.memberSettings || {};
+        const memberPermissions = teamData.memberPermissions || {};
+
+        const updatedMembers = members.filter((id) => id !== user.uid);
+        const updatedMembersData = membersData.filter((m) => m.id !== user.uid);
+        const updatedMemberSettings = { ...memberSettings };
+        delete updatedMemberSettings[user.uid];
+        const updatedMemberPermissions = { ...memberPermissions };
+        delete updatedMemberPermissions[user.uid];
 
         await updateDoc(teamRef, {
-            members: (teamData.members || []).filter((id) => id !== user.uid),
-            membersData: (teamData.membersData || []).filter((member) => member.id !== user.uid),
-            [`memberSettings.${user.uid}`]: deleteField(),
-            [`memberPermissions.${user.uid}`]: deleteField(),
+            members: updatedMembers,
+            membersData: updatedMembersData,
+            memberSettings: updatedMemberSettings,
+            memberPermissions: updatedMemberPermissions,
             updatedAt: new Date().toISOString()
         });
-
-        if (get(selectedTeamId) === teamId) {
-            selectedTeamId.set(null);
-        }
     } catch (error) {
         console.error("Error leaving team:", error);
         throw error;
@@ -408,10 +385,19 @@ export async function leaveTeam(teamId) {
 
 export async function deleteTeam(teamId) {
     const user = get(userStore);
-    if (!user || !teamId) return;
+    if (!user?.uid || !teamId) return;
 
     try {
-        await deleteDoc(doc(db, 'teams', teamId));
+        const teamRef = doc(db, 'teams', teamId);
+        const teamSnapshot = await getDoc(teamRef);
+        if (!teamSnapshot.exists()) throw new Error("Equipo no encontrado");
+
+        const teamData = teamSnapshot.data();
+        if (teamData.admin !== user.uid) {
+            throw new Error("Solo el administrador puede eliminar el equipo");
+        }
+
+        await deleteDoc(teamRef);
     } catch (error) {
         console.error("Error deleting team:", error);
         throw error;
@@ -420,40 +406,38 @@ export async function deleteTeam(teamId) {
 
 export async function setTeamActive(teamId, active) {
     const user = get(userStore);
-    if (!user || !teamId) throw new Error("Datos no válidos");
-    const teamSnapshot = await getDoc(doc(db, 'teams', teamId));
+    if (!user?.uid || !teamId) throw new Error("Faltan datos para actualizar el equipo");
+
+    const teamRef = doc(db, 'teams', teamId);
+    const teamSnapshot = await getDoc(teamRef);
     if (!teamSnapshot.exists()) throw new Error("Equipo no encontrado");
+
     const teamData = teamSnapshot.data();
     if (teamData.admin !== user.uid) {
-        throw new Error("Solo el administrador puede cambiar el estado del equipo");
+        throw new Error("Solo el administrador puede modificar el estado del equipo");
     }
-    try {
-        await updateDoc(doc(db, 'teams', teamId), {
-            active: Boolean(active),
-            updatedAt: new Date().toISOString()
-        });
-    } catch (error) {
-        console.error("Error updating team active state:", error);
-        throw error;
-    }
+
+    await updateDoc(teamRef, {
+        active: Boolean(active),
+        updatedAt: new Date().toISOString()
+    });
 }
 
 export async function setTeamHidden(teamId, hidden) {
     const user = get(userStore);
-    if (!user || !teamId) throw new Error("Datos no válidos");
-    const teamSnapshot = await getDoc(doc(db, 'teams', teamId));
+    if (!user?.uid || !teamId) throw new Error("Faltan datos para actualizar el equipo");
+
+    const teamRef = doc(db, 'teams', teamId);
+    const teamSnapshot = await getDoc(teamRef);
     if (!teamSnapshot.exists()) throw new Error("Equipo no encontrado");
+
     const teamData = teamSnapshot.data();
     if (teamData.admin !== user.uid) {
-        throw new Error("Solo el administrador puede ocultar el equipo");
+        throw new Error("Solo el administrador puede modificar la visibilidad del equipo");
     }
-    try {
-        await updateDoc(doc(db, 'teams', teamId), {
-            hidden: Boolean(hidden),
-            updatedAt: new Date().toISOString()
-        });
-    } catch (error) {
-        console.error("Error updating team hidden state:", error);
-        throw error;
-    }
+
+    await updateDoc(teamRef, {
+        hidden: Boolean(hidden),
+        updatedAt: new Date().toISOString()
+    });
 }
