@@ -225,3 +225,34 @@ describe('firestore team active/hidden rules contract', () => {
     expect(body).toContain('"hidden"');
   });
 });
+
+describe('firestore ghosts rules contract', () => {
+  it('declara el campo ghosts dentro de isAllowedTeamUpdateShape', () => {
+    const body = extractFunctionBody(rules, 'isAllowedTeamUpdateShape');
+    expect(body).toContain('"ghosts"');
+  });
+
+  it('declara el campo ghosts dentro de isAllowedTeamCreateShape', () => {
+    const body = extractFunctionBody(rules, 'isAllowedTeamCreateShape');
+    expect(body).toContain('"ghosts"');
+  });
+
+  it('define isGhostsUpdate limitando los cambios al array de fantasmas', () => {
+    const body = extractFunctionBody(rules, 'isGhostsUpdate');
+    expect(body).toContain('"ghosts"');
+    expect(body).toContain('"updatedAt"');
+  });
+
+  it('permite crear jornadas de fantasmas solo con ghosts.control', () => {
+    const worksSection = rules.split('match /works/{workId}')[1] || '';
+    expect(worksSection).toContain('hasTeamPermission');
+    expect(worksSection).toContain('"ghosts", "control"');
+    expect(worksSection).toContain('isGhost == true');
+  });
+
+  it('permite actualizar y borrar jornadas de fantasmas con ghosts.control', () => {
+    const worksSection = rules.split('match /works/{workId}')[1] || '';
+    expect(worksSection).toContain('allow update, delete');
+    expect(worksSection).toContain('ghosts", "control"');
+  });
+});

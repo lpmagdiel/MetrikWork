@@ -4,14 +4,16 @@ export const TEAM_PERMISSION_MODULES = {
     inventory: 'inventory',
     locations: 'locations',
     tasks: 'tasks',
-    settings: 'settings'
+    settings: 'settings',
+    ghosts: 'ghosts'
 };
 
 export const TEAM_PERMISSION_ACTIONS = {
     view: 'view',
     create: 'create',
     edit: 'edit',
-    delete: 'delete'
+    delete: 'delete',
+    control: 'control'
 };
 
 export const TEAM_PERMISSION_LABELS = {
@@ -20,14 +22,16 @@ export const TEAM_PERMISSION_LABELS = {
     inventory: 'Inventario',
     locations: 'Ubicaciones',
     tasks: 'Tareas',
-    settings: 'Ajustes'
+    settings: 'Ajustes',
+    ghosts: 'Fantasmas'
 };
 
 export const TEAM_PERMISSION_ACTION_LABELS = {
     view: 'Ver',
     create: 'Crear',
     edit: 'Editar',
-    delete: 'Eliminar'
+    delete: 'Eliminar',
+    control: 'Controlar'
 };
 
 const MODULES = Object.values(TEAM_PERMISSION_MODULES);

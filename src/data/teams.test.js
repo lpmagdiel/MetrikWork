@@ -57,7 +57,7 @@ vi.mock('./notifications.js', () => ({
     createNotification: vi.fn()
 }));
 
-import { createTeam, setTeamActive, setTeamHidden } from './teams.js';
+import { createTeam, setTeamActive, setTeamHidden, getTeamGhosts, getGhostById, getGhostWorkdayUserId, isGhostUserId, hasGhostControlPermission, hasGhostCreatePermission } from './teams.js';
 
 function setUser(user) {
     userMock.subscribe.mockImplementation((fn) => {
@@ -229,5 +229,63 @@ describe('team active/hidden state', () => {
 
         await setTeamActive('team-1', null);
         expect(firestoreMocks.updateDoc.mock.calls[2][1].active).toBe(false);
+    });
+});
+
+describe('team ghosts', () => {
+    it('detecta ids de usuario fantasma por prefijo', () => {
+        expect(isGhostUserId('ghost-123')).toBe(true);
+        expect(isGhostUserId('user-123')).toBe(false);
+        expect(isGhostUserId(undefined)).toBe(false);
+    });
+
+    it('genera el id de workday de un fantasma con prefijo "ghost-"', () => {
+        expect(getGhostWorkdayUserId('abc')).toBe('ghost-abc');
+    });
+
+    it('normaliza la lista de fantasmas descartando entradas inválidas', () => {
+        const team = {
+            ghosts: [
+                { id: 'g1', name: 'Fantasma Uno', createdAt: '2026-01-01' },
+                { id: 'g1', name: 'Fantasma Duplicado' },
+                { id: '', name: 'Sin id' },
+                { id: 'g2', name: '' },
+                { id: 'g3', name: 'Fantasma Tres' }
+            ]
+        };
+
+        const ghosts = getTeamGhosts(team);
+        expect(ghosts.map((ghost) => ghost.name)).toEqual(['Fantasma Uno', 'Fantasma Tres']);
+    });
+
+    it('recupera un fantasma por id', () => {
+        const team = { ghosts: [{ id: 'g1', name: 'Fantasma' }] };
+        const ghost = getGhostById(team, 'g1');
+        expect(ghost?.name).toBe('Fantasma');
+        expect(getGhostById(team, 'nope')).toBeNull();
+        expect(getGhostById(null, 'g1')).toBeNull();
+    });
+
+    it('concede control total de fantasmas al administrador', () => {
+        const team = { admin: 'admin-1', memberPermissions: {} };
+        expect(hasGhostControlPermission(team, 'admin-1')).toBe(true);
+        expect(hasGhostCreatePermission(team, 'admin-1')).toBe(true);
+    });
+
+    it('respeta los permisos ghosts.create y ghosts.control de cada miembro', () => {
+        const team = {
+            admin: 'admin-1',
+            memberPermissions: {
+                creator: { ghosts: { create: true } },
+                controller: { ghosts: { control: true } },
+                stranger: {}
+            }
+        };
+        expect(hasGhostCreatePermission(team, 'creator')).toBe(true);
+        expect(hasGhostControlPermission(team, 'creator')).toBe(false);
+        expect(hasGhostCreatePermission(team, 'controller')).toBe(true);
+        expect(hasGhostControlPermission(team, 'controller')).toBe(true);
+        expect(hasGhostCreatePermission(team, 'stranger')).toBe(false);
+        expect(hasGhostControlPermission(team, 'stranger')).toBe(false);
     });
 });

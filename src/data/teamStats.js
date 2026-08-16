@@ -1,8 +1,14 @@
 import { collection, doc, getDocs, query, updateDoc, where } from 'firebase/firestore';
 import { db } from './firebase.js';
-import { getTeamWorks } from './works.js';
 
-export async function getTeamAdvancedStatsData(teamId) {
+function buildWorksQuery(teamId, { startDate, endDate } = {}) {
+    const constraints = [where('teamId', '==', teamId)];
+    if (startDate) constraints.push(where('date', '>=', startDate));
+    if (endDate) constraints.push(where('date', '<=', endDate));
+    return query(collection(db, 'works'), ...constraints);
+}
+
+export async function getTeamAdvancedStatsData(teamId, { startDate, endDate } = {}) {
     if (!teamId) {
         return {
             works: [],
@@ -13,20 +19,34 @@ export async function getTeamAdvancedStatsData(teamId) {
         };
     }
 
-    const paymentsQuery = query(collection(db, 'team_payments'), where('teamId', '==', teamId));
-    const absenceRequestsQuery = query(
-        collection(db, 'absenceRequests'),
+    const paymentsConstraints = [where('teamId', '==', teamId)];
+    if (startDate) paymentsConstraints.push(where('date', '>=', startDate));
+    if (endDate) paymentsConstraints.push(where('date', '<=', endDate));
+
+    const absenceConstraints = [
         where('teamId', '==', teamId),
         where('status', '==', 'aceptado')
-    );
+    ];
+    if (startDate) absenceConstraints.push(where('endDate', '>=', startDate));
+    if (endDate) absenceConstraints.push(where('startDate', '<=', endDate));
 
-    const [works, paymentsSnapshot, inventorySnapshot, locationsSnapshot, absenceRequestsSnapshot] = await Promise.all([
-        getTeamWorks(teamId),
+    const worksQuery = buildWorksQuery(teamId, { startDate, endDate });
+    const paymentsQuery = query(collection(db, 'team_payments'), ...paymentsConstraints);
+    const absenceRequestsQuery = query(collection(db, 'absenceRequests'), ...absenceConstraints);
+
+    const [worksSnapshot, paymentsSnapshot, inventorySnapshot, locationsSnapshot, absenceRequestsSnapshot] = await Promise.all([
+        getDocs(worksQuery),
         getDocs(paymentsQuery),
         getDocs(collection(db, 'teams', teamId, 'inventory')),
         getDocs(collection(db, 'teams', teamId, 'locations')),
         getDocs(absenceRequestsQuery)
     ]);
+
+    const works = [];
+    worksSnapshot.forEach((workDoc) => {
+        works.push({ id: workDoc.id, ...workDoc.data() });
+    });
+    works.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
     const payments = [];
     paymentsSnapshot.forEach((paymentDoc) => {

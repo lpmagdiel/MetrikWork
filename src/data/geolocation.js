@@ -170,3 +170,14 @@ export async function captureCurrentUserLocation({ silent = true, prompt = false
     return null;
   }
 }
+
+export async function captureLocationOrAbort({ onRetry } = {}) {
+  try {
+    return await getCurrentGpsPosition({ prompt: true });
+  } catch (firstError) {
+    if (typeof onRetry !== "function") throw firstError;
+    const shouldRetry = await onRetry(firstError);
+    if (!shouldRetry) throw firstError;
+    return getCurrentGpsPosition({ prompt: true });
+  }
+}

@@ -10,7 +10,8 @@
     teamsStore,
     userStore,
   } from "../data/stores.js";
-  import { captureCurrentUserLocation } from "../data/geolocation.js";
+  import { captureLocationOrAbort } from "../data/geolocation.js";
+  import { confirmAlert, showErrorAlert } from "../data/alerts.js";
   import { navigateTo } from "../router.js";
   import Toast from "../components/Toast.svelte";
 
@@ -116,7 +117,15 @@
 
     isSaving = true;
     try {
-      await captureCurrentUserLocation({ silent: true, prompt: true });
+      await captureLocationOrAbort({
+        onRetry: async () =>
+          confirmAlert({
+            title: "Ubicación requerida",
+            text: "No pudimos obtener tu ubicación. Activa los permisos y vuelve a intentarlo para registrar la jornada.",
+            confirmButtonText: "Reintentar",
+            cancelButtonText: "Cancelar",
+          }),
+      });
       await registerWorkday(
         team.id,
         $userStore.uid,
@@ -133,6 +142,10 @@
       showNotification("Jornada registrada.");
     } catch (error) {
       const message = error?.message || "No se pudo registrar la jornada.";
+      if (message.toLowerCase().includes("ubicación")) {
+        await showErrorAlert("Jornada no registrada", "La jornada no se guardó porque no se obtuvo la ubicación.");
+        return;
+      }
       if (message.toLowerCase().includes("ya existe")) {
         hasWorkdayToday = true;
       }

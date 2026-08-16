@@ -129,4 +129,41 @@ describe('permissions', () => {
     expect(customPermissions.tasks.create).toBe(true);
     expect(customPermissions.payments.view).toBe(false);
   });
+
+  it('incluye el módulo de fantasmas con la acción de control por defecto en false', () => {
+    const permissions = createTeamPermissions(false);
+
+    expect(permissions.ghosts).toBeDefined();
+    expect(permissions.ghosts.create).toBe(false);
+    expect(permissions.ghosts.control).toBe(false);
+    expect(permissions.ghosts.view).toBe(false);
+  });
+
+  it('otorga control total al administrador del equipo', () => {
+    const team = {
+      admin: 'admin-1',
+      memberPermissions: {}
+    };
+
+    expect(hasTeamPermission(team, 'admin-1', 'ghosts', 'control')).toBe(true);
+    expect(hasTeamPermission(team, 'admin-1', 'ghosts', 'create')).toBe(true);
+    expect(getMemberPermissions(team, 'admin-1').ghosts.control).toBe(true);
+  });
+
+  it('respeta los permisos ghosts.create y ghosts.control en miembros', () => {
+    const team = {
+      admin: 'admin-1',
+      memberPermissions: {
+        creator: normalizeTeamPermissions({ ghosts: { create: true } }),
+        controller: normalizeTeamPermissions({ ghosts: { control: true } }),
+        stranger: normalizeTeamPermissions({})
+      }
+    };
+
+    expect(hasTeamPermission(team, 'creator', 'ghosts', 'create')).toBe(true);
+    expect(hasTeamPermission(team, 'creator', 'ghosts', 'control')).toBe(false);
+    expect(hasTeamPermission(team, 'controller', 'ghosts', 'control')).toBe(true);
+    expect(hasTeamPermission(team, 'stranger', 'ghosts', 'create')).toBe(false);
+    expect(hasTeamPermission(team, 'stranger', 'ghosts', 'control')).toBe(false);
+  });
 });

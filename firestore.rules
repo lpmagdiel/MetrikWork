@@ -80,6 +80,11 @@ service cloud.firestore {
         .hasOnly(["projectBudget", "projectBudgetCurrency", "updatedAt"]);
     }
 
+    function isGhostsUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(["ghosts", "updatedAt"]);
+    }
+
     function isLocationBudgetUpdate() {
       return request.resource.data.diff(resource.data).affectedKeys()
         .hasOnly(["budget", "updatedAt"]);
@@ -105,6 +110,7 @@ service cloud.firestore {
                "memberPermissions",
                "members",
                "membersData",
+               "ghosts",
                "active",
                "hidden",
                "updatedAt"
@@ -168,6 +174,7 @@ service cloud.firestore {
                "maxMembers",
                "photoURL",
                "themePrimaryColor",
+               "ghosts",
                "active",
                "hidden",
                "createdAt"
@@ -759,6 +766,8 @@ service cloud.firestore {
 
       // El admin siempre puede actualizar. Miembros con permisos de ajustes
       // pueden agregar/editar configuración del equipo, pero no cambiar el admin.
+      // Los miembros con permiso de gestionar fantasmas pueden modificar la lista
+      // de fantasmas del equipo.
       allow update: if request.auth != null &&
                     isAllowedTeamUpdateShape() &&
                     (
@@ -776,6 +785,13 @@ service cloud.firestore {
                           hasTeamPermission(teamId, "payments", "edit")
                         ) &&
                         isStatsBudgetUpdate()
+                      ) ||
+                      (
+                        (
+                          hasTeamPermission(teamId, "ghosts", "create") ||
+                          hasTeamPermission(teamId, "ghosts", "control")
+                        ) &&
+                        isGhostsUpdate()
                       ) ||
                       isAcceptingTeamInvitation(teamId) ||
                       isSelfLeavingTeam(teamId)
@@ -1022,7 +1038,8 @@ service cloud.firestore {
                   );
 
       // El usuario puede registrar su propio trabajo. El admin también puede
-      // crear registros para miembros del equipo.
+      // crear registros para miembros del equipo. Los usuarios con permiso
+      // `ghosts.control` pueden registrar jornadas para fantasmas del equipo.
       allow create: if request.auth != null &&
                     teamExists(request.resource.data.teamId) &&
                     (
@@ -1030,15 +1047,24 @@ service cloud.firestore {
                         request.auth.uid == request.resource.data.userId &&
                         request.auth.uid in teamData(request.resource.data.teamId).members
                       ) ||
-                      request.auth.uid == teamData(request.resource.data.teamId).admin
+                      request.auth.uid == teamData(request.resource.data.teamId).admin ||
+                      (
+                        request.resource.data.isGhost == true &&
+                        hasTeamPermission(request.resource.data.teamId, "ghosts", "control")
+                      )
                     );
 
       // El usuario puede actualizar/borrar su propio registro. El admin puede
-      // actualizar/borrar cualquier registro del equipo.
+      // actualizar/borrar cualquier registro del equipo. Los usuarios con
+      // permiso `ghosts.control` pueden modificar jornadas de fantasmas.
       allow update, delete: if request.auth != null &&
                             (
                               request.auth.uid == resource.data.userId ||
-                              request.auth.uid == teamData(resource.data.teamId).admin
+                              request.auth.uid == teamData(resource.data.teamId).admin ||
+                              (
+                                resource.data.isGhost == true &&
+                                hasTeamPermission(resource.data.teamId, "ghosts", "control")
+                              )
                             );
     }
 

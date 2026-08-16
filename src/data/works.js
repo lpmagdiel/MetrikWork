@@ -9,6 +9,9 @@ import {
 } from './offlineQueue.js';
 import { applyWorkdayOvertimeLimit, assertWorkingDay } from './workLimits.js';
 import { geocodeAddress, getStoredUserGpsLocation, normalizeCoordinates } from '../helpers/navigation.js';
+import { userStore } from './auth.js';
+import { teamsStore } from './teams.js';
+import { getTeamGhosts, getGhostById, hasGhostControlPermission } from './teams.js';
 
 const REGISTER_WORKDAY_OPERATION = 'registerWorkday';
 const DUPLICATE_REGULAR_WORKDAY_MESSAGE = 'Ya existe una jornada completa o media jornada para este día.';
@@ -30,7 +33,9 @@ const WORKDAY_OPTIONAL_FIELDS = [
     'checkInGps',
     'checkInLocationCapturedAt',
     'checkOutGps',
-    'checkOutLocationCapturedAt'
+    'checkOutLocationCapturedAt',
+    'isGhost',
+    'ghostId'
 ];
 
 export function getTodayDateString() {
@@ -162,6 +167,29 @@ function rememberLocalWorkday(workDate) {
     }
 }
 
+function resolveGhostWorkdayContext({ teamId, userId, workDay }) {
+    if (!isGhostUserId(userId)) {
+        return workDay ? { ...workDay, isGhost: false } : workDay;
+    }
+    const team = get(teamsStore).find((entry) => entry.id === teamId);
+    if (!team) {
+        throw new Error("Equipo no encontrado para registrar la jornada del fantasma");
+    }
+    const currentUser = get(userStore);
+    if (!hasGhostControlPermission(team, currentUser?.uid)) {
+        throw new Error("No tienes permisos para registrar jornadas de fantasmas");
+    }
+    const ghostId = userId.replace(/^ghost-/, "");
+    if (!getGhostById(team, ghostId)) {
+        throw new Error("El fantasma seleccionado ya no existe en este equipo");
+    }
+    return {
+        ...(workDay || {}),
+        isGhost: true,
+        ghostId
+    };
+}
+
 function buildWorkdayDoc(teamId, userId, userName, workDay, teamData = null) {
     if (!workDay) throw new Error("workDay is missing");
     const workDate = resolveWorkdayDate(workDay);
@@ -253,8 +281,9 @@ export async function executeRegisterWorkday({ teamId, userId, userName, workDay
     if (!workDay) throw new Error("workDay is missing");
     const teamSnapshot = await getDoc(doc(db, 'teams', teamId));
     const teamData = teamSnapshot.data();
+    const ghostedWorkDay = resolveGhostWorkdayContext({ teamId, userId, workDay });
     const datedWorkDay = withResolvedWorkdayDate({
-        ...workDay,
+        ...ghostedWorkDay,
         clientOperationId: workDay.clientOperationId || operation?.id
     }, operation);
     const workDayWithLocation = await ensureStoredMemberLocationAddress(datedWorkDay);
@@ -281,7 +310,8 @@ export async function executeRegisterWorkday({ teamId, userId, userName, workDay
 
 export async function registerWorkday(teamId, userId, userName, workDay) {
     if (!workDay) throw new Error("workDay is missing");
-    const datedWorkDay = withResolvedWorkdayDate(workDay);
+    const ghostedWorkDay = resolveGhostWorkdayContext({ teamId, userId, workDay });
+    const datedWorkDay = withResolvedWorkdayDate(ghostedWorkDay);
 
     if (isRegularWorkday(datedWorkDay)) {
         const hasQueuedWorkday = await hasQueuedRegularWorkdayForDate(teamId, userId, datedWorkDay.date);
@@ -313,7 +343,8 @@ export async function assignWorkdayToMember(teamId, userId, userName, workDay, a
     const teamSnapshot = await getDoc(doc(db, 'teams', teamId));
     const teamData = teamSnapshot.data();
     assertWorkingDay(teamData, workDay.date);
-    const limitedWorkDay = withResolvedWorkdayDate(applyWorkdayOvertimeLimit(workDay, teamData));
+    const ghostedWorkDay = resolveGhostWorkdayContext({ teamId, userId, workDay });
+    const limitedWorkDay = withResolvedWorkdayDate(applyWorkdayOvertimeLimit(ghostedWorkDay, teamData));
     const workData = {
         teamId,
         userId,
@@ -326,27 +357,26 @@ export async function assignWorkdayToMember(teamId, userId, userName, workDay, a
         updatedAt: new Date().toISOString()
     };
 
-    ['taskTitle', 'startedAt', 'endedAt', 'durationSeconds', 'durationHours', 'variableHours', 'timerMode'].forEach((field) => {
+    ['taskTitle', 'startedAt', 'endedAt', 'durationSeconds', 'durationHours', 'variableHours', 'timerMode', 'memberGps', 'memberLocationCapturedAt', 'memberLocationAddress', 'isGhost', 'ghostId'].forEach((field) => {
         if (limitedWorkDay[field] !== undefined && limitedWorkDay[field] !== null) {
             workData[field] = limitedWorkDay[field];
         }
     });
 
     if (isRegularWorkday(workData)) {
-        const existingRegularDoc = await findRegularWorkdayForDate(teamId, userId, workData.date);
-
-        if (existingRegularDoc) {
-            await updateDoc(existingRegularDoc.ref, workData);
-            return existingRegularDoc.id;
-        }
-
         const regularDocId = getRegularWorkdayDocId(teamId, userId, workData.date);
-        await setDoc(doc(db, 'works', regularDocId), {
-            ...workData,
-            createdAt: new Date().toISOString(),
-            paid: false
+        const regularDocRef = doc(db, 'works', regularDocId);
+        const finalDocId = await runTransaction(db, async (transaction) => {
+            const existingDoc = await transaction.get(regularDocRef);
+            const payload = {
+                ...workData,
+                createdAt: existingDoc.exists() ? (existingDoc.data()?.createdAt || new Date().toISOString()) : new Date().toISOString(),
+                paid: existingDoc.exists() ? Boolean(existingDoc.data()?.paid) : false
+            };
+            transaction.set(regularDocRef, payload, { merge: true });
+            return regularDocId;
         });
-        return regularDocId;
+        return finalDocId;
     }
 
     const docRef = await addDoc(collection(db, 'works'), {
@@ -386,11 +416,14 @@ export const getUserTeamWorks = async (teamId, userId) => {
 export const getWorksByTeamId = async (teamId) => {
     const worksQuery = query(collection(db, 'works'), where('teamId', '==', teamId));
     const snapshot = await getDocs(worksQuery);
-    const works = [];
-    snapshot.forEach((doc) => {
-        works.push({ id: doc.id, ...doc.data() });
+    const groups = {};
+    snapshot.forEach((docSnapshot) => {
+        const work = { id: docSnapshot.id, ...docSnapshot.data() };
+        const key = work.userId || 'unassigned';
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(work);
     });
-    return Object.groupBy(works, ({ userId }) => userId);
+    return groups;
 }
 export async function getTeamStats(teamId, userId, period = 'month', dailyRate = 0, extraHourRate = 0) {
     try {

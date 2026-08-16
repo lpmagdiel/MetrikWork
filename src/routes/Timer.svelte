@@ -17,6 +17,7 @@
     TimerReset,
     Briefcase,
     CalendarDays,
+    User,
   } from "lucide-svelte";
   import Toast from "../components/Toast.svelte";
   import {
@@ -37,9 +38,12 @@
     subscribeToTeamTemplates,
     addTeamTemplate,
     deleteTeamTemplate,
+    hasGhostControlPermission,
+    getTeamGhosts,
+    getGhostWorkdayUserId,
   } from "../data/stores.js";
-  import { getCurrentGpsPosition } from "../data/geolocation.js";
-  import { showErrorAlert, showSuccessAlert } from "../data/alerts.js";
+  import { getCurrentGpsPosition, captureLocationOrAbort } from "../data/geolocation.js";
+  import { showErrorAlert, showSuccessAlert, confirmAlert } from "../data/alerts.js";
   import { normalizeCoordinates } from "../helpers/navigation.js";
   import SelectiveButton from "../components/SelectiveButton.svelte";
   import SliceContainer from "../components/SliceContainer.svelte";
@@ -58,6 +62,7 @@
   let activeTeamId = $state("");
   let taskTitle = $state("");
   let note = $state("");
+  let workdayGhostId = $state("");
   let timerMode = $state("full-day");
   let pomodoroEnabled = $state(false);
   let pomodoroPhase = $state("focus");
@@ -106,6 +111,21 @@
       icon: Briefcase,
     })),
   );
+  let teamGhosts = $derived(getTeamGhosts(selectedTeam));
+  let canControlGhosts = $derived(hasGhostControlPermission(selectedTeam, $userStore?.uid));
+  let activeWorkdayGhost = $derived(
+    canControlGhosts && workdayGhostId ? teamGhosts.find((ghost) => ghost.id === workdayGhostId) || null : null,
+  );
+  let workdayTargetUserId = $derived(activeWorkdayGhost ? getGhostWorkdayUserId(activeWorkdayGhost.id) : $userStore?.uid || "");
+  let workdayTargetUserName = $derived(activeWorkdayGhost ? activeWorkdayGhost.name : $userStore?.name || $userStore?.email || "");
+  let ghostOptions = $derived([
+    { value: "", label: "Registrar a mi nombre", icon: User },
+    ...teamGhosts.map((ghost) => ({
+      value: ghost.id,
+      label: `👻 ${ghost.name}`,
+      icon: null,
+    })),
+  ]);
   let timerModeOptions = $derived([
     {
       label: "Completa",
@@ -602,14 +622,32 @@
     };
   }
 
-  async function captureLocationSnapshot(capturedAt = new Date()) {
+  async function captureLocationSnapshot(capturedAt = new Date(), { prompt = false } = {}) {
     isCapturingLocation = true;
     try {
-      const gps = await getCurrentGpsPosition();
+      const gps = await getCurrentGpsPosition({ prompt });
       return createLocationSnapshot(gps, capturedAt);
     } catch (error) {
       showNotification(error?.message || "No se pudo obtener la ubicación.", "warning");
       return null;
+    } finally {
+      isCapturingLocation = false;
+    }
+  }
+
+  async function ensureWorkdayLocation(capturedAt) {
+    isCapturingLocation = true;
+    try {
+      const gps = await captureLocationOrAbort({
+        onRetry: async () =>
+          confirmAlert({
+            title: "Ubicación requerida",
+            text: "No pudimos obtener tu ubicación. Activa los permisos y vuelve a intentarlo para registrar la jornada.",
+            confirmButtonText: "Reintentar",
+            cancelButtonText: "Cancelar",
+          }),
+      });
+      return createLocationSnapshot(gps, capturedAt);
     } finally {
       isCapturingLocation = false;
     }
@@ -708,7 +746,7 @@
     startTicker();
     persistActiveTimer();
 
-    const location = await captureLocationSnapshot(startDate);
+    const location = await captureLocationSnapshot(startDate, { prompt: true });
     if (startedAt?.getTime() === startDate.getTime() && !endedAt) {
       checkInLocation = location;
       persistActiveTimer();
@@ -790,7 +828,7 @@
         return;
       }
 
-      const finishLocation = await captureLocationSnapshot(finishDate);
+      const finishLocation = await ensureWorkdayLocation(finishDate);
       checkOutLocation = finishLocation;
       const workDayToRegister = applyWorkdayOvertimeLimit(
         createTimedWorkday(totalSeconds, totalHours, finishDate, finishLocation),
@@ -799,8 +837,8 @@
 
       const result = await registerWorkday(
         selectedTeam.id,
-        $userStore.uid,
-        $userStore.name || $userStore.email,
+        workdayTargetUserId,
+        workdayTargetUserName,
         workDayToRegister,
       );
 
@@ -822,10 +860,11 @@
       endedAt = null;
       checkInLocation = null;
       checkOutLocation = null;
+      workdayGhostId = "";
       resetPomodoroProgress();
       now = Date.now();
       clearActiveTimer();
-      if (finishedTimerMode === "full-day") {
+      if (finishedTimerMode === "full-day" && !activeWorkdayGhost) {
         hasRegularWorkdayToday = true;
       }
       await showSuccessAlert(
@@ -903,6 +942,28 @@
           ariaLabel="Cambiar tipo de jornada"
         />
       </div>
+
+      {#if canControlGhosts && teamGhosts.length > 0}
+        <div class="hero-target">
+          <label class="hero-target-label">
+            <span>👻 Fantasma</span>
+            <select
+              bind:value={workdayGhostId}
+              disabled={isRunning || isSaving}
+              aria-label="Seleccionar fantasma"
+            >
+              {#each ghostOptions as option}
+                <option value={option.value}>{option.label}</option>
+              {/each}
+            </select>
+          </label>
+          {#if activeWorkdayGhost}
+            <p class="hero-target-hint">
+              Registrando a nombre del fantasma <strong>👻 {activeWorkdayGhost.name}</strong>. No generará coste.
+            </p>
+          {/if}
+        </div>
+      {/if}
 
       {#if teamOptions.length === 0}
         <p class="notice">Necesitas un equipo para registrar una jornada.</p>
@@ -1251,6 +1312,43 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 12px;
+  }
+
+  .hero-target {
+    margin-top: 12px;
+    background: var(--timer-control, rgba(255, 255, 255, 0.04));
+    border: 1px solid var(--timer-border, rgba(148, 163, 184, 0.2));
+    border-radius: var(--radius-md, 12px);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .hero-target-label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-secondary, #64748b);
+  }
+
+  .hero-target-label select {
+    appearance: none;
+    border: 1px solid var(--border-color, rgba(148, 163, 184, 0.3));
+    background: var(--bg-input, #fff);
+    color: var(--text-primary, #0f172a);
+    border-radius: var(--radius-sm, 8px);
+    padding: 8px 10px;
+    font: inherit;
+    font-weight: 600;
+  }
+
+  .hero-target-hint {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-secondary, #475569);
   }
 
   .timer-hero :global(.selective-button) {

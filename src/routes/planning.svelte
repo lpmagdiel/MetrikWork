@@ -30,9 +30,13 @@
     getOvertimeLimitMessage,
     isNonWorkingDay,
     getNonWorkingDayMessage,
+    getTeamGhosts,
+    getGhostWorkdayUserId,
   } from "../data/stores.js";
   import TitleHeader from "../components/TitleHeader.svelte";
   import { formatGpsCoordinates, geocodeAddress, normalizeCoordinates } from "../helpers/navigation.js";
+  import { captureLocationOrAbort } from "../data/geolocation.js";
+  import { confirmAlert, showErrorAlert } from "../data/alerts.js";
 
   let messageToast = $state("");
   let typeToast = $state("success");
@@ -55,6 +59,7 @@
   });
   let isSavingAssignment = $state(false);
   let workLocationAddresses = $state({});
+  let teamGhosts = $derived(getTeamGhosts(team));
   const resolvingLocationAddressIds = new Set();
 
   let team = $derived($selectedTeam);
@@ -225,6 +230,11 @@
   }
 
   function getMemberName(memberId) {
+    if (typeof memberId === "string" && memberId.startsWith("ghost-")) {
+      const ghostId = memberId.replace(/^ghost-/, "");
+      const ghost = teamGhosts.find((item) => item.id === ghostId);
+      return ghost ? `👻 ${ghost.name}` : "Fantasma";
+    }
     const member = memberList.find((item) => item.id === memberId);
     return member?.name || member?.email || "Usuario";
   }
@@ -375,26 +385,48 @@
       return;
     }
 
+    let memberGps = null;
+    try {
+      memberGps = await captureLocationOrAbort({
+        onRetry: async () =>
+          confirmAlert({
+            title: "Ubicación requerida",
+            text: "No pudimos obtener tu ubicación. Activa los permisos y vuelve a intentarlo para registrar la jornada.",
+            confirmButtonText: "Reintentar",
+            cancelButtonText: "Cancelar",
+          }),
+      });
+    } catch (locationError) {
+      await showErrorAlert(
+        "Jornada no registrada",
+        locationError?.message || "La jornada no se guardó porque no se obtuvo la ubicación.",
+      );
+      return;
+    }
+
     isSavingAssignment = true;
     try {
       const limitedAssignment = applyWorkdayOvertimeLimit(assignmentForm, team);
+      const isGhostAssignment = typeof limitedAssignment.userId === "string" && limitedAssignment.userId.startsWith("ghost-");
       await assignWorkdayToMember(
         team.id,
         limitedAssignment.userId,
         getMemberName(limitedAssignment.userId),
-        limitedAssignment,
+        { ...limitedAssignment, memberGps },
         $userStore?.uid || null,
       );
-      await createNotification(
-        limitedAssignment.userId,
-        "Nueva jornada asignada",
-        buildAssignmentNotificationMessage(limitedAssignment),
-        {
-          url: `/teams/${team.id}/planning`,
-          type: "event_assigned",
-          teamId: team.id,
-        },
-      );
+      if (!isGhostAssignment) {
+        await createNotification(
+          limitedAssignment.userId,
+          "Nueva jornada asignada",
+          buildAssignmentNotificationMessage(limitedAssignment),
+          {
+            url: `/teams/${team.id}/planning`,
+            type: "event_assigned",
+            teamId: team.id,
+          },
+        );
+      }
       await loadWorks();
       openAddEvent = false;
       selectedCalendarDate = limitedAssignment.date;
@@ -641,6 +673,9 @@
         <select bind:value={assignmentForm.userId}>
           {#each memberList as member}
             <option value={member.id}>{member.name || member.email}</option>
+          {/each}
+          {#each teamGhosts as ghost}
+            <option value={`ghost-${ghost.id}`}>👻 {ghost.name}</option>
           {/each}
         </select>
       </label>

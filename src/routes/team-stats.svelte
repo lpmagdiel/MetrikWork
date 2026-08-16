@@ -26,6 +26,7 @@
     selectedTeam,
     selectedTeamId,
     updateTeamBudget,
+    getTeamGhosts,
     userStore,
   } from "../data/stores.js";
 
@@ -76,9 +77,11 @@
     (team?.members || []).forEach((memberId) => {
       if (!byId.has(memberId)) byId.set(memberId, { id: memberId, name: "Usuario" });
     });
-    return Array.from(byId.values()).sort((a, b) =>
-      (a.name || a.email || "Usuario").localeCompare(b.name || b.email || "Usuario"),
-    );
+    return Array.from(byId.values())
+      .filter((member) => !member.id.startsWith("ghost-"))
+      .sort((a, b) =>
+        (a.name || a.email || "Usuario").localeCompare(b.name || b.email || "Usuario"),
+      );
   });
 
   let range = $derived.by(() => {
@@ -250,82 +253,109 @@
     },
   ]);
 
-  let memberSummaries = $derived.by(() =>
-    members
-      .map((member) => {
-        const memberWorks = filteredWorks.filter((work) => work.userId === member.id);
-        const memberPayments = filteredPayments.filter((payment) => payment.userId === member.id);
-        const earned = memberWorks.reduce((sum, work) => sum + getWorkLaborCost(work), 0);
-        const paid = memberPayments.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
-        const locationId = memberLocationMap.get(member.id) || "";
-        return {
-          ...member,
-          locationId,
-          locationName: getLocationName(locationId),
-          workDays: memberWorks.reduce((sum, work) => sum + getWorkUnits(work), 0),
-          overtimeHours: memberWorks.reduce((sum, work) => sum + (Number(work.overtimeHours) || 0), 0),
-          earned,
-          paid,
-          balance: earned - paid,
-        };
-      })
-      .filter((member) => selectedMemberId !== "all" || member.earned || member.paid || member.locationId)
-      .sort((a, b) => b.earned + b.paid - (a.earned + a.paid)),
-  );
-
-  let locationSummaries = $derived.by(() => {
-    const summaries = locations
-      .filter((location) => selectedLocationId === "all" || location.id === selectedLocationId)
-      .map((location) => {
-        const locWorks = filteredWorks.filter((work) => workBelongsToLocation(work, location.id));
-        const locPayments = filteredPayments.filter((payment) =>
-          paymentBelongsToLocation(payment, location.id),
-        );
-        const locProducts = consumablesInRange.filter((item) => item.locationId === location.id);
-        const labor = locWorks.reduce((sum, work) => sum + getWorkLaborCost(work), 0);
-        const paid = locPayments.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
-        const products = locProducts.reduce((sum, item) => sum + getProductCost(item), 0);
-        const total = Math.max(labor, paid) + products;
-        const budget = Number(location.budget) || 0;
-        return {
-          ...location,
-          membersCount: (location.assignedMemberIds || []).length,
-          workDays: locWorks.reduce((sum, work) => sum + getWorkUnits(work), 0),
-          labor,
-          paid,
-          products,
-          total,
-          budget,
-          remaining: budget - total,
-          usage: budget > 0 ? (total / budget) * 100 : 0,
-        };
-      });
-
-    const unassignedProducts = consumablesInRange.filter((item) => !item.locationId);
-    const unassignedWorks = filteredWorks.filter((work) => !getWorkLocationId(work));
-    const unassignedPayments = filteredPayments.filter((payment) => !getPaymentLocationId(payment));
-    if (
-      selectedLocationId === "all" &&
-      (unassignedProducts.length || unassignedWorks.length || unassignedPayments.length)
-    ) {
-      const labor = unassignedWorks.reduce((sum, work) => sum + getWorkLaborCost(work), 0);
-      const paid = unassignedPayments.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
-      const products = unassignedProducts.reduce((sum, item) => sum + getProductCost(item), 0);
-      const total = Math.max(labor, paid) + products;
-      summaries.push({
-        id: "unassigned",
-        name: "Sin ubicación",
-        membersCount: 0,
-        workDays: unassignedWorks.reduce((sum, work) => sum + getWorkUnits(work), 0),
-        labor,
-        paid,
-        products,
-        total,
-        budget: 0,
-        remaining: -total,
-        usage: 0,
+  let memberSummaries = $derived.by(() => {
+    const memberMap = new Map();
+    for (const member of members) {
+      memberMap.set(member.id, {
+        ...member,
+        locationId: memberLocationMap.get(member.id) || "",
+        workDays: 0,
+        overtimeHours: 0,
+        earned: 0,
+        paid: 0,
+        hasActivity: false,
       });
     }
+
+    for (const work of filteredWorks) {
+      const bucket = memberMap.get(work.userId);
+      if (!bucket) continue;
+      const units = getWorkUnits(work);
+      const overtime = Number(work.overtimeHours) || 0;
+      const cost = getWorkLaborCost(work);
+      bucket.workDays += units;
+      bucket.overtimeHours += overtime;
+      bucket.earned += cost;
+      bucket.hasActivity = bucket.hasActivity || units > 0 || overtime > 0;
+    }
+    for (const payment of filteredPayments) {
+      const bucket = memberMap.get(payment.userId);
+      if (!bucket) continue;
+      const amount = Number(payment.amount) || 0;
+      bucket.paid += amount;
+      bucket.hasActivity = bucket.hasActivity || amount > 0;
+    }
+
+    const summaries = Array.from(memberMap.values()).map((bucket) => ({
+      ...bucket,
+      locationName: getLocationName(bucket.locationId),
+      balance: bucket.earned - bucket.paid,
+      hasActivity: bucket.hasActivity || Boolean(bucket.locationId),
+    }));
+
+    return summaries
+      .filter((member) => selectedMemberId !== "all" || member.hasActivity)
+      .sort((a, b) => (b.earned + b.paid) - (a.earned + a.paid));
+  });
+
+  let locationSummaries = $derived.by(() => {
+    const visibleLocations = locations.filter(
+      (location) => selectedLocationId === "all" || location.id === selectedLocationId,
+    );
+    const buckets = new Map();
+
+    const ensureBucket = (locationId) => {
+      if (!buckets.has(locationId)) {
+        const location = locations.find((item) => item.id === locationId);
+        const budget = Number(location?.budget) || 0;
+        buckets.set(locationId, {
+          id: locationId,
+          name: location?.name || (locationId === "unassigned" ? "Sin ubicación" : "Ubicación"),
+          membersCount: location?.assignedMemberIds?.length || 0,
+          workDays: 0,
+          labor: 0,
+          paid: 0,
+          products: 0,
+          budget,
+        });
+      }
+      return buckets.get(locationId);
+    };
+
+    for (const work of filteredWorks) {
+      const locationId = getWorkLocationId(work) || "unassigned";
+      const bucket = ensureBucket(locationId);
+      bucket.workDays += getWorkUnits(work);
+      bucket.labor += getWorkLaborCost(work);
+    }
+    for (const payment of filteredPayments) {
+      const locationId = getPaymentLocationId(payment) || "unassigned";
+      const bucket = ensureBucket(locationId);
+      bucket.paid += Number(payment.amount) || 0;
+    }
+    for (const item of consumablesInRange) {
+      const locationId = item.locationId || "unassigned";
+      const bucket = ensureBucket(locationId);
+      bucket.products += getProductCost(item);
+    }
+
+    if (selectedLocationId === "all") {
+      for (const location of visibleLocations) {
+        ensureBucket(location.id);
+      }
+    }
+
+    const summaries = Array.from(buckets.values())
+      .filter((bucket) => visibleLocations.some((location) => location.id === bucket.id))
+      .map((bucket) => {
+        const total = Math.max(bucket.labor, bucket.paid) + bucket.products;
+        return {
+          ...bucket,
+          total,
+          remaining: bucket.budget - total,
+          usage: bucket.budget > 0 ? (total / bucket.budget) * 100 : 0,
+        };
+      });
 
     return summaries
       .filter((item) => item.total || item.membersCount || item.budget)
@@ -378,6 +408,49 @@
       .slice(-10);
   });
 
+  let ghostSummaries = $derived.by(() => {
+    const ghosts = getTeamGhosts(team);
+    if (!ghosts.length) return [];
+    const buckets = new Map();
+    for (const ghost of ghosts) {
+      buckets.set(ghost.id, {
+        id: ghost.id,
+        name: ghost.name,
+        fullDays: 0,
+        halfDays: 0,
+        overtimeHours: 0,
+        variableHours: 0,
+        workDays: 0,
+        lastDate: "",
+      });
+    }
+    for (const work of filteredWorks) {
+      if (!work?.isGhost && !(typeof work?.userId === "string" && work.userId.startsWith("ghost-"))) continue;
+      const ghostId = work.ghostId || (work.userId || "").replace(/^ghost-/, "");
+      const bucket = buckets.get(ghostId);
+      if (!bucket) continue;
+      if (work.type === "full-day") {
+        bucket.fullDays += 1;
+        bucket.workDays += 1;
+      } else if (work.type === "half-day") {
+        bucket.halfDays += 1;
+        bucket.workDays += 0.5;
+      } else if (work.type === "variable" && work.timerMode !== "overtime") {
+        const hours = getVariableHours(work);
+        bucket.variableHours += hours;
+        bucket.workDays += hours / 8;
+      }
+      bucket.overtimeHours += Number(work.overtimeHours) || 0;
+      if ((work.date || "") > bucket.lastDate) bucket.lastDate = work.date;
+    }
+    return Array.from(buckets.values())
+      .filter((bucket) =>
+        bucket.fullDays + bucket.halfDays + bucket.variableHours + bucket.overtimeHours > 0 ||
+        bucket.lastDate,
+      )
+      .sort((a, b) => a.name.localeCompare(b.name));
+  });
+
   let maxExpenseValue = $derived(Math.max(...expenseDistribution.map((item) => item.value), 1));
   let maxLocationValue = $derived(Math.max(...locationSummaries.map((item) => item.total), 1));
   let maxCategoryValue = $derived(Math.max(...categoryTotals.map((item) => item.value), 1));
@@ -394,6 +467,13 @@
   });
 
   $effect(() => {
+    if (!team?.id || !canViewStats) return;
+    const currentRange = range;
+    if (!currentRange?.start || !currentRange?.end) return;
+    loadStatsData(currentRange);
+  });
+
+  $effect(() => {
     const pendingWorks = filteredWorks.filter((work) => {
       const key = getWorkAddressKey(work);
       return getWorkMemberGps(work) &&
@@ -407,20 +487,29 @@
     }
   });
 
-  async function loadStatsData() {
+  let loadRequestId = 0;
+  async function loadStatsData(currentRange = range) {
+    if (!team?.id) return;
+    const requestId = ++loadRequestId;
     isLoading = true;
     try {
-      const data = await getTeamAdvancedStatsData(team.id);
+      const data = await getTeamAdvancedStatsData(team.id, {
+        startDate: currentRange?.start,
+        endDate: currentRange?.end
+      });
+      if (requestId !== loadRequestId) return;
       works = data.works;
       payments = data.payments;
       inventory = data.inventory;
       locations = data.locations;
       absenceRequests = data.absenceRequests || [];
+      workLocationAddresses = {};
     } catch (error) {
+      if (requestId !== loadRequestId) return;
       console.error("Error loading advanced team stats:", error);
       showNotification("Error al cargar estadísticas", "error");
     } finally {
-      isLoading = false;
+      if (requestId === loadRequestId) isLoading = false;
     }
   }
 
@@ -578,6 +667,9 @@
   }
 
   function getWorkLaborCost(work) {
+    if (work?.isGhost || (typeof work?.userId === "string" && work.userId.startsWith("ghost-"))) {
+      return 0;
+    }
     const settings = team?.memberSettings?.[work.userId] || {};
     const dailyRate = Number(settings.dailyRate) || 0;
     const extraHourRate = Number(settings.extraHourRate) || 0;
@@ -812,6 +904,19 @@
           headers: ["Categoria", "Articulos", "Valor"],
           rows: categoryTotals.map((item) => [item.label, item.count, formatMoney(item.value)]),
         },
+        ...(ghostSummaries.length
+          ? [{
+              title: "Fantasmas (sin coste)",
+              headers: ["Fantasma", "Dias completos", "Medios dias", "Horas extra", "Ultima jornada"],
+              rows: ghostSummaries.map((ghost) => [
+                `👻 ${ghost.name}`,
+                formatNumber(ghost.fullDays, 0),
+                formatNumber(ghost.halfDays, 0),
+                `${formatNumber(ghost.overtimeHours)}h`,
+                ghost.lastDate ? formatDate(ghost.lastDate) : "Sin actividad",
+              ]),
+            }]
+          : []),
         {
           title: "Detalle de jornadas",
           headers: ["Fecha", "Miembro", "Ubicacion", "GPS miembro", "Direccion GPS", "Tipo", "Dias", "Horas extra", "Coste"],
@@ -1214,6 +1319,45 @@
               {/if}
             </article>
           </section>
+
+          {#if ghostSummaries.length}
+            <section class="insights-grid">
+              <article class="panel ghost-panel">
+                <div class="panel-heading">
+                  <div>
+                    <p>👻 Fantasmas</p>
+                    <h2>Jornadas sin coste</h2>
+                  </div>
+                  <span class="ghost-count">{ghostSummaries.length} {ghostSummaries.length === 1 ? "fantasma" : "fantasmas"}</span>
+                </div>
+                <p class="ghost-panel-hint">
+                  Las jornadas de fantasmas se registran con normalidad (incluyendo horas extra y GPS)
+                  pero nunca generan coste para el equipo.
+                </p>
+                <div class="ghost-table">
+                  <div class="ghost-table-head">
+                    <span>Fantasma</span>
+                    <span>Días completos</span>
+                    <span>Medios días</span>
+                    <span>Horas extra</span>
+                    <span>Última jornada</span>
+                  </div>
+                  {#each ghostSummaries as ghost (ghost.id)}
+                    <div class="ghost-table-row">
+                      <span class="ghost-name">
+                        <span class="ghost-avatar" aria-hidden="true">👻</span>
+                        {ghost.name}
+                      </span>
+                      <span>{formatNumber(ghost.fullDays, 0)}</span>
+                      <span>{formatNumber(ghost.halfDays, 0)}</span>
+                      <span>{formatNumber(ghost.overtimeHours)}h</span>
+                      <span>{ghost.lastDate ? formatDate(ghost.lastDate) : "Sin actividad"}</span>
+                    </div>
+                  {/each}
+                </div>
+              </article>
+            </section>
+          {/if}
 
           <section class="insights-grid">
             <article class="panel">
@@ -1654,6 +1798,75 @@
 
   .work-accordion[open] .panel-heading {
     margin-bottom: 16px;
+  }
+
+  .ghost-panel {
+    border-color: rgba(148, 163, 184, 0.25);
+    background: linear-gradient(180deg, rgba(148, 163, 184, 0.08), var(--bg-card, transparent));
+  }
+
+  .ghost-panel-hint {
+    margin: 0 0 14px;
+    font-size: 13px;
+    color: var(--text-secondary, #475569);
+    line-height: 1.5;
+  }
+
+  .ghost-count {
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.18);
+    color: #475569;
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .ghost-table {
+    display: grid;
+    gap: 6px;
+  }
+
+  .ghost-table-head,
+  .ghost-table-row {
+    display: grid;
+    grid-template-columns: 1.6fr repeat(4, 1fr);
+    gap: 8px;
+    align-items: center;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm, 8px);
+  }
+
+  .ghost-table-head {
+    background: rgba(148, 163, 184, 0.12);
+    font-size: 11px;
+    font-weight: 800;
+    color: #475569;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .ghost-table-row {
+    background: var(--bg-input, rgba(148, 163, 184, 0.05));
+    font-size: 14px;
+  }
+
+  .ghost-table-row .ghost-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 700;
+  }
+
+  .ghost-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: rgba(148, 163, 184, 0.25);
+    display: grid;
+    place-items: center;
+    font-size: 16px;
+    line-height: 1;
   }
 
   .accordion-summary {

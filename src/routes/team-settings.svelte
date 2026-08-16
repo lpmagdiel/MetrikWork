@@ -47,6 +47,11 @@
     TEAM_PERMISSION_ACTION_LABELS,
     WEEKDAY_OPTIONS,
     normalizeNonWorkingDays,
+    getTeamGhosts,
+    addTeamGhost,
+    updateTeamGhost,
+    removeTeamGhost,
+    hasGhostCreatePermission,
   } from "../data/stores.js";
   import { navigateTo } from "../router.js";
   import { resizeImageFile, uploader } from "../data/fileHelper.js";
@@ -94,6 +99,12 @@
   let isTogglingHidden = $state(false);
   let showNewMemberPermissions = $state(false);
   let openPermissionMemberId = $state(null);
+  let ghostsList = $derived(getTeamGhosts(team));
+  let canManageGhosts = $derived(isAdmin || hasGhostCreatePermission(team, $userStore?.uid));
+  let isAddingGhost = $state(false);
+  let newGhostName = $state("");
+  let editingGhostId = $state(null);
+  let editingGhostName = $state("");
   let roleTemplates = $derived(getTeamRoleTemplates({ customRoles }));
 
   const currencyOptions = [
@@ -617,6 +628,69 @@
       await showSuccessAlert("Permisos actualizados", "Los permisos del miembro se guardaron correctamente.");
     } catch (error) {
       await showErrorAlert("Error al guardar permisos", "No se pudieron guardar los permisos.");
+    }
+  }
+
+  async function handleAddGhost() {
+    if (!canManageGhosts) return;
+    const name = String(newGhostName || "").trim();
+    if (!name) {
+      await showErrorAlert("Fantasma sin nombre", "Escribe un nombre para el fantasma.");
+      return;
+    }
+    isAddingGhost = true;
+    try {
+      await addTeamGhost(team.id, name);
+      newGhostName = "";
+      await showSuccessAlert("Fantasma añadido", `${name} ya puede recibir jornadas en el equipo.`);
+    } catch (error) {
+      await showErrorAlert("Error al crear fantasma", error?.message || "No se pudo crear el fantasma.");
+    } finally {
+      isAddingGhost = false;
+    }
+  }
+
+  function startEditingGhost(ghost) {
+    editingGhostId = ghost.id;
+    editingGhostName = ghost.name || "";
+  }
+
+  function cancelEditingGhost() {
+    editingGhostId = null;
+    editingGhostName = "";
+  }
+
+  async function handleSaveGhostName(ghost) {
+    if (!canManageGhosts) return;
+    const name = String(editingGhostName || "").trim();
+    if (!name || name === ghost.name) {
+      cancelEditingGhost();
+      return;
+    }
+    try {
+      await updateTeamGhost(team.id, ghost.id, { name });
+      editingGhostId = null;
+      editingGhostName = "";
+      await showSuccessAlert("Fantasma actualizado", "El nombre del fantasma se guardó.");
+    } catch (error) {
+      await showErrorAlert("Error al actualizar fantasma", error?.message || "No se pudo actualizar el fantasma.");
+    }
+  }
+
+  async function handleRemoveGhost(ghost) {
+    if (!canManageGhosts) return;
+    const confirmed = await confirmAlert({
+      title: "Eliminar fantasma",
+      text: `¿Eliminar a ${ghost.name || "este fantasma"}? Las jornadas registradas se mantienen, pero ya no podrás asignarle nuevas jornadas.`,
+      confirmButtonText: "Eliminar",
+      danger: true,
+    });
+    if (!confirmed) return;
+    try {
+      await removeTeamGhost(team.id, ghost.id);
+      await showSuccessAlert("Fantasma eliminado", "El fantasma se quitó del equipo.");
+    } catch (error) {
+      await showErrorAlert("Error al eliminar fantasma", error?.message || "No se pudo eliminar el fantasma.");
     }
   }
 
@@ -1363,6 +1437,100 @@
           {/each}
         </div>
       </details>
+
+      {#if canViewSettings}
+        <details class="section collapsible-section">
+          <summary class="section-summary">
+            <span>
+              <span class="ghost-emoji" aria-hidden="true">👻</span>
+              Fantasmas
+            </span>
+            <small>{ghostsList.length} {ghostsList.length === 1 ? "fantasma" : "fantasmas"}</small>
+            <ChevronDown size={18} />
+          </summary>
+          <div class="section-body members-list">
+            <p class="ghost-help">
+              Los fantasmas son miembros virtuales sin login. Puedes registrar sus jornadas y horas extra,
+              pero nunca generan coste para el equipo. Solo se muestran en la sección "Fantasmas" de las
+              estadísticas avanzadas.
+            </p>
+
+            {#if canManageGhosts}
+              <div class="ghost-add">
+                <input
+                  type="text"
+                  placeholder="Nombre del fantasma (ej. Juan sin apellido)"
+                  bind:value={newGhostName}
+                  disabled={isAddingGhost}
+                  maxlength="80"
+                  onkeydown={(event) => event.key === "Enter" && handleAddGhost()}
+                />
+                <button
+                  type="button"
+                  class="primary-btn"
+                  onclick={handleAddGhost}
+                  disabled={isAddingGhost || !newGhostName.trim()}
+                >
+                  <Plus size={18} />
+                  <span>{isAddingGhost ? "Añadiendo..." : "Añadir fantasma"}</span>
+                </button>
+              </div>
+            {/if}
+
+            {#each ghostsList as ghost (ghost.id)}
+              <article class="member-item ghost-item">
+                <div class="member-header">
+                  <div class="member-avatar ghost-avatar" aria-hidden="true">
+                    <span>👻</span>
+                  </div>
+                  <div>
+                    {#if editingGhostId === ghost.id}
+                      <input
+                        type="text"
+                        class="ghost-name-input"
+                        bind:value={editingGhostName}
+                        maxlength="80"
+                        onkeydown={(event) => event.key === "Enter" && handleSaveGhostName(ghost)}
+                      />
+                    {:else}
+                      <h3>{ghost.name}</h3>
+                      <p>Fantasma del equipo</p>
+                    {/if}
+                  </div>
+                  <span class="ghost-badge">👻 Fantasma</span>
+                </div>
+                {#if canManageGhosts}
+                  <div class="member-actions">
+                    {#if editingGhostId === ghost.id}
+                      <button class="secondary-btn" onclick={() => handleSaveGhostName(ghost)}>
+                        <Save size={16} />
+                        <span>Guardar</span>
+                      </button>
+                      <button class="secondary-btn" onclick={cancelEditingGhost}>
+                        <XCircle size={16} />
+                        <span>Cancelar</span>
+                      </button>
+                    {:else}
+                      <button class="secondary-btn" onclick={() => startEditingGhost(ghost)}>
+                        <Pencil size={16} />
+                        <span>Editar</span>
+                      </button>
+                      <button class="danger-soft-btn" onclick={() => handleRemoveGhost(ghost)}>
+                        <Trash2 size={16} />
+                        <span>Eliminar</span>
+                      </button>
+                    {/if}
+                  </div>
+                {/if}
+              </article>
+            {:else}
+              {#if !canManageGhosts}
+                <p class="ghost-empty">No hay fantasmas en este equipo todavía.</p>
+              {/if}
+            {/each}
+          </div>
+        </details>
+      {/if}
 
       <details class="section danger-section collapsible-section">
         <summary class="section-summary">
@@ -2215,6 +2383,82 @@
     color: var(--accent-ink);
     font-size: 12px;
     font-weight: 800;
+  }
+
+  .ghost-emoji {
+    font-size: 18px;
+    margin-right: 2px;
+  }
+
+  .ghost-help {
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.5;
+    background: var(--bg-input);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    margin-bottom: 12px;
+  }
+
+  .ghost-add {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    align-items: stretch;
+  }
+
+  .ghost-add input {
+    flex: 1;
+    min-width: 0;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font: inherit;
+  }
+
+  .ghost-add .primary-btn {
+    width: auto;
+    flex-shrink: 0;
+  }
+
+  .ghost-item .ghost-avatar {
+    background: rgba(148, 163, 184, 0.18);
+    color: #475569;
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    font-size: 22px;
+    line-height: 1;
+  }
+
+  .ghost-badge {
+    padding: 5px 9px;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.18);
+    color: #475569;
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .ghost-name-input {
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font: inherit;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+
+  .ghost-empty {
+    color: var(--text-secondary);
+    font-size: 13px;
   }
 
   button {

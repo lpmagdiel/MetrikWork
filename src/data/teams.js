@@ -26,6 +26,148 @@ function normalizeCompanyProfile(profile = {}) {
     );
 }
 
+function generateGhostId() {
+    return `ghost-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function normalizeGhost(ghost = {}, fallbackId = '') {
+    const id = String(ghost?.id || fallbackId || '').trim();
+    if (!id) return null;
+    const name = String(ghost?.name || '').trim().slice(0, 80);
+    if (!name) return null;
+    return {
+        id,
+        name,
+        createdAt: typeof ghost?.createdAt === 'string' ? ghost.createdAt : '',
+        createdBy: typeof ghost?.createdBy === 'string' ? ghost.createdBy : '',
+        updatedAt: typeof ghost?.updatedAt === 'string' ? ghost.updatedAt : ''
+    };
+}
+
+export function getTeamGhosts(team) {
+    if (!team) return [];
+    const ghosts = Array.isArray(team.ghosts) ? team.ghosts : [];
+    const normalized = [];
+    const seenIds = new Set();
+    for (const ghost of ghosts) {
+        const parsed = normalizeGhost(ghost, ghost?.id);
+        if (!parsed) continue;
+        if (seenIds.has(parsed.id)) continue;
+        seenIds.add(parsed.id);
+        normalized.push(parsed);
+    }
+    return normalized;
+}
+
+export function getGhostById(team, ghostId) {
+    if (!team || !ghostId) return null;
+    return getTeamGhosts(team).find((ghost) => ghost.id === ghostId) || null;
+}
+
+export function getGhostWorkdayUserId(ghostId) {
+    return `ghost-${ghostId}`;
+}
+
+export function isGhostUserId(userId) {
+    return typeof userId === 'string' && userId.startsWith('ghost-');
+}
+
+export function hasGhostControlPermission(team, uid) {
+    if (!team || !uid) return false;
+    if (team.admin === uid) return true;
+    return Boolean(team.memberPermissions?.[uid]?.ghosts?.control);
+}
+
+export function hasGhostCreatePermission(team, uid) {
+    if (!team || !uid) return false;
+    if (team.admin === uid) return true;
+    return Boolean(
+        team.memberPermissions?.[uid]?.ghosts?.create ||
+        team.memberPermissions?.[uid]?.ghosts?.control
+    );
+}
+
+function assertCanManageGhosts(team, user, action = 'create') {
+    if (!team || !user?.uid) throw new Error('Datos insuficientes para gestionar fantasmas');
+    if (team.admin === user.uid) return;
+    const memberPermissions = team.memberPermissions?.[user.uid];
+    const ghostsPermissions = memberPermissions?.ghosts || {};
+    const allowed = action === 'create'
+        ? Boolean(ghostsPermissions.create || ghostsPermissions.control)
+        : action === 'edit'
+            ? Boolean(ghostsPermissions.create || ghostsPermissions.control)
+            : action === 'delete'
+                ? Boolean(ghostsPermissions.create || ghostsPermissions.control)
+                : Boolean(ghostsPermissions.control);
+    if (!allowed) {
+        throw new Error('No tienes permisos para gestionar fantasmas en este equipo');
+    }
+}
+
+export async function addTeamGhost(teamId, name) {
+    const user = get(userStore);
+    const team = get(teamsStore).find((t) => t.id === teamId);
+    if (!team) throw new Error('Equipo no encontrado');
+    assertCanManageGhosts(team, user, 'create');
+
+    const normalizedName = String(name || '').trim();
+    if (!normalizedName) throw new Error('Escribe un nombre para el fantasma');
+
+    const now = new Date().toISOString();
+    const newGhost = {
+        id: generateGhostId(),
+        name: normalizedName,
+        createdAt: now,
+        createdBy: user.uid,
+        updatedAt: now
+    };
+    const updatedGhosts = [...getTeamGhosts(team), newGhost];
+    await updateDoc(doc(db, 'teams', teamId), {
+        ghosts: updatedGhosts,
+        updatedAt: now
+    });
+    return newGhost;
+}
+
+export async function updateTeamGhost(teamId, ghostId, data = {}) {
+    const user = get(userStore);
+    const team = get(teamsStore).find((t) => t.id === teamId);
+    if (!team) throw new Error('Equipo no encontrado');
+    if (!getGhostById(team, ghostId)) throw new Error('Fantasma no encontrado');
+    assertCanManageGhosts(team, user, 'edit');
+
+    const updatedName = String(data?.name || '').trim();
+    if (!updatedName) throw new Error('Escribe un nombre para el fantasma');
+
+    const now = new Date().toISOString();
+    const updatedGhosts = getTeamGhosts(team).map((ghost) =>
+        ghost.id === ghostId
+            ? { ...ghost, name: updatedName, updatedAt: now }
+            : ghost
+    );
+    await updateDoc(doc(db, 'teams', teamId), {
+        ghosts: updatedGhosts,
+        updatedAt: now
+    });
+    return updatedGhosts.find((ghost) => ghost.id === ghostId) || null;
+}
+
+export async function removeTeamGhost(teamId, ghostId) {
+    const user = get(userStore);
+    const team = get(teamsStore).find((t) => t.id === teamId);
+    if (!team) throw new Error('Equipo no encontrado');
+    if (!getGhostById(team, ghostId)) throw new Error('Fantasma no encontrado');
+    assertCanManageGhosts(team, user, 'delete');
+
+    const now = new Date().toISOString();
+    const updatedGhosts = getTeamGhosts(team).filter((ghost) => ghost.id !== ghostId);
+    await updateDoc(doc(db, 'teams', teamId), {
+        ghosts: updatedGhosts,
+        updatedAt: now
+    });
+    return ghostId;
+}
+
 export function getTeamMembers() {
     const teamData = get(selectedTeam);
     if (!teamData || !teamData.memberSettings) return [];
@@ -52,6 +194,7 @@ export function subscribeToTeams(uid, callback) {
     }
 
     const teamsQuery = query(collection(db, 'teams'), where('members', 'array-contains', uid));
+    let lastCachedTeamsJson = '';
 
     teamsUnsubscribe = onSnapshot(teamsQuery, (snapshot) => {
         const teams = [];
@@ -59,10 +202,15 @@ export function subscribeToTeams(uid, callback) {
             teams.push({ id: doc.id, name: doc.data().team, ...doc.data() });
         });
         teamsStore.set(teams);
-        try {
-            localStorage.setItem('userTeams', JSON.stringify(teams.map(t => ({ id: t.id, name: t.name }))));
-        } catch (e) {
-            console.log('Error saving teams to localStorage:', e);
+        const minimal = teams.map(t => ({ id: t.id, name: t.name }));
+        const serialized = JSON.stringify(minimal);
+        if (serialized !== lastCachedTeamsJson) {
+            lastCachedTeamsJson = serialized;
+            try {
+                localStorage.setItem('userTeams', serialized);
+            } catch (e) {
+                console.log('Error saving teams to localStorage:', e);
+            }
         }
 
         if (callback) callback(teams);
@@ -106,6 +254,7 @@ export async function createTeam(teamName) {
             memberPermissions: {
                 [user.uid]: createTeamPermissions(true)
             },
+            ghosts: [],
             projectBudget: 0,
             projectBudgetCurrency: 'MXN',
             active: true,

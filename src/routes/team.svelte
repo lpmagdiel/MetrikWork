@@ -70,12 +70,16 @@
     userPresenceStore,
     subscribeToUsersPresence,
     isUserPresenceActive,
+    getTeamGhosts,
+    hasGhostControlPermission,
+    getGhostWorkdayUserId,
   } from "../data/stores.js";
   import { navigateTo } from "../router.js";
   import SliceContainer from "../components/SliceContainer.svelte";
   import Toast from "../components/Toast.svelte";
   import AvatarCircle from "../components/AvatarCircle.svelte";
-  import { showErrorAlert, showSuccessAlert } from "../data/alerts.js";
+  import { showErrorAlert, showSuccessAlert, confirmAlert } from "../data/alerts.js";
+  import { captureLocationOrAbort } from "../data/geolocation.js";
   import TitleHeader from "../components/TitleHeader.svelte";
   import { optimizeCloudinary } from "../helpers/image.js";
 
@@ -134,6 +138,18 @@
     type: "full-day", // "full-day" | "half-day" | "overtime"
     overtimeHours: 0,
   });
+  let workdayGhostId = $state("");
+  let teamGhosts = $derived(getTeamGhosts(team));
+  let canControlGhosts = $derived(hasGhostControlPermission(team, $userStore?.uid));
+  let activeWorkdayGhost = $derived(
+    canControlGhosts && workdayGhostId ? teamGhosts.find((ghost) => ghost.id === workdayGhostId) || null : null,
+  );
+  let workdayTargetUserId = $derived(activeWorkdayGhost ? getGhostWorkdayUserId(activeWorkdayGhost.id) : $userStore?.uid || "");
+  let workdayTargetUserName = $derived(activeWorkdayGhost ? activeWorkdayGhost.name : $userStore?.name || $userStore?.email || "");
+  let ghostOptions = $derived([
+    { value: "", label: "Mi nombre" },
+    ...teamGhosts.map((ghost) => ({ value: ghost.id, label: `👻 ${ghost.name}` })),
+  ]);
   // Tasks state
   let showTasks = $state(false);
   let showAddTask = $state(false);
@@ -434,15 +450,34 @@
         return;
       }
 
+      try {
+        await captureLocationOrAbort({
+          onRetry: async () =>
+            confirmAlert({
+              title: "Ubicación requerida",
+              text: "No pudimos obtener tu ubicación. Activa los permisos y vuelve a intentarlo para registrar la jornada.",
+              confirmButtonText: "Reintentar",
+              cancelButtonText: "Cancelar",
+            }),
+        });
+      } catch (locationError) {
+        await showErrorAlert(
+          "Jornada no registrada",
+          locationError?.message || "La jornada no se guardó porque no se obtuvo la ubicación.",
+        );
+        return;
+      }
+
       const limitedWorkDay = applyWorkdayOvertimeLimit(workDayToRegister, team);
       const result = await registerWorkday(
         team.id,
-        $userStore.uid,
-        $userStore.name || $userStore.email,
+        workdayTargetUserId,
+        workdayTargetUserName,
         limitedWorkDay,
       );
       showWorkdayForm = false;
-      hasWorkdayToday = true;
+      workdayGhostId = "";
+      hasWorkdayToday = activeWorkdayGhost ? hasWorkdayToday : true;
       await showSuccessAlert(
         result?.queued
           ? "Guardado sin conexión"
@@ -1029,6 +1064,24 @@
             Horas extra desactivadas.
           {/if}
         </p>
+
+        {#if canControlGhosts && teamGhosts.length > 0}
+          <div class="ghost-selector">
+            <label>
+              <span class="ghost-selector-label">👻 Registrar a nombre de</span>
+              <select bind:value={workdayGhostId} aria-label="Seleccionar fantasma">
+                {#each ghostOptions as option}
+                  <option value={option.value}>{option.label}</option>
+                {/each}
+              </select>
+            </label>
+            {#if activeWorkdayGhost}
+              <p class="ghost-selector-hint">
+                Esta jornada se asignará al fantasma <strong>👻 {activeWorkdayGhost.name}</strong> y no tendrá coste.
+              </p>
+            {/if}
+          </div>
+        {/if}
 
         <div class="workday-options">
           <button
@@ -1774,6 +1827,40 @@
     font-size: 14px;
     color: var(--text-secondary);
     line-height: 1.5;
+  }
+
+  .ghost-selector {
+    background: rgba(148, 163, 184, 0.12);
+    border-radius: var(--radius-md, 12px);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .ghost-selector label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-secondary, #475569);
+  }
+
+  .ghost-selector select {
+    appearance: none;
+    border: 1px solid var(--border-color);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    border-radius: var(--radius-sm, 8px);
+    padding: 8px 10px;
+    font: inherit;
+  }
+
+  .ghost-selector-hint {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-secondary, #475569);
   }
 
   .workday-options {

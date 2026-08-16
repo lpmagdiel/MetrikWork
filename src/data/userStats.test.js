@@ -32,4 +32,24 @@ describe('user statistics earnings', () => {
     expect(getWorkEarnings(work, rates.dailyRate, rates.extraHourRate)).toBe(110);
     expect(getOutstandingAmount([work], [{ amount: 150 }], rates.dailyRate, rates.extraHourRate)).toBe(0);
   });
+
+  it('ghost workdays never generate earnings regardless of hours', () => {
+    const ghostWork = {
+      id: 'ghost-work',
+      type: 'full-day',
+      isGhost: true,
+      overtimeHours: 8,
+    };
+    const legacyGhostWork = {
+      id: 'legacy-ghost',
+      type: 'variable',
+      variableHours: 6,
+      overtimeHours: 4,
+      userId: 'ghost-abc123',
+    };
+
+    expect(getWorkEarnings(ghostWork, rates.dailyRate, rates.extraHourRate)).toBe(0);
+    expect(getWorkEarnings(legacyGhostWork, rates.dailyRate, rates.extraHourRate)).toBe(0);
+    expect(getOutstandingAmount([ghostWork, legacyGhostWork], [], rates.dailyRate, rates.extraHourRate)).toBe(0);
+  });
 });
