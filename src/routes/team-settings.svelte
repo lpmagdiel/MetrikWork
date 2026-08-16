@@ -1664,11 +1664,18 @@
   .team-settings-page {
     height: 100%;
     overflow-y: auto;
+    overflow-x: hidden;
     box-sizing: border-box;
     padding: 20px 16px var(--bottom-nav-clearance);
     padding-top: var(--page-top-safe);
     background: var(--bg-page);
     color: var(--text-primary);
+    min-width: 0;
+  }
+
+  .team-settings-page,
+  .team-settings-page * {
+    min-width: 0;
   }
 
   header {
@@ -1676,12 +1683,13 @@
     align-items: center;
     gap: 12px;
     margin-bottom: 14px;
+    min-width: 0;
   }
 
-
-
-  h2, h3, p {
+  h2, h3, h4, p {
     margin: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   h2 {
@@ -1695,7 +1703,8 @@
     margin: 0 auto;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
+    min-width: 0;
   }
 
   .section,
@@ -1705,6 +1714,8 @@
     border-radius: var(--radius-md);
     padding: 14px;
     box-shadow: var(--shadow-card);
+    min-width: 0;
+    overflow: hidden;
   }
 
   .collapsible-section {
@@ -1717,6 +1728,7 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
+    min-width: 0;
   }
 
   .section-summary,
@@ -1734,8 +1746,15 @@
   .section-summary {
     min-height: 54px;
     padding: 0 14px;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .settings-summary {
+    min-height: 50px;
+    padding: 0 12px;
+    display: flex;
     align-items: center;
     gap: 10px;
   }
@@ -1743,17 +1762,20 @@
   .section-summary > span,
   .settings-summary > span {
     min-width: 0;
+    flex: 1;
     display: inline-flex;
     align-items: center;
     gap: 8px;
     color: var(--text-primary);
     font-size: 14px;
     font-weight: 850;
+    overflow: hidden;
   }
 
   .section-summary small,
   .settings-summary small {
-    min-width: 0;
+    flex-shrink: 0;
+    max-width: 50%;
     color: var(--text-secondary);
     font-size: 12px;
     font-weight: 700;
@@ -1766,6 +1788,7 @@
   .settings-summary > :global(svg:last-child),
   .accordion-trigger :global(svg) {
     transition: transform 0.18s ease;
+    flex-shrink: 0;
   }
 
   .collapsible-section[open] > .section-summary,
@@ -1781,9 +1804,11 @@
 
   .profile-row {
     display: flex;
-    align-items: center;
-    gap: 16px;
+    align-items: flex-start;
+    gap: 14px;
     margin-bottom: 12px;
+    flex-wrap: wrap;
+    min-width: 0;
   }
 
   .profile-heading {
@@ -1839,11 +1864,13 @@
 
   .profile-fields,
   .input-with-icon {
-    flex: 1;
+    flex: 1 1 200px;
+    min-width: 0;
   }
 
   .settings-field {
     margin-bottom: 10px;
+    min-width: 0;
   }
 
   .settings-panel {
@@ -1854,19 +1881,11 @@
     overflow: hidden;
   }
 
-  .settings-summary {
-    min-height: 48px;
-    padding: 0 12px;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
-    align-items: center;
-    gap: 10px;
-  }
-
   .settings-panel-body {
     padding: 12px;
     display: grid;
     gap: 10px;
+    min-width: 0;
   }
 
   .company-grid,
@@ -1874,10 +1893,12 @@
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
+    min-width: 0;
   }
 
   .settings-panel-body .settings-field {
     margin-bottom: 0;
+    min-width: 0;
   }
 
   .field-help {
@@ -1885,6 +1906,7 @@
     font-size: 12px;
     line-height: 1.4;
     margin-top: 5px;
+    overflow-wrap: anywhere;
   }
 
   .field-label {
@@ -1918,8 +1940,9 @@
 
   .theme-presets {
     display: grid;
-    grid-template-columns: repeat(6, 28px);
+    grid-template-columns: repeat(auto-fill, minmax(28px, 1fr));
     gap: 7px;
+    max-width: 220px;
   }
 
   .theme-presets button {
@@ -1929,6 +1952,7 @@
     border: 2px solid var(--border-color);
     background: var(--preset-color);
     cursor: pointer;
+    justify-self: start;
   }
 
   .theme-presets button.active {
@@ -1939,7 +1963,7 @@
   .weekday-grid {
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 6px;
+    gap: 5px;
   }
 
   .weekday-toggle {
@@ -1951,8 +1975,12 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 0 6px;
+    padding: 0 4px;
     cursor: pointer;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+    overflow: hidden;
   }
 
   .weekday-toggle.active {
@@ -1979,6 +2007,7 @@
   select,
   textarea {
     width: 100%;
+    max-width: 100%;
     box-sizing: border-box;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
@@ -1988,6 +2017,7 @@
     padding: 9px 11px;
     margin-top: 6px;
     font-size: 14px;
+    font-family: inherit;
   }
 
   textarea {
@@ -2013,6 +2043,8 @@
     background: transparent;
     margin: 0;
     padding-left: 0;
+    min-width: 0;
+    flex: 1;
   }
 
   .flag-card {
@@ -2020,12 +2052,13 @@
     grid-template-columns: 44px minmax(0, 1fr) auto;
     align-items: center;
     gap: 12px;
-    padding: 14px 16px;
+    padding: 14px;
     margin-top: 6px;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     background: var(--bg-card);
     transition: border-color 0.18s ease, background 0.18s ease;
+    min-width: 0;
   }
 
   .flag-card-active {
@@ -2084,6 +2117,7 @@
 
   .flag-body {
     min-width: 0;
+    flex: 1;
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -2094,6 +2128,7 @@
     font-size: 14px;
     font-weight: 800;
     line-height: 1.2;
+    overflow-wrap: anywhere;
   }
 
   .flag-body small {
@@ -2101,6 +2136,7 @@
     font-size: 12px;
     font-weight: 600;
     line-height: 1.35;
+    overflow-wrap: anywhere;
   }
 
   .ios-switch {
@@ -2166,8 +2202,6 @@
   }
 
   .section-heading-row,
-  .custom-role-main,
-  .custom-role-actions,
   .custom-role-form-actions {
     display: flex;
     align-items: center;
@@ -2177,6 +2211,7 @@
   .section-heading-row {
     justify-content: space-between;
     margin-bottom: 10px;
+    flex-wrap: wrap;
   }
 
   .section-heading-row h2 {
@@ -2205,16 +2240,27 @@
     border-radius: var(--radius-sm);
     background: var(--bg-input);
     padding: 12px;
+    min-width: 0;
   }
 
   .custom-role-main {
-    justify-content: space-between;
+    display: flex;
     align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .custom-role-main > div {
+    flex: 1 1 200px;
+    min-width: 0;
   }
 
   .custom-role-main h3 {
     font-size: 15px;
     font-weight: 800;
+    overflow-wrap: anywhere;
   }
 
   .custom-role-main p,
@@ -2223,9 +2269,13 @@
     font-size: 13px;
     line-height: 1.4;
     margin-top: 4px;
+    overflow-wrap: anywhere;
   }
 
   .custom-role-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     flex-shrink: 0;
   }
 
@@ -2273,12 +2323,14 @@
   .custom-role-form-actions {
     justify-content: flex-end;
     align-items: stretch;
+    flex-wrap: wrap;
   }
 
   .custom-role-form-actions .primary-btn,
   .custom-role-form-actions .secondary-btn {
     width: auto;
     min-width: 132px;
+    flex: 1 1 140px;
   }
 
   .role-template-section {
@@ -2301,6 +2353,7 @@
     font-size: 13px;
     line-height: 1.4;
     color: var(--text-secondary);
+    overflow-wrap: anywhere;
   }
 
   .role-template-grid {
@@ -2321,6 +2374,7 @@
     flex-direction: column;
     gap: 5px;
     transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+    min-width: 0;
   }
 
   .role-template-btn:hover {
@@ -2337,18 +2391,21 @@
     font-size: 13px;
     font-weight: 800;
     color: var(--text-primary);
+    overflow-wrap: anywhere;
   }
 
   .role-template-btn small {
     font-size: 11px;
     line-height: 1.35;
     color: var(--text-secondary);
+    overflow-wrap: anywhere;
   }
 
   .permissions-editor {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    min-width: 0;
   }
 
   .permissions-editor.compact {
@@ -2357,6 +2414,7 @@
 
   .accordion {
     margin-bottom: 14px;
+    min-width: 0;
   }
 
   .accordion.member-permissions {
@@ -2376,10 +2434,12 @@
     padding: 0 12px;
     font-size: 14px;
     font-weight: 800;
+    min-width: 0;
   }
 
   .accordion-trigger :global(svg) {
     transition: transform 0.18s ease;
+    flex-shrink: 0;
   }
 
   .accordion-trigger.open :global(svg) {
@@ -2388,6 +2448,7 @@
 
   .accordion-panel {
     margin-top: 8px;
+    min-width: 0;
   }
 
   .permission-row {
@@ -2395,11 +2456,13 @@
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
     padding: 12px;
+    min-width: 0;
   }
 
   .permission-row > span {
     display: block;
     margin-bottom: 9px;
+    overflow-wrap: anywhere;
   }
 
   .permission-actions {
@@ -2417,12 +2480,15 @@
     border-radius: 8px;
     background: var(--bg-card);
     color: var(--text-secondary);
+    overflow: hidden;
   }
 
   .permission-actions input {
     width: auto;
+    min-width: 0;
     margin: 0;
     accent-color: var(--accent-color);
+    flex-shrink: 0;
   }
 
   .members-list {
@@ -2438,11 +2504,16 @@
     margin-top: 12px;
   }
 
+  .member-actions button {
+    min-width: 0;
+  }
+
   .member-header {
-        display: flex;
+    display: flex;
     align-items: center;
     gap: 10px;
-    justify-content: space-between;
+    flex-wrap: wrap;
+    min-width: 0;
   }
 
   .member-avatar {
@@ -2456,16 +2527,19 @@
     justify-content: center;
     overflow: hidden;
     flex-shrink: 0;
+    font-size: 16px;
+    font-weight: 800;
   }
 
-  .member-header > div:nth-child(2) {
-    flex: 1;
+  .member-header > div:not(.member-avatar):not(.admin-badge):not(.ghost-badge) {
+    flex: 1 1 140px;
     min-width: 0;
   }
 
   .member-header h3 {
     font-size: 15px;
     font-weight: 800;
+    overflow-wrap: anywhere;
   }
 
   .member-header p,
@@ -2473,6 +2547,7 @@
     color: var(--text-secondary);
     font-size: 13px;
     margin-top: 3px;
+    overflow-wrap: anywhere;
   }
 
   .admin-badge {
@@ -2482,6 +2557,8 @@
     color: var(--accent-ink);
     font-size: 12px;
     font-weight: 800;
+    flex-shrink: 0;
+    white-space: nowrap;
   }
 
   .ghost-emoji {
@@ -2559,10 +2636,12 @@
     border: 1px solid var(--border-color);
     cursor: pointer;
     font-size: 13px;
+    max-width: 100%;
   }
 
   .ghost-master-pill input {
     margin: 0;
+    flex-shrink: 0;
   }
 
   .ghost-master-readonly {
@@ -2600,6 +2679,7 @@
     font-size: 12px;
     font-weight: 800;
     white-space: nowrap;
+    flex-shrink: 0;
   }
 
   .ghost-name-input {
@@ -2635,6 +2715,8 @@
     gap: 8px;
     padding: 0 14px;
     font-weight: 800;
+    font-size: 14px;
+    min-width: 0;
   }
 
   .primary-btn {
@@ -2676,9 +2758,232 @@
     color: var(--text-secondary);
   }
 
-  @media (max-width: 620px) {
-    .company-grid {
+  /* ---- Modern tokens (refined card spacing + subtle elevation) ---- */
+  .section {
+    border-radius: 14px;
+    padding: 16px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.05);
+  }
+
+  .section-heading-row h2 {
+    font-size: 17px;
+    letter-spacing: -0.005em;
+  }
+
+  .section-summary {
+    padding: 0 16px;
+  }
+
+  .settings-summary {
+    padding: 0 14px;
+  }
+
+  .section-summary > span,
+  .settings-summary > span {
+    font-size: 15px;
+  }
+
+  .flag-card {
+    border-radius: 14px;
+    padding: 14px 16px;
+  }
+
+  .ios-switch {
+    transition: background 0.22s ease, box-shadow 0.22s ease;
+  }
+
+  .ios-switch:hover:not(:disabled) {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent-color) 12%, transparent);
+  }
+
+  /* ---- Mobile breakpoints ---- */
+  @media (max-width: 720px) {
+    .team-settings-page {
+      padding: 16px 14px var(--bottom-nav-clearance);
+    }
+
+    .section, .member-item {
+      padding: 14px;
+    }
+
+    .settings-panel-body {
+      padding: 12px;
+    }
+
+    .flag-card {
+      padding: 12px 14px;
+      gap: 10px;
+    }
+
+    .company-grid,
+    .operation-grid {
       grid-template-columns: 1fr;
+    }
+
+    .profile-row {
+      gap: 12px;
+    }
+
+    .team-photo {
+      width: 56px;
+      height: 56px;
+    }
+
+    .profile-fields {
+      flex-basis: 100%;
+    }
+
+    .role-template-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .member-actions {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .section-summary small,
+    .settings-summary small {
+      max-width: 40%;
+    }
+  }
+
+  @media (max-width: 540px) {
+    .team-settings-page {
+      padding: 14px 12px var(--bottom-nav-clearance);
+    }
+
+    .section {
+      padding: 12px;
+      border-radius: 12px;
+    }
+
+    .section-summary {
+      padding: 0 12px;
+      min-height: 50px;
+    }
+
+    .settings-summary {
+      padding: 0 12px;
+      min-height: 46px;
+    }
+
+    .section-summary > span,
+    .settings-summary > span {
+      font-size: 14px;
+    }
+
+    .section-heading-row h2 {
+      font-size: 16px;
+    }
+
+    .profile-fields {
+      flex-basis: 100%;
+    }
+
+    .flag-card {
+      grid-template-columns: 40px minmax(0, 1fr) auto;
+      gap: 10px;
+    }
+
+    .flag-icon {
+      width: 40px;
+      height: 40px;
+    }
+
+    .ios-switch {
+      width: 46px;
+      height: 26px;
+    }
+
+    .ios-switch.on .ios-switch-handle {
+      transform: translateX(20px);
+    }
+
+    .ios-switch-handle {
+      width: 20px;
+      height: 20px;
+    }
+
+    .weekday-grid {
+      gap: 4px;
+    }
+
+    .weekday-toggle {
+      padding: 0 2px;
+      font-size: 11px;
+      min-height: 34px;
+    }
+
+    .permission-actions {
+      grid-template-columns: 1fr;
+    }
+
+    .member-actions {
+      grid-template-columns: 1fr;
+    }
+
+    .custom-role-form-actions {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .custom-role-form-actions .primary-btn,
+    .custom-role-form-actions .secondary-btn {
+      width: 100%;
+      min-width: 0;
+    }
+
+    .admin-badge,
+    .ghost-badge {
+      font-size: 11px;
+      padding: 4px 8px;
+    }
+
+    .role-template-btn {
+      min-height: 76px;
+      padding: 10px;
+    }
+  }
+
+  @media (max-width: 380px) {
+    .team-settings-page {
+      padding: 12px 10px var(--bottom-nav-clearance);
+    }
+
+    .section, .member-item {
+      padding: 11px;
+    }
+
+    .section-summary {
+      padding: 0 10px;
+      gap: 8px;
+    }
+
+    .settings-summary {
+      padding: 0 10px;
+    }
+
+    .flag-card {
+      padding: 11px 12px;
+      gap: 8px;
+    }
+
+    .flag-icon {
+      width: 36px;
+      height: 36px;
+    }
+
+    .weekday-toggle {
+      font-size: 10px;
+      padding: 0 1px;
+    }
+
+    .primary-btn,
+    .secondary-btn,
+    .danger-soft-btn,
+    .delete-team-btn {
+      padding: 0 10px;
+      font-size: 13px;
     }
   }
 </style>

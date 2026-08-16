@@ -310,6 +310,16 @@ describe('firestore composite indexes contract', () => {
     expect(findIndex(indexes, 'works', ['teamId', 'date', '__name__'])).toBeDefined();
   });
 
+  it('incluye el índice team_payments(teamId, date, __name__) para la consulta de team-stats', () => {
+    const indexes = readIndexes();
+    expect(findIndex(indexes, 'team_payments', ['teamId', 'date', '__name__'])).toBeDefined();
+  });
+
+  it('incluye el índice absenceRequests(teamId, status, endDate, startDate, __name__) para la consulta de team-stats', () => {
+    const indexes = readIndexes();
+    expect(findIndex(indexes, 'absenceRequests', ['teamId', 'status', 'endDate', 'startDate', '__name__'])).toBeDefined();
+  });
+
   it('incluye el índice works(teamId, userId, date) usado en works.js', () => {
     const indexes = readIndexes();
     expect(findIndex(indexes, 'works', ['teamId', 'userId', 'date'])).toBeDefined();
