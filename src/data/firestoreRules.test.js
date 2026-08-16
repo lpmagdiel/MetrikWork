@@ -1,8 +1,14 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const rules = readFileSync(resolve(process.cwd(), 'firestore.rules'), 'utf8');
+
+function readIndexes() {
+  const path = resolve(process.cwd(), 'firestore.indexes.json');
+  if (!existsSync(path)) return null;
+  return JSON.parse(readFileSync(path, 'utf8'));
+}
 
 function stripCommentsAndStrings(source) {
   return source
@@ -254,5 +260,49 @@ describe('firestore ghosts rules contract', () => {
     const worksSection = rules.split('match /works/{workId}')[1] || '';
     expect(worksSection).toContain('allow update, delete');
     expect(worksSection).toContain('ghosts", "control"');
+  });
+});
+
+describe('firestore composite indexes contract', () => {
+  function findIndex(indexes, collectionGroup, fieldPaths) {
+    if (!indexes?.indexes) return null;
+    return indexes.indexes.find((entry) => {
+      if (entry.collectionGroup !== collectionGroup) return false;
+      const actual = (entry.fields || []).map((field) => field.fieldPath);
+      return actual.length === fieldPaths.length &&
+        fieldPaths.every((path) => actual.includes(path));
+    });
+  }
+
+  it('declara firestore.indexes.json con los índices compuestos necesarios', () => {
+    const indexes = readIndexes();
+    expect(indexes).not.toBeNull();
+    expect(Array.isArray(indexes.indexes)).toBe(true);
+    expect(indexes.indexes.length).toBeGreaterThan(0);
+  });
+
+  it('incluye el índice team_payments(teamId, date) usado en team-stats', () => {
+    const indexes = readIndexes();
+    expect(findIndex(indexes, 'team_payments', ['teamId', 'date'])).toBeDefined();
+  });
+
+  it('incluye el índice works(teamId, date) usado en team-stats', () => {
+    const indexes = readIndexes();
+    expect(findIndex(indexes, 'works', ['teamId', 'date'])).toBeDefined();
+  });
+
+  it('incluye el índice works(teamId, userId, date) usado en works.js', () => {
+    const indexes = readIndexes();
+    expect(findIndex(indexes, 'works', ['teamId', 'userId', 'date'])).toBeDefined();
+  });
+
+  it('incluye el índice team_payments(teamId, userId) usado en user-stats', () => {
+    const indexes = readIndexes();
+    expect(findIndex(indexes, 'team_payments', ['teamId', 'userId'])).toBeDefined();
+  });
+
+  it('incluye el índice absenceRequests(teamId, status, endDate, startDate) usado en team-stats', () => {
+    const indexes = readIndexes();
+    expect(findIndex(indexes, 'absenceRequests', ['teamId', 'status', 'endDate', 'startDate'])).toBeDefined();
   });
 });

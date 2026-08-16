@@ -11,7 +11,7 @@ import { applyWorkdayOvertimeLimit, assertWorkingDay } from './workLimits.js';
 import { geocodeAddress, getStoredUserGpsLocation, normalizeCoordinates } from '../helpers/navigation.js';
 import { userStore } from './auth.js';
 import { teamsStore } from './teams.js';
-import { getTeamGhosts, getGhostById, hasGhostControlPermission } from './teams.js';
+import { getTeamGhosts, getGhostById, hasGhostControlPermission, isGhostUserId } from './teams.js';
 
 const REGISTER_WORKDAY_OPERATION = 'registerWorkday';
 const DUPLICATE_REGULAR_WORKDAY_MESSAGE = 'Ya existe una jornada completa o media jornada para este día.';
