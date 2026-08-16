@@ -1,11 +1,57 @@
-import { collection, doc, getDocs, query, updateDoc, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, updateDoc, where } from 'firebase/firestore';
 import { db } from './firebase.js';
+import { getTeamGhosts } from './teams.js';
 
 function buildWorksQuery(teamId, { startDate, endDate } = {}) {
     const constraints = [where('teamId', '==', teamId)];
     if (startDate) constraints.push(where('date', '>=', startDate));
     if (endDate) constraints.push(where('date', '<=', endDate));
     return query(collection(db, 'works'), ...constraints);
+}
+
+function buildGhostWorks(teamId, teamData, { startDate, endDate } = {}) {
+    if (!teamData) return [];
+    const ghosts = getTeamGhosts(teamData);
+    const result = [];
+    for (const ghost of ghosts) {
+        const userId = `ghost-${ghost.id}`;
+        const userName = ghost.name;
+        const entries = [...(ghost.worksdays || []), ...(ghost.overtime || [])];
+        for (const entry of entries) {
+            if (!entry?.date) continue;
+            if (startDate && entry.date < startDate) continue;
+            if (endDate && entry.date > endDate) continue;
+            const isOvertime = entry.type === 'overtime';
+            const overtimeHours = isOvertime
+                ? (Number(entry.overtimeHours ?? entry.hours) || 0)
+                : (Number(entry.overtimeHours) || 0);
+            result.push({
+                id: entry.id,
+                teamId,
+                userId,
+                userName,
+                type: isOvertime ? 'overtime' : (entry.type || 'full-day'),
+                overtimeHours,
+                hours: Number(entry.hours) || overtimeHours || 0,
+                date: entry.date,
+                taskTitle: entry.taskTitle || '',
+                note: entry.note || '',
+                startedAt: entry.startedAt || '',
+                endedAt: entry.endedAt || '',
+                durationSeconds: Number(entry.durationSeconds) || 0,
+                durationHours: Number(entry.durationHours) || 0,
+                variableHours: Number(entry.variableHours) || 0,
+                timerMode: entry.timerMode || '',
+                assignedBy: entry.assignedBy || '',
+                assignedByName: entry.assignedByName || '',
+                isGhost: true,
+                ghostId: ghost.id,
+                createdAt: entry.createdAt || '',
+                paid: Boolean(entry.paid)
+            });
+        }
+    }
+    return result;
 }
 
 export async function getTeamAdvancedStatsData(teamId, { startDate, endDate } = {}) {
@@ -34,7 +80,8 @@ export async function getTeamAdvancedStatsData(teamId, { startDate, endDate } = 
     const paymentsQuery = query(collection(db, 'team_payments'), ...paymentsConstraints);
     const absenceRequestsQuery = query(collection(db, 'absenceRequests'), ...absenceConstraints);
 
-    const [worksSnapshot, paymentsSnapshot, inventorySnapshot, locationsSnapshot, absenceRequestsSnapshot] = await Promise.all([
+    const [teamSnapshot, worksSnapshot, paymentsSnapshot, inventorySnapshot, locationsSnapshot, absenceRequestsSnapshot] = await Promise.all([
+        getDoc(doc(db, 'teams', teamId)),
         getDocs(worksQuery),
         getDocs(paymentsQuery),
         getDocs(collection(db, 'teams', teamId, 'inventory')),
@@ -46,6 +93,11 @@ export async function getTeamAdvancedStatsData(teamId, { startDate, endDate } = 
     worksSnapshot.forEach((workDoc) => {
         works.push({ id: workDoc.id, ...workDoc.data() });
     });
+
+    const teamData = teamSnapshot.exists() ? teamSnapshot.data() : null;
+    if (teamData) {
+        works.push(...buildGhostWorks(teamId, teamData, { startDate, endDate }));
+    }
     works.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
     const payments = [];

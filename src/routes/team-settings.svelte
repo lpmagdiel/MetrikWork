@@ -103,8 +103,48 @@
   let canManageGhosts = $derived(isAdmin || hasGhostCreatePermission(team, $userStore?.uid));
   let isAddingGhost = $state(false);
   let newGhostName = $state("");
+  let newGhostMasters = $state([]);
   let editingGhostId = $state(null);
   let editingGhostName = $state("");
+  let editingGhostMasters = $state([]);
+
+  function masterCandidates() {
+    const candidates = [];
+    const adminUid = team?.admin;
+    if (adminUid) {
+      candidates.push({
+        uid: adminUid,
+        name: team?.membersData?.find((m) => m.id === adminUid)?.name || "Administrador",
+        isAdmin: true
+      });
+    }
+    (team?.membersData || []).forEach((member) => {
+      if (member?.id && member.id !== adminUid) {
+        candidates.push({
+          uid: member.id,
+          name: member.name || member.email || "Miembro",
+          isAdmin: false
+        });
+      }
+    });
+    return candidates;
+  }
+
+  function toggleMaster(list, uid) {
+    if (list.includes(uid)) return list.filter((id) => id !== uid);
+    return [...list, uid];
+  }
+
+  function formatGhostSummary(ghost) {
+    const worksdays = (ghost.worksdays || []).length;
+    const overtime = (ghost.overtime || []).length;
+    const masters = (ghost.masters || []).length;
+    const parts = [];
+    if (worksdays) parts.push(`${worksdays} jornada${worksdays === 1 ? "" : "s"}`);
+    if (overtime) parts.push(`${overtime} overtime`);
+    if (masters) parts.push(`${masters} master${masters === 1 ? "" : "s"}`);
+    return parts.length ? parts.join(" • ") : "Sin actividad";
+  }
   let roleTemplates = $derived(getTeamRoleTemplates({ customRoles }));
 
   const currencyOptions = [
@@ -638,10 +678,15 @@
       await showErrorAlert("Fantasma sin nombre", "Escribe un nombre para el fantasma.");
       return;
     }
+    if (newGhostMasters.length === 0) {
+      await showErrorAlert("Sin masters", "Selecciona al menos un master (admin o miembro) responsable del fantasma.");
+      return;
+    }
     isAddingGhost = true;
     try {
-      await addTeamGhost(team.id, name);
+      await addTeamGhost(team.id, { name, masters: newGhostMasters });
       newGhostName = "";
+      newGhostMasters = [];
       await showSuccessAlert("Fantasma añadido", `${name} ya puede recibir jornadas en el equipo.`);
     } catch (error) {
       await showErrorAlert("Error al crear fantasma", error?.message || "No se pudo crear el fantasma.");
@@ -653,25 +698,35 @@
   function startEditingGhost(ghost) {
     editingGhostId = ghost.id;
     editingGhostName = ghost.name || "";
+    editingGhostMasters = Array.isArray(ghost.masters) ? [...ghost.masters] : [];
   }
 
   function cancelEditingGhost() {
     editingGhostId = null;
     editingGhostName = "";
+    editingGhostMasters = [];
   }
 
   async function handleSaveGhostName(ghost) {
     if (!canManageGhosts) return;
     const name = String(editingGhostName || "").trim();
-    if (!name || name === ghost.name) {
+    const updatedFields = {};
+    if (name && name !== ghost.name) updatedFields.name = name;
+    if (editingGhostMasters.length === 0) {
+      await showErrorAlert("Sin masters", "Asigna al menos un master al fantasma.");
+      return;
+    }
+    const sameMasters = JSON.stringify([...(ghost.masters || [])].sort()) === JSON.stringify([...editingGhostMasters].sort());
+    if (!sameMasters) updatedFields.masters = editingGhostMasters;
+
+    if (Object.keys(updatedFields).length === 0) {
       cancelEditingGhost();
       return;
     }
     try {
-      await updateTeamGhost(team.id, ghost.id, { name });
-      editingGhostId = null;
-      editingGhostName = "";
-      await showSuccessAlert("Fantasma actualizado", "El nombre del fantasma se guardó.");
+      await updateTeamGhost(team.id, ghost.id, updatedFields);
+      cancelEditingGhost();
+      await showSuccessAlert("Fantasma actualizado", "Los datos del fantasma se guardaron.");
     } catch (error) {
       await showErrorAlert("Error al actualizar fantasma", error?.message || "No se pudo actualizar el fantasma.");
     }
@@ -1465,11 +1520,27 @@
                   maxlength="80"
                   onkeydown={(event) => event.key === "Enter" && handleAddGhost()}
                 />
+                <div class="ghost-masters">
+                  <small class="ghost-masters-label">Masters (al menos uno)</small>
+                  <div class="ghost-masters-options">
+                    {#each masterCandidates() as candidate (candidate.uid)}
+                      <label class="ghost-master-pill">
+                        <input
+                          type="checkbox"
+                          checked={newGhostMasters.includes(candidate.uid)}
+                          disabled={isAddingGhost}
+                          onchange={() => (newGhostMasters = toggleMaster(newGhostMasters, candidate.uid))}
+                        />
+                        <span>{candidate.name}{candidate.isAdmin ? " (admin)" : ""}</span>
+                      </label>
+                    {/each}
+                  </div>
+                </div>
                 <button
                   type="button"
                   class="primary-btn"
                   onclick={handleAddGhost}
-                  disabled={isAddingGhost || !newGhostName.trim()}
+                  disabled={isAddingGhost || !newGhostName.trim() || newGhostMasters.length === 0}
                 >
                   <Plus size={18} />
                   <span>{isAddingGhost ? "Añadiendo..." : "Añadir fantasma"}</span>
@@ -1494,11 +1565,39 @@
                       />
                     {:else}
                       <h3>{ghost.name}</h3>
-                      <p>Fantasma del equipo</p>
+                      <p>{formatGhostSummary(ghost)}</p>
                     {/if}
                   </div>
                   <span class="ghost-badge">👻 Fantasma</span>
                 </div>
+                {#if editingGhostId === ghost.id}
+                  <div class="ghost-masters">
+                    <small class="ghost-masters-label">Masters (al menos uno)</small>
+                    <div class="ghost-masters-options">
+                      {#each masterCandidates() as candidate (candidate.uid)}
+                        <label class="ghost-master-pill">
+                          <input
+                            type="checkbox"
+                            checked={editingGhostMasters.includes(candidate.uid)}
+                            onchange={() => (editingGhostMasters = toggleMaster(editingGhostMasters, candidate.uid))}
+                          />
+                          <span>{candidate.name}{candidate.isAdmin ? " (admin)" : ""}</span>
+                        </label>
+                      {/each}
+                    </div>
+                  </div>
+                {:else}
+                  <div class="ghost-masters-readonly">
+                    <small class="ghost-masters-label">Masters:</small>
+                    <div class="ghost-masters-options">
+                      {#each masterCandidates().filter((c) => (ghost.masters || []).includes(c.uid)) as candidate (candidate.uid)}
+                        <span class="ghost-master-readonly">{candidate.name}</span>
+                      {:else}
+                        <span class="ghost-master-readonly empty">Sin masters asignados</span>
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
                 {#if canManageGhosts}
                   <div class="member-actions">
                     {#if editingGhostId === ghost.id}
@@ -2402,12 +2501,13 @@
 
   .ghost-add {
     display: flex;
-    gap: 8px;
+    flex-direction: column;
+    gap: 10px;
     margin-bottom: 12px;
     align-items: stretch;
   }
 
-  .ghost-add input {
+  .ghost-add input[type="text"] {
     flex: 1;
     min-width: 0;
     padding: 10px 12px;
@@ -2421,6 +2521,63 @@
   .ghost-add .primary-btn {
     width: auto;
     flex-shrink: 0;
+    align-self: flex-start;
+  }
+
+  .ghost-masters,
+  .ghost-masters-readonly {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+  }
+
+  .ghost-masters-label {
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .ghost-masters-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .ghost-master-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: var(--bg-surface, var(--bg-input));
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+    font-size: 13px;
+  }
+
+  .ghost-master-pill input {
+    margin: 0;
+  }
+
+  .ghost-master-readonly {
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.18);
+    color: #475569;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .ghost-master-readonly.empty {
+    background: transparent;
+    border: 1px dashed var(--border-color);
+    color: var(--text-secondary);
   }
 
   .ghost-item .ghost-avatar {

@@ -1,3 +1,4 @@
+import { get } from 'svelte/store';
 import { db } from './firebase.js';
 import { collection, addDoc, query, where, getDocs, doc, getDoc, setDoc, updateDoc, runTransaction } from 'firebase/firestore';
 import {
@@ -11,7 +12,17 @@ import { applyWorkdayOvertimeLimit, assertWorkingDay } from './workLimits.js';
 import { geocodeAddress, getStoredUserGpsLocation, normalizeCoordinates } from '../helpers/navigation.js';
 import { userStore } from './auth.js';
 import { teamsStore } from './teams.js';
-import { getTeamGhosts, getGhostById, hasGhostControlPermission, isGhostUserId } from './teams.js';
+import {
+    getTeamGhosts,
+    getGhostById,
+    getGhostIdFromUserId,
+    hasGhostControlPermission,
+    isGhostMaster,
+    isGhostUserId,
+    addGhostWorkday,
+    removeGhostWorkday,
+    findGhostRegularWorkday
+} from './teams.js';
 
 const REGISTER_WORKDAY_OPERATION = 'registerWorkday';
 const DUPLICATE_REGULAR_WORKDAY_MESSAGE = 'Ya existe una jornada completa o media jornada para este día.';
@@ -33,9 +44,7 @@ const WORKDAY_OPTIONAL_FIELDS = [
     'checkInGps',
     'checkInLocationCapturedAt',
     'checkOutGps',
-    'checkOutLocationCapturedAt',
-    'isGhost',
-    'ghostId'
+    'checkOutLocationCapturedAt'
 ];
 
 export function getTodayDateString() {
@@ -85,8 +94,17 @@ function getRegularWorkdayDocId(teamId, userId, date) {
         .join('__');
 }
 
+function findGhostRegularWorkdayEntry(team, ghostId, date, { excludeId = '' } = {}) {
+    return findGhostRegularWorkday(team, ghostId, date, { excludeId });
+}
+
 async function findRegularWorkdayForDate(teamId, userId, date, { excludeId = '' } = {}) {
     if (!teamId || !userId || !date) return null;
+    if (isGhostUserId(userId)) {
+        const ghostId = getGhostIdFromUserId(userId);
+        const team = get(teamsStore).find((t) => t.id === teamId);
+        return findGhostRegularWorkdayEntry(team, ghostId, date, { excludeId });
+    }
     const worksQuery = query(
         collection(db, 'works'),
         where('teamId', '==', teamId),
@@ -98,6 +116,54 @@ async function findRegularWorkdayForDate(teamId, userId, date, { excludeId = '' 
         if (excludeId && workDoc.id === excludeId) return false;
         return isRegularWorkdayType(workDoc.data().type);
     }) || null;
+}
+
+function getCurrentTeam(teamId) {
+    return get(teamsStore).find((t) => t.id === teamId) || null;
+}
+
+function mapGhostWorkdaysAsWorks(teamId) {
+    const team = get(teamsStore);
+    const target = team.find((t) => t.id === teamId);
+    if (!target) return [];
+    const ghosts = getTeamGhosts(target);
+    const result = [];
+    for (const ghost of ghosts) {
+        const userId = `ghost-${ghost.id}`;
+        const userName = ghost.name;
+        const ghostWorkdays = [...(ghost.worksdays || []), ...(ghost.overtime || [])];
+        for (const entry of ghostWorkdays) {
+            const isOvertime = entry.type === 'overtime';
+            const overtimeHours = isOvertime
+                ? (Number(entry.overtimeHours ?? entry.hours) || 0)
+                : (Number(entry.overtimeHours) || 0);
+            result.push({
+                id: entry.id,
+                teamId,
+                userId,
+                userName,
+                type: isOvertime ? 'overtime' : (entry.type || 'full-day'),
+                overtimeHours,
+                hours: Number(entry.hours) || overtimeHours || 0,
+                date: entry.date,
+                taskTitle: entry.taskTitle || '',
+                note: entry.note || '',
+                startedAt: entry.startedAt || '',
+                endedAt: entry.endedAt || '',
+                durationSeconds: Number(entry.durationSeconds) || 0,
+                durationHours: Number(entry.durationHours) || 0,
+                variableHours: Number(entry.variableHours) || 0,
+                timerMode: entry.timerMode || '',
+                assignedBy: entry.assignedBy || '',
+                assignedByName: entry.assignedByName || '',
+                isGhost: true,
+                ghostId: ghost.id,
+                createdAt: entry.createdAt || '',
+                paid: Boolean(entry.paid)
+            });
+        }
+    }
+    return result;
 }
 
 async function saveRegularWorkday(teamId, userId, workDayDoc) {
@@ -137,6 +203,11 @@ async function saveRegularWorkday(teamId, userId, workDayDoc) {
 export async function hasWorkdayForDate(teamId, userId, date = getTodayDateString()) {
     if (!teamId || !userId) return false;
     const hasQueuedWorkday = await hasQueuedRegularWorkdayForDate(teamId, userId, date);
+    if (isGhostUserId(userId)) {
+        const ghostId = getGhostIdFromUserId(userId);
+        const team = getCurrentTeam(teamId);
+        return hasQueuedWorkday || Boolean(findGhostRegularWorkdayEntry(team, ghostId, date));
+    }
     const worksQuery = query(
         collection(db, 'works'),
         where('teamId', '==', teamId),
@@ -176,12 +247,18 @@ function resolveGhostWorkdayContext({ teamId, userId, workDay }) {
         throw new Error("Equipo no encontrado para registrar la jornada del fantasma");
     }
     const currentUser = get(userStore);
-    if (!hasGhostControlPermission(team, currentUser?.uid)) {
-        throw new Error("No tienes permisos para registrar jornadas de fantasmas");
+    const ghostId = getGhostIdFromUserId(userId);
+    if (!ghostId) {
+        throw new Error("Identificador de fantasma inválido");
     }
-    const ghostId = userId.replace(/^ghost-/, "");
-    if (!getGhostById(team, ghostId)) {
+    const ghost = getGhostById(team, ghostId);
+    if (!ghost) {
         throw new Error("El fantasma seleccionado ya no existe en este equipo");
+    }
+    const allowed = hasGhostControlPermission(team, currentUser?.uid)
+        || isGhostMaster(team, ghostId, currentUser?.uid);
+    if (!allowed) {
+        throw new Error("No tienes permisos para registrar jornadas de fantasmas");
     }
     return {
         ...(workDay || {}),
@@ -253,6 +330,9 @@ async function hasQueuedRegularWorkdayForDate(teamId, userId, date) {
         const payload = operation.payload || {};
         const workDay = payload.workDay || {};
         const type = workDay.type || 'full-day';
+        if (isGhostUserId(userId) && !isGhostUserId(payload.userId)) {
+            return false;
+        }
         return payload.teamId === teamId &&
             payload.userId === userId &&
             resolveWorkdayDate(workDay, operation) === date &&
@@ -287,6 +367,18 @@ export async function executeRegisterWorkday({ teamId, userId, userName, workDay
         clientOperationId: workDay.clientOperationId || operation?.id
     }, operation);
     const workDayWithLocation = await ensureStoredMemberLocationAddress(datedWorkDay);
+
+    if (isGhostUserId(userId)) {
+        const entry = await addGhostWorkday(
+            teamId,
+            ghostedWorkDay.ghostId,
+            { ...workDayWithLocation, clientOperationId: workDayWithLocation.clientOperationId || operation?.id },
+            { uid: get(userStore)?.uid, name: get(userStore)?.name || get(userStore)?.email }
+        );
+        rememberLocalWorkday(entry.date);
+        return entry.id;
+    }
+
     const newWork = buildWorkdayDoc(teamId, userId, userName, workDayWithLocation, teamData);
 
     if (isRegularWorkday(newWork)) {
@@ -345,6 +437,33 @@ export async function assignWorkdayToMember(teamId, userId, userName, workDay, a
     assertWorkingDay(teamData, workDay.date);
     const ghostedWorkDay = resolveGhostWorkdayContext({ teamId, userId, workDay });
     const limitedWorkDay = withResolvedWorkdayDate(applyWorkdayOvertimeLimit(ghostedWorkDay, teamData));
+    const assignedByUid = assignedBy?.uid || assignedBy?.id || assignedBy || get(userStore)?.uid || '';
+    const assignedByName = assignedBy?.name || get(userStore)?.name || get(userStore)?.email || '';
+
+    if (isGhostUserId(userId)) {
+        const ghostId = getGhostIdFromUserId(userId);
+        const entry = await addGhostWorkday(
+            teamId,
+            ghostId,
+            {
+                ...limitedWorkDay,
+                date: workDay.date,
+                type: limitedWorkDay.type || workDay.type || 'full-day',
+                taskTitle: workDay.taskTitle || limitedWorkDay.taskTitle || '',
+                note: workDay.note || limitedWorkDay.note || '',
+                startedAt: workDay.startedAt || limitedWorkDay.startedAt || '',
+                endedAt: workDay.endedAt || limitedWorkDay.endedAt || '',
+                durationSeconds: workDay.durationSeconds || limitedWorkDay.durationSeconds || 0,
+                durationHours: workDay.durationHours || limitedWorkDay.durationHours || 0,
+                variableHours: workDay.variableHours || limitedWorkDay.variableHours || 0,
+                timerMode: workDay.timerMode || limitedWorkDay.timerMode || '',
+                overtimeHours: limitedWorkDay.overtimeHours || 0
+            },
+            { uid: assignedByUid, name: assignedByName }
+        );
+        return entry.id;
+    }
+
     const workData = {
         teamId,
         userId,
@@ -353,11 +472,11 @@ export async function assignWorkdayToMember(teamId, userId, userName, workDay, a
         overtimeHours: limitedWorkDay.overtimeHours ? Number(limitedWorkDay.overtimeHours) : 0,
         date: limitedWorkDay.date,
         note: limitedWorkDay.note?.trim() || '',
-        assignedBy,
+        assignedBy: assignedByUid,
         updatedAt: new Date().toISOString()
     };
 
-    ['taskTitle', 'startedAt', 'endedAt', 'durationSeconds', 'durationHours', 'variableHours', 'timerMode', 'memberGps', 'memberLocationCapturedAt', 'memberLocationAddress', 'isGhost', 'ghostId'].forEach((field) => {
+    ['taskTitle', 'startedAt', 'endedAt', 'durationSeconds', 'durationHours', 'variableHours', 'timerMode', 'memberGps', 'memberLocationCapturedAt', 'memberLocationAddress'].forEach((field) => {
         if (limitedWorkDay[field] !== undefined && limitedWorkDay[field] !== null) {
             workData[field] = limitedWorkDay[field];
         }
@@ -395,11 +514,18 @@ export const getTeamWorks = async (teamId) => {
     snapshot.forEach((doc) => {
         works.push({ id: doc.id, ...doc.data() });
     });
-    return works.sort((a, b) => getWorkDateKey(b).localeCompare(getWorkDateKey(a)));
+    const ghostWorks = mapGhostWorkdaysAsWorks(teamId);
+    return [...works, ...ghostWorks].sort((a, b) => getWorkDateKey(b).localeCompare(getWorkDateKey(a)));
 }
 
 export const getUserTeamWorks = async (teamId, userId) => {
     if (!teamId || !userId) return [];
+    if (isGhostUserId(userId)) {
+        const ghostWorks = mapGhostWorkdaysAsWorks(teamId);
+        return ghostWorks
+            .filter((work) => work.userId === userId)
+            .sort((a, b) => getWorkDateKey(b).localeCompare(getWorkDateKey(a)));
+    }
     const worksQuery = query(
         collection(db, 'works'),
         where('teamId', '==', teamId),
@@ -423,6 +549,12 @@ export const getWorksByTeamId = async (teamId) => {
         if (!groups[key]) groups[key] = [];
         groups[key].push(work);
     });
+    const ghostWorks = mapGhostWorkdaysAsWorks(teamId);
+    for (const work of ghostWorks) {
+        const key = work.userId || 'unassigned';
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(work);
+    }
     return groups;
 }
 export async function getTeamStats(teamId, userId, period = 'month', dailyRate = 0, extraHourRate = 0) {
@@ -439,19 +571,24 @@ export async function getTeamStats(teamId, userId, period = 'month', dailyRate =
             startDate = `${year}-01-01`;
             endDate = `${year}-12-31`;
         }
-        const worksQuery = query(
-            collection(db, 'works'),
-            where('teamId', '==', teamId),
-            where('userId', '==', userId),
-            where('date', '>=', startDate),
-            where('date', '<=', endDate)
-        );
-        const snapshot = await getDocs(worksQuery);
-        const works = [];
-        snapshot.forEach((doc) => {
-            works.push({ id: doc.id, ...doc.data() });
-        });
-        
+        let works = [];
+        if (isGhostUserId(userId)) {
+            const ghostWorks = mapGhostWorkdaysAsWorks(teamId).filter((work) => work.userId === userId);
+            works = ghostWorks.filter((work) => work.date >= startDate && work.date <= endDate);
+        } else {
+            const worksQuery = query(
+                collection(db, 'works'),
+                where('teamId', '==', teamId),
+                where('userId', '==', userId),
+                where('date', '>=', startDate),
+                where('date', '<=', endDate)
+            );
+            const snapshot = await getDocs(worksQuery);
+            snapshot.forEach((doc) => {
+                works.push({ id: doc.id, ...doc.data() });
+            });
+        }
+
         // Use the passed rates
         let totalFullDays = 0, totalHalfDays = 0, totalOvertimeHours = 0, totalEarnings = 0;
         works.forEach(work => {

@@ -14,10 +14,13 @@
   import { confirmAlert, showErrorAlert } from "../data/alerts.js";
   import { navigateTo } from "../router.js";
   import Toast from "../components/Toast.svelte";
+  import WorkdayLoadingOverlay from "../components/WorkdayLoadingOverlay.svelte";
 
   let hasWorkdayToday = $state(false);
   let isCheckingWorkday = $state(false);
   let isSaving = $state(false);
+  let loadingPhase = $state("idle");
+  let loadingLabel = $state("");
   let messageToast = $state("");
   let typeToast = $state("success");
   let showToast = $state(false);
@@ -116,6 +119,8 @@
     if (!canRegister) return;
 
     isSaving = true;
+    loadingPhase = "location";
+    loadingLabel = "Obteniendo ubicación";
     try {
       await captureLocationOrAbort({
         onRetry: async () =>
@@ -126,6 +131,8 @@
             cancelButtonText: "Cancelar",
           }),
       });
+      loadingPhase = "registering";
+      loadingLabel = "Registrando jornada";
       await registerWorkday(
         team.id,
         $userStore.uid,
@@ -152,12 +159,15 @@
       showNotification(message, "error");
     } finally {
       isSaving = false;
+      loadingPhase = "idle";
+      loadingLabel = "";
     }
   }
 </script>
 
 <section class="basic-page">
   <Toast message={messageToast} type={typeToast} show={showToast} />
+  <WorkdayLoadingOverlay phase={loadingPhase} visible={isSaving} label={loadingLabel} />
 
   <button
     class="register-button"

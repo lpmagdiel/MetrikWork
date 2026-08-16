@@ -48,6 +48,8 @@
   import SelectiveButton from "../components/SelectiveButton.svelte";
   import SliceContainer from "../components/SliceContainer.svelte";
   import TitleHeader from "../components/TitleHeader.svelte";
+  import WorkdayLoadingOverlay from "../components/WorkdayLoadingOverlay.svelte";
+  import SegmentedSelector from "../components/SegmentedSelector.svelte";
 
   const ACTIVE_TIMER_KEY = "metricwork.activeVariableTimer";
   const POMODORO_FOCUS_SECONDS = 25 * 60;
@@ -63,6 +65,7 @@
   let taskTitle = $state("");
   let note = $state("");
   let workdayGhostId = $state("");
+  let registerTarget = $state("self");
   let timerMode = $state("full-day");
   let pomodoroEnabled = $state(false);
   let pomodoroPhase = $state("focus");
@@ -75,6 +78,8 @@
   let now = $state(Date.now());
   let intervalId = null;
   let isSaving = $state(false);
+  let loadingPhase = $state("idle");
+  let loadingLabel = $state("");
   let messageToast = $state("");
   let typeToast = $state("success");
   let showToast = $state(false);
@@ -113,18 +118,26 @@
   );
   let teamGhosts = $derived(getTeamGhosts(selectedTeam));
   let canControlGhosts = $derived(hasGhostControlPermission(selectedTeam, $userStore?.uid));
+  let isAnyGhostMaster = $derived(teamGhosts.some((ghost) => (ghost.masters || []).includes($userStore?.uid)));
+  let canRegisterGhost = $derived(canControlGhosts || isAnyGhostMaster);
+  let hasGhostOptions = $derived(canRegisterGhost && teamGhosts.length > 0);
   let activeWorkdayGhost = $derived(
-    canControlGhosts && workdayGhostId ? teamGhosts.find((ghost) => ghost.id === workdayGhostId) || null : null,
+    registerTarget === "other" && canRegisterGhost && workdayGhostId
+      ? teamGhosts.find((ghost) => ghost.id === workdayGhostId) || null
+      : null,
   );
   let workdayTargetUserId = $derived(activeWorkdayGhost ? getGhostWorkdayUserId(activeWorkdayGhost.id) : $userStore?.uid || "");
   let workdayTargetUserName = $derived(activeWorkdayGhost ? activeWorkdayGhost.name : $userStore?.name || $userStore?.email || "");
   let ghostOptions = $derived([
-    { value: "", label: "Registrar a mi nombre", icon: User },
     ...teamGhosts.map((ghost) => ({
       value: ghost.id,
       label: `👻 ${ghost.name}`,
       icon: null,
     })),
+  ]);
+  let registerTargetOptions = $derived([
+    { value: "self", label: "Mi nombre", icon: User },
+    { value: "other", label: "Alguien más", disabled: !hasGhostOptions }
   ]);
   let timerModeOptions = $derived([
     {
@@ -229,10 +242,10 @@
 
   $effect(() => {
     const teamId = selectedTeam?.id;
-    const userId = $userStore?.uid;
+    const targetUserId = workdayTargetUserId;
     const date = todayDate;
 
-    if (!teamId || !userId) {
+    if (!teamId || !targetUserId) {
       hasRegularWorkdayToday = false;
       isCheckingWorkday = false;
       return;
@@ -241,7 +254,7 @@
     let cancelled = false;
     isCheckingWorkday = true;
 
-    hasWorkdayForDate(teamId, userId, date)
+    hasWorkdayForDate(teamId, targetUserId, date)
       .then((exists) => {
         if (!cancelled) hasRegularWorkdayToday = exists;
       })
@@ -372,7 +385,7 @@
     return workDay;
   }
 
-  async function checkRegularWorkdayNow(teamId = selectedTeam?.id, userId = $userStore?.uid, date = todayDate) {
+  async function checkRegularWorkdayNow(teamId = selectedTeam?.id, userId = workdayTargetUserId, date = todayDate) {
     if (!teamId || !userId) {
       hasRegularWorkdayToday = false;
       return false;
@@ -381,7 +394,7 @@
     isCheckingWorkday = true;
     try {
       const exists = await hasWorkdayForDate(teamId, userId, date);
-      if (teamId === selectedTeam?.id && userId === $userStore?.uid && date === todayDate) {
+      if (teamId === selectedTeam?.id && userId === workdayTargetUserId && date === todayDate) {
         hasRegularWorkdayToday = exists;
       }
       return exists;
@@ -390,7 +403,7 @@
       showNotification("No se pudo comprobar la jornada de hoy.", "warning");
       return false;
     } finally {
-      if (teamId === selectedTeam?.id && userId === $userStore?.uid && date === todayDate) {
+      if (teamId === selectedTeam?.id && userId === workdayTargetUserId && date === todayDate) {
         isCheckingWorkday = false;
       }
     }
@@ -653,6 +666,17 @@
     }
   }
 
+  async function handleRegisterTargetChange(event) {
+    const next = typeof event === "string" ? event : event?.detail ?? registerTarget;
+    registerTarget = next === "other" ? "other" : "self";
+    if (registerTarget === "other" && !workdayGhostId && teamGhosts.length > 0) {
+      workdayGhostId = teamGhosts[0].id;
+    }
+    if (registerTarget === "self") {
+      workdayGhostId = "";
+    }
+  }
+
   function restoreActiveTimer() {
     try {
       const rawTimer = localStorage.getItem(ACTIVE_TIMER_KEY);
@@ -716,10 +740,17 @@
     if (timerMode === "full-day") {
       const alreadyHasWorkday = await checkRegularWorkdayNow();
       if (alreadyHasWorkday) {
-        await showErrorAlert(
-          "Jornada ya registrada",
-          "Hoy ya tienes una jornada completa o media jornada. Usa tiempo parcial u horas extra para registrar otra entrada.",
-        );
+        if (activeWorkdayGhost) {
+          await showErrorAlert(
+            "Fantasma con jornada",
+            `El fantasma ${activeWorkdayGhost.name} ya tiene una jornada hoy. Usa tiempo parcial u horas extra para registrar más tiempo.`,
+          );
+        } else {
+          await showErrorAlert(
+            "Jornada ya registrada",
+            "Hoy ya tienes una jornada completa o media jornada. Usa tiempo parcial u horas extra para registrar otra entrada.",
+          );
+        }
         return;
       }
     }
@@ -788,6 +819,8 @@
     endedAt = finishDate;
     stopTicker();
     isSaving = true;
+    loadingPhase = "location";
+    loadingLabel = "Obteniendo ubicación";
 
     try {
       if (isTodayNonWorkingDay) {
@@ -804,10 +837,17 @@
           endedAt = null;
           startTicker();
           persistActiveTimer();
-          await showErrorAlert(
-            "Jornada ya registrada",
-            "Hoy ya tienes una jornada completa o media jornada. Usa tiempo parcial u horas extra para registrar otra entrada.",
-          );
+          if (activeWorkdayGhost) {
+            await showErrorAlert(
+              "Fantasma con jornada",
+              `El fantasma ${activeWorkdayGhost.name} ya tiene una jornada hoy. Usa tiempo parcial u horas extra para registrar más tiempo.`,
+            );
+          } else {
+            await showErrorAlert(
+              "Jornada ya registrada",
+              "Hoy ya tienes una jornada completa o media jornada. Usa tiempo parcial u horas extra para registrar otra entrada.",
+            );
+          }
           return;
         }
       }
@@ -834,6 +874,9 @@
         createTimedWorkday(totalSeconds, totalHours, finishDate, finishLocation),
         selectedTeam,
       );
+
+      loadingPhase = "registering";
+      loadingLabel = "Registrando jornada";
 
       const result = await registerWorkday(
         selectedTeam.id,
@@ -895,6 +938,8 @@
       );
     } finally {
       isSaving = false;
+      loadingPhase = "idle";
+      loadingLabel = "";
     }
   }
 
@@ -905,6 +950,7 @@
 
 <div class="timer-page">
   <Toast message={messageToast} type={typeToast} show={showToast} />
+  <WorkdayLoadingOverlay phase={loadingPhase} visible={isSaving} label={loadingLabel} />
 
   <header class="timer-header">
     <TitleHeader title="Timer" description="Fichaje de jornada" icon={Clock} iconPosition="right" />
@@ -943,24 +989,33 @@
         />
       </div>
 
-      {#if canControlGhosts && teamGhosts.length > 0}
+      {#if canRegisterGhost && teamGhosts.length > 0}
         <div class="hero-target">
-          <label class="hero-target-label">
-            <span>👻 Fantasma</span>
-            <select
-              bind:value={workdayGhostId}
-              disabled={isRunning || isSaving}
-              aria-label="Seleccionar fantasma"
-            >
-              {#each ghostOptions as option}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
-          {#if activeWorkdayGhost}
-            <p class="hero-target-hint">
-              Registrando a nombre del fantasma <strong>👻 {activeWorkdayGhost.name}</strong>. No generará coste.
-            </p>
+          <SegmentedSelector
+            options={registerTargetOptions}
+            bind:value={registerTarget}
+            label="Registrar a nombre de"
+            ariaLabel="Seleccionar a nombre de quién registrar la jornada"
+            onchange={handleRegisterTargetChange}
+          />
+          {#if registerTarget === "other"}
+            <label class="hero-target-label">
+              <span>👻 Fantasma</span>
+              <select
+                bind:value={workdayGhostId}
+                disabled={isRunning || isSaving}
+                aria-label="Seleccionar fantasma"
+              >
+                {#each ghostOptions as option}
+                  <option value={option.value}>{option.label}</option>
+                {/each}
+              </select>
+            </label>
+            {#if activeWorkdayGhost}
+              <p class="hero-target-hint">
+                Registrando a nombre del fantasma <strong>👻 {activeWorkdayGhost.name}</strong>. No generará coste.
+              </p>
+            {/if}
           {/if}
         </div>
       {/if}

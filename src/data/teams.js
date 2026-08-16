@@ -30,14 +30,76 @@ function generateGhostId() {
     return `ghost-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function normalizeGhost(ghost = {}, fallbackId = '') {
+function normalizeMasters(masters, team = null) {
+    if (!Array.isArray(masters)) return [];
+    const teamMembers = new Set(Array.isArray(team?.members) ? team.members : []);
+    const teamAdmin = team?.admin ? String(team.admin) : '';
+    const seen = new Set();
+    const result = [];
+    for (const master of masters) {
+        const uid = String(master || '').trim();
+        if (!uid || seen.has(uid)) continue;
+        if (teamMembers.size && !teamMembers.has(uid) && uid !== teamAdmin) continue;
+        seen.add(uid);
+        result.push(uid);
+    }
+    return result;
+}
+
+function normalizeGhostWorkday(work = {}) {
+    if (!work || typeof work !== 'object') return null;
+    return {
+        id: String(work.id || '').trim(),
+        date: String(work.date || '').trim(),
+        type: String(work.type || 'full-day'),
+        taskTitle: String(work.taskTitle || '').trim(),
+        note: String(work.note || '').trim(),
+        overtimeHours: Number(work.overtimeHours) || 0,
+        hours: Number(work.hours) || 0,
+        startedAt: String(work.startedAt || '').trim(),
+        endedAt: String(work.endedAt || '').trim(),
+        durationSeconds: Number(work.durationSeconds) || 0,
+        durationHours: Number(work.durationHours) || 0,
+        variableHours: Number(work.variableHours) || 0,
+        timerMode: String(work.timerMode || '').trim(),
+        assignedBy: String(work.assignedBy || '').trim(),
+        assignedByName: String(work.assignedByName || '').trim(),
+        createdAt: String(work.createdAt || '').trim(),
+        paid: Boolean(work.paid)
+    };
+}
+
+function normalizeGhost(ghost = {}, fallbackId = '', team = null) {
     const id = String(ghost?.id || fallbackId || '').trim();
     if (!id) return null;
     const name = String(ghost?.name || '').trim().slice(0, 80);
     if (!name) return null;
+    const masters = normalizeMasters(ghost?.masters, team);
+    const rawWorksdays = Array.isArray(ghost?.worksdays) ? ghost.worksdays : [];
+    const rawOvertime = Array.isArray(ghost?.overtime) ? ghost.overtime : [];
+    const worksdays = [];
+    const seenWorkIds = new Set();
+    for (const entry of rawWorksdays) {
+        const normalized = normalizeGhostWorkday(entry);
+        if (!normalized || !normalized.id) continue;
+        if (seenWorkIds.has(normalized.id)) continue;
+        seenWorkIds.add(normalized.id);
+        worksdays.push(normalized);
+    }
+    const overtime = [];
+    for (const entry of rawOvertime) {
+        const normalized = normalizeGhostWorkday(entry);
+        if (!normalized || !normalized.id) continue;
+        if (seenWorkIds.has(normalized.id)) continue;
+        seenWorkIds.add(normalized.id);
+        overtime.push(normalized);
+    }
     return {
         id,
         name,
+        masters,
+        worksdays,
+        overtime,
         createdAt: typeof ghost?.createdAt === 'string' ? ghost.createdAt : '',
         createdBy: typeof ghost?.createdBy === 'string' ? ghost.createdBy : '',
         updatedAt: typeof ghost?.updatedAt === 'string' ? ghost.updatedAt : ''
@@ -50,7 +112,7 @@ export function getTeamGhosts(team) {
     const normalized = [];
     const seenIds = new Set();
     for (const ghost of ghosts) {
-        const parsed = normalizeGhost(ghost, ghost?.id);
+        const parsed = normalizeGhost(ghost, ghost?.id, team);
         if (!parsed) continue;
         if (seenIds.has(parsed.id)) continue;
         seenIds.add(parsed.id);
@@ -70,6 +132,19 @@ export function getGhostWorkdayUserId(ghostId) {
 
 export function isGhostUserId(userId) {
     return typeof userId === 'string' && userId.startsWith('ghost-');
+}
+
+export function getGhostIdFromUserId(userId) {
+    if (!isGhostUserId(userId)) return null;
+    return String(userId).replace(/^ghost-/, '');
+}
+
+export function isGhostMaster(team, ghostId, uid) {
+    if (!team || !ghostId || !uid) return false;
+    const ghost = getGhostById(team, ghostId);
+    if (!ghost) return false;
+    if (team.admin === uid) return true;
+    return Array.isArray(ghost.masters) && ghost.masters.includes(uid);
 }
 
 export function hasGhostControlPermission(team, uid) {
@@ -104,19 +179,38 @@ function assertCanManageGhosts(team, user, action = 'create') {
     }
 }
 
-export async function addTeamGhost(teamId, name) {
+function assertCanAssignGhostWorkday(team, ghostId, user) {
+    const uid = user?.uid;
+    if (!team || !ghostId || !uid) {
+        throw new Error('Datos insuficientes para asignar jornada al fantasma');
+    }
+    if (team.admin === uid) return;
+    if (hasGhostControlPermission(team, uid)) return;
+    if (isGhostMaster(team, ghostId, uid)) return;
+    throw new Error('No tienes permisos para registrar jornadas de este fantasma');
+}
+
+export async function addTeamGhost(teamId, data = {}) {
     const user = get(userStore);
     const team = get(teamsStore).find((t) => t.id === teamId);
     if (!team) throw new Error('Equipo no encontrado');
     assertCanManageGhosts(team, user, 'create');
 
-    const normalizedName = String(name || '').trim();
+    const normalizedName = String(data?.name || '').trim();
     if (!normalizedName) throw new Error('Escribe un nombre para el fantasma');
+
+    const masters = normalizeMasters(data?.masters, team);
+    if (masters.length === 0) {
+        throw new Error('Asigna al menos un master válido (admin o miembro del equipo)');
+    }
 
     const now = new Date().toISOString();
     const newGhost = {
         id: generateGhostId(),
         name: normalizedName,
+        masters,
+        worksdays: [],
+        overtime: [],
         createdAt: now,
         createdBy: user.uid,
         updatedAt: now
@@ -136,15 +230,30 @@ export async function updateTeamGhost(teamId, ghostId, data = {}) {
     if (!getGhostById(team, ghostId)) throw new Error('Fantasma no encontrado');
     assertCanManageGhosts(team, user, 'edit');
 
-    const updatedName = String(data?.name || '').trim();
-    if (!updatedName) throw new Error('Escribe un nombre para el fantasma');
+    const existing = getGhostById(team, ghostId);
+    const updatedFields = { updatedAt: new Date().toISOString() };
 
-    const now = new Date().toISOString();
+    if (data?.name !== undefined) {
+        const updatedName = String(data.name || '').trim();
+        if (!updatedName) throw new Error('Escribe un nombre para el fantasma');
+        updatedFields.name = updatedName;
+    }
+
+    if (data?.masters !== undefined) {
+        const masters = normalizeMasters(data.masters, team);
+        if (masters.length === 0) {
+            throw new Error('Asigna al menos un master válido (admin o miembro del equipo)');
+        }
+        updatedFields.masters = masters;
+    }
+
     const updatedGhosts = getTeamGhosts(team).map((ghost) =>
         ghost.id === ghostId
-            ? { ...ghost, name: updatedName, updatedAt: now }
+            ? { ...ghost, ...updatedFields, masters: updatedFields.masters ?? ghost.masters }
             : ghost
     );
+
+    const now = updatedFields.updatedAt;
     await updateDoc(doc(db, 'teams', teamId), {
         ghosts: updatedGhosts,
         updatedAt: now
@@ -166,6 +275,145 @@ export async function removeTeamGhost(teamId, ghostId) {
         updatedAt: now
     });
     return ghostId;
+}
+
+export function getGhostWorkdays(team, ghostId) {
+    const ghost = getGhostById(team, ghostId);
+    if (!ghost) return [];
+    return [...(ghost.worksdays || []), ...(ghost.overtime || [])];
+}
+
+export function findGhostRegularWorkday(team, ghostId, date, { excludeId = '' } = {}) {
+    const ghost = getGhostById(team, ghostId);
+    if (!ghost || !date) return null;
+    const worksdays = Array.isArray(ghost.worksdays) ? ghost.worksdays : [];
+    return worksdays.find((entry) => {
+        if (!entry || entry.date !== date) return false;
+        if (excludeId && entry.id === excludeId) return false;
+        return entry.type === 'full-day' || entry.type === 'half-day';
+    }) || null;
+}
+
+export async function addGhostWorkday(teamId, ghostId, workDay, assignedBy = null) {
+    const user = get(userStore);
+    const team = get(teamsStore).find((t) => t.id === teamId);
+    if (!team) throw new Error('Equipo no encontrado');
+    const ghost = getGhostById(team, ghostId);
+    if (!ghost) throw new Error('Fantasma no encontrado');
+    assertCanAssignGhostWorkday(team, ghostId, user);
+
+    if (!workDay?.date) throw new Error('La jornada del fantasma necesita una fecha');
+    const assignedByUid = assignedBy?.uid || user?.uid || '';
+    if (!assignedByUid) throw new Error('Falta el usuario que registra la jornada');
+
+    const isOvertime = workDay.type === 'overtime' || workDay.timerMode === 'overtime';
+    const entryId = workDay.id || workDay.clientOperationId || `gd-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const now = new Date().toISOString();
+    const entry = {
+        id: entryId,
+        date: String(workDay.date || '').trim(),
+        type: isOvertime ? 'overtime' : (workDay.type || 'full-day'),
+        taskTitle: String(workDay.taskTitle || '').trim(),
+        note: String(workDay.note || '').trim(),
+        overtimeHours: isOvertime ? (Number(workDay.overtimeHours ?? workDay.hours) || 0) : 0,
+        hours: isOvertime ? (Number(workDay.hours ?? workDay.overtimeHours) || 0) : 0,
+        startedAt: String(workDay.startedAt || '').trim(),
+        endedAt: String(workDay.endedAt || '').trim(),
+        durationSeconds: Number(workDay.durationSeconds) || 0,
+        durationHours: Number(workDay.durationHours) || 0,
+        variableHours: Number(workDay.variableHours) || 0,
+        timerMode: String(workDay.timerMode || '').trim(),
+        assignedBy: assignedByUid,
+        assignedByName: assignedBy?.name || user?.name || user?.email || '',
+        createdAt: now,
+        paid: false
+    };
+
+    const currentGhost = getGhostById(team, ghostId);
+    const targetArray = isOvertime ? 'overtime' : 'worksdays';
+    const otherArray = isOvertime ? 'worksdays' : 'overtime';
+    const updatedEntries = [...(currentGhost?.[targetArray] || []), entry];
+    const updatedGhosts = getTeamGhosts(team).map((g) =>
+        g.id === ghostId
+            ? { ...g, [targetArray]: updatedEntries, [otherArray]: currentGhost?.[otherArray] || [], updatedAt: now }
+            : g
+    );
+
+    await updateDoc(doc(db, 'teams', teamId), {
+        ghosts: updatedGhosts,
+        updatedAt: now
+    });
+    return entry;
+}
+
+export async function removeGhostWorkday(teamId, ghostId, workdayId) {
+    const user = get(userStore);
+    const team = get(teamsStore).find((t) => t.id === teamId);
+    if (!team) throw new Error('Equipo no encontrado');
+    const ghost = getGhostById(team, ghostId);
+    if (!ghost) throw new Error('Fantasma no encontrado');
+    assertCanAssignGhostWorkday(team, ghostId, user);
+
+    if (!workdayId) throw new Error('Falta el identificador de la jornada');
+
+    const now = new Date().toISOString();
+    const updatedGhosts = getTeamGhosts(team).map((g) => {
+        if (g.id !== ghostId) return g;
+        return {
+            ...g,
+            worksdays: (g.worksdays || []).filter((entry) => entry.id !== workdayId),
+            overtime: (g.overtime || []).filter((entry) => entry.id !== workdayId),
+            updatedAt: now
+        };
+    });
+
+    await updateDoc(doc(db, 'teams', teamId), {
+        ghosts: updatedGhosts,
+        updatedAt: now
+    });
+    return workdayId;
+}
+
+function assertCanManageGhostRecords(team, user) {
+    if (!team || !user?.uid) {
+        throw new Error('Datos insuficientes para limpiar registros de fantasmas');
+    }
+    if (team.admin === user.uid) return;
+    const memberPermissions = team.memberPermissions?.[user.uid];
+    const ghostsPermissions = memberPermissions?.ghosts || {};
+    if (!ghostsPermissions.create && !ghostsPermissions.control) {
+        throw new Error('No tienes permisos para limpiar registros de fantasmas');
+    }
+}
+
+export async function clearGhostWorkdays(teamId, ghostId) {
+    const user = get(userStore);
+    const team = get(teamsStore).find((t) => t.id === teamId);
+    if (!team) throw new Error('Equipo no encontrado');
+    const ghost = getGhostById(team, ghostId);
+    if (!ghost) throw new Error('Fantasma no encontrado');
+    assertCanManageGhostRecords(team, user);
+
+    const removedWorksdays = (ghost.worksdays || []).length;
+    const removedOvertime = (ghost.overtime || []).length;
+    if (removedWorksdays === 0 && removedOvertime === 0) return { removedWorksdays: 0, removedOvertime: 0 };
+
+    const now = new Date().toISOString();
+    const updatedGhosts = getTeamGhosts(team).map((g) => {
+        if (g.id !== ghostId) return g;
+        return {
+            ...g,
+            worksdays: [],
+            overtime: [],
+            updatedAt: now
+        };
+    });
+
+    await updateDoc(doc(db, 'teams', teamId), {
+        ghosts: updatedGhosts,
+        updatedAt: now
+    });
+    return { removedWorksdays, removedOvertime };
 }
 
 export function getTeamMembers() {

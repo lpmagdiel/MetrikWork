@@ -249,6 +249,20 @@ describe('firestore ghosts rules contract', () => {
     expect(body).toContain('"updatedAt"');
   });
 
+  it('define isMasterGhostUpdate para masters listados en ghosts[].masters', () => {
+    const body = extractFunctionBody(rules, 'isMasterGhostUpdate');
+    expect(body).toContain('isTeamMember');
+    expect(body).toContain('ghosts');
+    expect(body).toContain('masters');
+    expect(body).toContain('request.auth.uid in ghostItem.masters');
+  });
+
+  it('permite a masters actualizar el equipo cuando solo cambian ghosts/updatedAt', () => {
+    const updateSection = rules.split('match /teams/{teamId}')[1] || '';
+    expect(updateSection).toContain('isMasterGhostUpdate(teamId)');
+    expect(updateSection).toContain('isGhostsUpdate()');
+  });
+
   it('permite crear jornadas de fantasmas solo con ghosts.control', () => {
     const worksSection = rules.split('match /works/{workId}')[1] || '';
     expect(worksSection).toContain('hasTeamPermission');
@@ -289,6 +303,11 @@ describe('firestore composite indexes contract', () => {
   it('incluye el índice works(teamId, date) usado en team-stats', () => {
     const indexes = readIndexes();
     expect(findIndex(indexes, 'works', ['teamId', 'date'])).toBeDefined();
+  });
+
+  it('incluye el índice works(teamId, date, __name__) para la consulta de team-stats', () => {
+    const indexes = readIndexes();
+    expect(findIndex(indexes, 'works', ['teamId', 'date', '__name__'])).toBeDefined();
   });
 
   it('incluye el índice works(teamId, userId, date) usado en works.js', () => {

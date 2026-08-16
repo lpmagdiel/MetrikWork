@@ -3,13 +3,16 @@
     AlertCircle,
     BarChart3,
     CalendarCheck,
+    ChevronDown,
     Clock,
     Download,
     DollarSign,
+    Eraser,
     Filter,
     MapPin,
     Package,
     Save,
+    Trash2,
     TrendingUp,
     Users,
     WalletCards,
@@ -20,19 +23,31 @@
   import { navigateTo } from "../router.js";
   import { formatGpsCoordinates, geocodeAddress, normalizeCoordinates } from "../helpers/navigation.js";
   import { downloadExcelReport, openPrintableReport } from "../helpers/reportExport.js";
+  import { confirmAlert, showErrorAlert, showSuccessAlert } from "../data/alerts.js";
   import {
     getTeamAdvancedStatsData,
     hasTeamPermission,
+    hasGhostControlPermission,
+    hasGhostCreatePermission,
     selectedTeam,
     selectedTeamId,
     updateTeamBudget,
     getTeamGhosts,
+    removeGhostWorkday,
+    clearGhostWorkdays,
     userStore,
   } from "../data/stores.js";
 
   let team = $derived($selectedTeam);
   let canViewStats = $derived(hasTeamPermission(team, $userStore?.uid, "stats", "view"));
   let canEditStats = $derived(hasTeamPermission(team, $userStore?.uid, "stats", "edit"));
+  let canManageGhostRecords = $derived(
+    !!(team?.id && $userStore?.uid) && (
+      team.admin === $userStore.uid ||
+      hasGhostCreatePermission(team, $userStore.uid) ||
+      hasGhostControlPermission(team, $userStore.uid)
+    )
+  );
 
   let works = $state([]);
   let payments = $state([]);
@@ -41,6 +56,8 @@
   let absenceRequests = $state([]);
   let isLoading = $state(false);
   let isSavingBudget = $state(false);
+  let isClearingGhostId = $state("");
+  let isRemovingGhostEntryId = $state("");
   let period = $state("month");
   let startDate = $state(getPeriodRange("month").start);
   let endDate = $state(getPeriodRange("month").end);
@@ -422,6 +439,9 @@
         variableHours: 0,
         workDays: 0,
         lastDate: "",
+        totalWorksdays: (ghost.worksdays || []).length,
+        totalOvertime: (ghost.overtime || []).length,
+        masters: ghost.masters || []
       });
     }
     for (const work of filteredWorks) {
@@ -446,10 +466,115 @@
     return Array.from(buckets.values())
       .filter((bucket) =>
         bucket.fullDays + bucket.halfDays + bucket.variableHours + bucket.overtimeHours > 0 ||
-        bucket.lastDate,
+        bucket.lastDate ||
+        bucket.totalWorksdays > 0 ||
+        bucket.totalOvertime > 0,
       )
       .sort((a, b) => a.name.localeCompare(b.name));
   });
+
+  let ghostWorkRecords = $derived.by(() => {
+    const ghosts = getTeamGhosts(team);
+    if (!ghosts.length) return [];
+    return ghosts
+      .map((ghost) => {
+        const workdays = (ghost.worksdays || [])
+          .map((entry) => ({ ...entry, kind: "worksday" }));
+        const overtime = (ghost.overtime || [])
+          .map((entry) => ({ ...entry, kind: "overtime" }));
+        const entries = [...workdays, ...overtime]
+          .filter((entry) => entry?.date)
+          .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+        return {
+          id: ghost.id,
+          name: ghost.name,
+          masters: ghost.masters || [],
+          entries
+        };
+      })
+      .filter((ghost) => ghost.entries.length > 0)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  });
+
+  let expandedGhostIds = $state(new Set());
+
+  function toggleGhostExpansion(ghostId) {
+    const next = new Set(expandedGhostIds);
+    if (next.has(ghostId)) next.delete(ghostId);
+    else next.add(ghostId);
+    expandedGhostIds = next;
+  }
+
+  function ghostLabel(kind) {
+    return kind === "overtime" ? "Horas extra" : "Jornada";
+  }
+
+  function getGhostEntryLabel(entry) {
+    if (entry.kind === "overtime") {
+      const hours = Number(entry.hours || entry.overtimeHours || 0);
+      return `${hours.toFixed(hours % 1 === 0 ? 0 : 2)}h`;
+    }
+    if (entry.type === "half-day") return "Media jornada";
+    return "Jornada completa";
+  }
+
+  async function handleClearGhost(ghost) {
+    if (!team?.id || !canManageGhostRecords || isClearingGhostId) return;
+    const totalEntries = (ghost.entries || []).length;
+    if (totalEntries === 0) {
+      showNotification("Este miembro temporal no tiene registros para limpiar.");
+      return;
+    }
+    const confirmed = await confirmAlert({
+      title: "Limpiar registros del miembro temporal",
+      text: `¿Eliminar las ${totalEntries} jornadas${totalEntries > 1 ? "s" : ""} y horas extra de ${ghost.name}? Esta acción no se puede deshacer.`,
+      confirmButtonText: "Limpiar todo",
+      cancelButtonText: "Cancelar",
+      danger: true
+    });
+    if (!confirmed) return;
+    isClearingGhostId = ghost.id;
+    try {
+      const result = await clearGhostWorkdays(team.id, ghost.id);
+      const removed = (result?.removedWorksdays || 0) + (result?.removedOvertime || 0);
+      showNotification(
+        `Registros de ${ghost.name} eliminados (${removed}).`,
+      );
+    } catch (error) {
+      console.error("Error clearing ghost workdays:", error);
+      await showErrorAlert(
+        "No se pudo limpiar",
+        error?.message || "Inténtalo de nuevo.",
+      );
+    } finally {
+      isClearingGhostId = "";
+    }
+  }
+
+  async function handleRemoveGhostEntry(ghost, entry) {
+    if (!team?.id || !canManageGhostRecords || isRemovingGhostEntryId) return;
+    const confirmed = await confirmAlert({
+      title: "Eliminar registro",
+      text: `¿Quitar la ${entry.kind === "overtime" ? "hora extra" : "jornada"} del ${formatDate(entry.date)}?`,
+      confirmButtonText: "Eliminar",
+      cancelButtonText: "Cancelar",
+      danger: true
+    });
+    if (!confirmed) return;
+    isRemovingGhostEntryId = `${ghost.id}:${entry.id}`;
+    try {
+      await removeGhostWorkday(team.id, ghost.id, entry.id);
+      showNotification("Registro eliminado.");
+    } catch (error) {
+      console.error("Error removing ghost workday:", error);
+      await showErrorAlert(
+        "No se pudo eliminar",
+        error?.message || "Inténtalo de nuevo.",
+      );
+    } finally {
+      isRemovingGhostEntryId = "";
+    }
+  }
 
   let maxExpenseValue = $derived(Math.max(...expenseDistribution.map((item) => item.value), 1));
   let maxLocationValue = $derived(Math.max(...locationSummaries.map((item) => item.total), 1));
@@ -906,8 +1031,8 @@
         },
         ...(ghostSummaries.length
           ? [{
-              title: "Fantasmas (sin coste)",
-              headers: ["Fantasma", "Dias completos", "Medios dias", "Horas extra", "Ultima jornada"],
+              title: "Miembros temporales (sin coste)",
+              headers: ["Miembro temporal", "Dias completos", "Medios dias", "Horas extra", "Ultima jornada"],
               rows: ghostSummaries.map((ghost) => [
                 `👻 ${ghost.name}`,
                 formatNumber(ghost.fullDays, 0),
@@ -1321,26 +1446,27 @@
           </section>
 
           {#if ghostSummaries.length}
-            <section class="insights-grid">
+            <section class="insights-grid ghost-section">
               <article class="panel ghost-panel">
                 <div class="panel-heading">
                   <div>
-                    <p>👻 Fantasmas</p>
+                    <p>👻 Miembros temporales</p>
                     <h2>Jornadas sin coste</h2>
                   </div>
-                  <span class="ghost-count">{ghostSummaries.length} {ghostSummaries.length === 1 ? "fantasma" : "fantasmas"}</span>
+                  <span class="ghost-count">{ghostSummaries.length} {ghostSummaries.length === 1 ? "miembro temporal" : "miembros temporales"}</span>
                 </div>
                 <p class="ghost-panel-hint">
-                  Las jornadas de fantasmas se registran con normalidad (incluyendo horas extra y GPS)
+                  Las jornadas de miembros temporales se registran con normalidad (incluyendo horas extra y GPS)
                   pero nunca generan coste para el equipo.
                 </p>
                 <div class="ghost-table">
                   <div class="ghost-table-head">
-                    <span>Fantasma</span>
+                    <span>Miembro temporal</span>
                     <span>Días completos</span>
                     <span>Medios días</span>
                     <span>Horas extra</span>
                     <span>Última jornada</span>
+                    <span>Total registros</span>
                   </div>
                   {#each ghostSummaries as ghost (ghost.id)}
                     <div class="ghost-table-row">
@@ -1352,9 +1478,103 @@
                       <span>{formatNumber(ghost.halfDays, 0)}</span>
                       <span>{formatNumber(ghost.overtimeHours)}h</span>
                       <span>{ghost.lastDate ? formatDate(ghost.lastDate) : "Sin actividad"}</span>
+                      <span class="ghost-total-cell">
+                        {ghost.totalWorksdays + ghost.totalOvertime}
+                        <small class="ghost-total-detail">
+                          {ghost.totalWorksdays} jor · {ghost.totalOvertime} extra
+                        </small>
+                      </span>
                     </div>
                   {/each}
                 </div>
+              </article>
+
+              <article class="panel ghost-records-panel">
+                <div class="panel-heading">
+                  <div>
+                    <p>👻 Detalle</p>
+                    <h2>Días y horas trabajadas</h2>
+                  </div>
+                  <span class="ghost-count">
+                    {ghostWorkRecords.length} {ghostWorkRecords.length === 1 ? "miembro temporal con registros" : "miembros temporales con registros"}
+                  </span>
+                </div>
+                <p class="ghost-panel-hint">
+                  Expande un miembro temporal para revisar cada jornada y hora extra registradas. Los
+                  registros pueden borrarse uno a uno o limpiarse por completo.
+                </p>
+                {#if ghostWorkRecords.length}
+                  <ul class="ghost-records-list">
+                    {#each ghostWorkRecords as ghost (ghost.id)}
+                      <li class="ghost-record-item">
+                        <div class="ghost-record-summary">
+                          <button
+                            type="button"
+                            class="ghost-record-toggle"
+                            aria-expanded={expandedGhostIds.has(ghost.id)}
+                            onclick={() => toggleGhostExpansion(ghost.id)}
+                          >
+                            <span class="ghost-avatar" aria-hidden="true">👻</span>
+                            <span class="ghost-record-name">{ghost.name}</span>
+                            <span class="ghost-record-meta">
+                              {ghost.entries.length} {ghost.entries.length === 1 ? "registro" : "registros"}
+                            </span>
+                            <span class="ghost-record-chevron" class:open={expandedGhostIds.has(ghost.id)}>
+                              <ChevronDown size={16} />
+                            </span>
+                          </button>
+                          {#if canManageGhostRecords}
+                            <button
+                              type="button"
+                              class="ghost-clear-btn"
+                              onclick={() => handleClearGhost(ghost)}
+                              disabled={isClearingGhostId === ghost.id}
+                              aria-label={`Limpiar todos los registros de ${ghost.name}`}
+                            >
+                              <Eraser size={14} />
+                              <span>{isClearingGhostId === ghost.id ? "Limpiando..." : "Limpiar"}</span>
+                            </button>
+                          {/if}
+                        </div>
+                        {#if expandedGhostIds.has(ghost.id)}
+                          <div class="ghost-record-entries">
+                            {#each ghost.entries as entry (`${ghost.id}:${entry.id}`)}
+                              {@const entryKey = `${ghost.id}:${entry.id}`}
+                              <div class="ghost-record-entry">
+                                <div class="ghost-record-entry-info">
+                                  <span class="ghost-record-entry-date">{formatDate(entry.date)}</span>
+                                  <span class="ghost-record-entry-kind">{ghostLabel(entry.kind)}</span>
+                                  <span class="ghost-record-entry-value">{getGhostEntryLabel(entry)}</span>
+                                  {#if entry.taskTitle}
+                                    <span class="ghost-record-entry-task">{entry.taskTitle}</span>
+                                  {/if}
+                                  {#if entry.assignedByName}
+                                    <span class="ghost-record-entry-author">
+                                      por {entry.assignedByName}
+                                    </span>
+                                  {/if}
+                                </div>
+                                {#if canManageGhostRecords}
+                                  <button
+                                    type="button"
+                                    class="ghost-entry-remove"
+                                    onclick={() => handleRemoveGhostEntry(ghost, entry)}
+                                    disabled={isRemovingGhostEntryId === entryKey}
+                                    aria-label={`Eliminar registro del ${formatDate(entry.date)}`}
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                {/if}
+                              </div>
+                            {/each}
+                          </div>
+                        {/if}
+                      </li>
+                    {/each}
+                  </ul>
+                {:else}
+                  <div class="empty-inline">No hay jornadas ni horas extra registradas para miembros temporales.</div>
+                {/if}
               </article>
             </section>
           {/if}
@@ -1867,6 +2087,236 @@
     place-items: center;
     font-size: 16px;
     line-height: 1;
+  }
+
+  .ghost-section {
+    grid-template-columns: 1fr;
+  }
+
+  @media (min-width: 880px) {
+    .ghost-section {
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    }
+  }
+
+  .ghost-table-head,
+  .ghost-table-row {
+    grid-template-columns: 1.6fr repeat(4, 1fr) 1.2fr;
+  }
+
+  .ghost-total-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+
+  .ghost-total-detail {
+    font-size: 11px;
+    color: var(--text-secondary, #64748b);
+    font-weight: 500;
+  }
+
+  .ghost-records-panel {
+    border-color: rgba(148, 163, 184, 0.25);
+  }
+
+  .ghost-records-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .ghost-record-item {
+    background: var(--bg-input, rgba(148, 163, 184, 0.05));
+    border-radius: var(--radius-sm, 8px);
+    overflow: hidden;
+  }
+
+  .ghost-record-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 6px 4px 4px;
+  }
+
+  .ghost-record-toggle {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    border-radius: var(--radius-sm, 8px);
+    min-width: 0;
+  }
+
+  .ghost-record-toggle:hover {
+    background: rgba(148, 163, 184, 0.1);
+  }
+
+  .ghost-record-name {
+    flex: 1;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ghost-record-meta {
+    font-size: 12px;
+    color: var(--text-secondary, #64748b);
+    flex-shrink: 0;
+  }
+
+  .ghost-record-chevron {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary, #64748b);
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+  }
+
+  .ghost-record-chevron.open {
+    transform: rotate(180deg);
+  }
+
+  .ghost-clear-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    border-radius: var(--radius-sm, 8px);
+    background: rgba(148, 163, 184, 0.1);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.18s ease, border-color 0.18s ease;
+    flex-shrink: 0;
+  }
+
+  .ghost-clear-btn:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.5);
+    color: #b91c1c;
+  }
+
+  .ghost-clear-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  .ghost-record-entries {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 0 8px 8px 12px;
+  }
+
+  .ghost-record-entry {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm, 8px);
+    background: var(--bg-card, var(--bg-surface, #ffffff));
+    border: 1px solid var(--border-color, rgba(148, 163, 184, 0.2));
+  }
+
+  .ghost-record-entry-info {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-size: 13px;
+  }
+
+  .ghost-record-entry-date {
+    font-weight: 700;
+  }
+
+  .ghost-record-entry-kind {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(99, 102, 241, 0.12);
+    color: rgb(67, 56, 202);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .ghost-record-entry-value {
+    font-weight: 700;
+  }
+
+  .ghost-record-entry-task {
+    color: var(--text-secondary, #64748b);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 200px;
+  }
+
+  .ghost-record-entry-author {
+    font-size: 11px;
+    color: var(--text-secondary, #64748b);
+    font-style: italic;
+  }
+
+  .ghost-entry-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: 1px solid var(--border-color, rgba(148, 163, 184, 0.4));
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-secondary, #64748b);
+    cursor: pointer;
+    transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+    flex-shrink: 0;
+  }
+
+  .ghost-entry-remove:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.5);
+    color: #b91c1c;
+  }
+
+  .ghost-entry-remove:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  @media (max-width: 540px) {
+    .ghost-table-head,
+    .ghost-table-row {
+      grid-template-columns: 1.4fr repeat(5, 1fr);
+      font-size: 12px;
+      padding: 6px 8px;
+    }
+    .ghost-record-entry-info {
+      font-size: 12px;
+    }
+    .ghost-record-entry-task {
+      max-width: 100%;
+    }
   }
 
   .accordion-summary {

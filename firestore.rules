@@ -85,6 +85,16 @@ service cloud.firestore {
         .hasOnly(["ghosts", "updatedAt"]);
     }
 
+    function isMasterGhostUpdate(teamId) {
+      return isTeamMember(teamId) &&
+             request.resource.data.ghosts is list &&
+             request.resource.data.ghosts.size() > 0 &&
+             request.resource.data.ghosts.any(ghostItem,
+               ghostItem.masters is list &&
+               request.auth.uid in ghostItem.masters
+             );
+    }
+
     function isLocationBudgetUpdate() {
       return request.resource.data.diff(resource.data).affectedKeys()
         .hasOnly(["budget", "updatedAt"]);
@@ -791,6 +801,10 @@ service cloud.firestore {
                           hasTeamPermission(teamId, "ghosts", "create") ||
                           hasTeamPermission(teamId, "ghosts", "control")
                         ) &&
+                        isGhostsUpdate()
+                      ) ||
+                      (
+                        isMasterGhostUpdate(teamId) &&
                         isGhostsUpdate()
                       ) ||
                       isAcceptingTeamInvitation(teamId) ||
