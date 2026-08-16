@@ -1,6 +1,6 @@
 import { writable, get, derived } from 'svelte/store';
 import { db } from './firebase.js';
-import { doc, onSnapshot, collection, query, where, updateDoc, getDoc, getDocs, setDoc, deleteField, deleteDoc } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, updateDoc, getDoc, getDocs, setDoc, deleteDoc } from 'firebase/firestore';
 import { userStore, getProfileImage } from './auth.js';
 import { createNotification } from './notifications.js';
 import { createTeamPermissions, normalizeCustomTeamRoles, normalizeTeamPermissions } from './permissions.js';
