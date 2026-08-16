@@ -42,22 +42,6 @@ service cloud.firestore {
              );
     }
 
-    // Los planes ya no se utilizan. Esta función se conserva por compatibilidad
-    // histórica: si el documento no incluye campos de plan, simplemente devuelve true.
-    function isValidTeamSize(size, maxMembers) {
-      return (!("size" in request.resource.data) && !("teamSize" in request.resource.data)) ||
-             (
-               size is string &&
-               maxMembers is number &&
-               (
-                 (size == "G" && maxMembers == 1) ||
-                 (size == "S" && maxMembers == 4) ||
-                 (size == "M" && maxMembers == 10) ||
-                 (size == "L" && maxMembers == 999)
-               )
-             );
-    }
-
     function respectsTeamMemberLimit(teamDocument) {
       return !teamDocument.keys().hasAny(["maxMembers"]) ||
              (
@@ -82,17 +66,15 @@ service cloud.firestore {
 
     function isGhostsUpdate() {
       return request.resource.data.diff(resource.data).affectedKeys()
-        .hasOnly(["ghosts", "updatedAt"]);
+        .hasOnly(["ghosts", "ghostMasterIds", "updatedAt"]);
     }
 
     function isMasterGhostUpdate(teamId) {
       return isTeamMember(teamId) &&
-             request.resource.data.ghosts is list &&
-             request.resource.data.ghosts.size() > 0 &&
-             request.resource.data.ghosts.any(ghostItem,
-               ghostItem.masters is list &&
-               request.auth.uid in ghostItem.masters
-             );
+             resource.data.ghostMasterIds is map &&
+             request.resource.data.ghostMasterIds == resource.data.ghostMasterIds &&
+             request.auth.uid in resource.data.ghostMasterIds &&
+             resource.data.ghostMasterIds[request.auth.uid] == true;
     }
 
     function isLocationBudgetUpdate() {
@@ -121,6 +103,7 @@ service cloud.firestore {
                "members",
                "membersData",
                "ghosts",
+               "ghostMasterIds",
                "active",
                "hidden",
                "updatedAt"
@@ -185,6 +168,7 @@ service cloud.firestore {
                "photoURL",
                "themePrimaryColor",
                "ghosts",
+               "ghostMasterIds",
                "active",
                "hidden",
                "createdAt"
@@ -289,7 +273,7 @@ service cloud.firestore {
              request.resource.data.membersData.size() == resource.data.membersData.size() + 1;
     }
 
-    function isSelfLeavingTeam(teamId) {
+    function isSelfLeavingTeam() {
       return request.auth != null &&
              request.auth.uid != resource.data.admin &&
              request.auth.uid in resource.data.members &&
@@ -490,6 +474,31 @@ service cloud.firestore {
       ]);
     }
 
+    function isValidReceipt(receipt) {
+      return receipt is map &&
+             receipt.keys().hasOnly(["url", "name"]) &&
+             receipt.url is string &&
+             receipt.url.size() > 0 &&
+             receipt.url.size() <= 600 &&
+             receipt.name is string &&
+             receipt.name.size() <= 160;
+    }
+
+    function areValidExpenseReceipts(receipts) {
+      return receipts is list &&
+             receipts.size() <= 10 &&
+             (receipts.size() < 1 || isValidReceipt(receipts[0])) &&
+             (receipts.size() < 2 || isValidReceipt(receipts[1])) &&
+             (receipts.size() < 3 || isValidReceipt(receipts[2])) &&
+             (receipts.size() < 4 || isValidReceipt(receipts[3])) &&
+             (receipts.size() < 5 || isValidReceipt(receipts[4])) &&
+             (receipts.size() < 6 || isValidReceipt(receipts[5])) &&
+             (receipts.size() < 7 || isValidReceipt(receipts[6])) &&
+             (receipts.size() < 8 || isValidReceipt(receipts[7])) &&
+             (receipts.size() < 9 || isValidReceipt(receipts[8])) &&
+             (receipts.size() < 10 || isValidReceipt(receipts[9]));
+    }
+
     function isValidManualExpenseData(data) {
       return data.keys().hasOnly([
                "source",
@@ -610,16 +619,7 @@ service cloud.firestore {
              data.deductible is bool &&
              data.notes is string &&
              data.notes.size() <= 1000 &&
-             data.receipts is list &&
-             data.receipts.size() <= 10 &&
-             data.receipts.all(receipt,
-               receipt.keys().hasOnly(["url", "name"]) &&
-               receipt.url is string &&
-               receipt.url.size() > 0 &&
-               receipt.url.size() <= 600 &&
-               receipt.name is string &&
-               receipt.name.size() <= 160
-             ) &&
+             areValidExpenseReceipts(data.receipts) &&
              data.createdBy is string &&
              data.createdBy.size() > 0 &&
              data.createdByName is string &&
@@ -808,7 +808,7 @@ service cloud.firestore {
                         isGhostsUpdate()
                       ) ||
                       isAcceptingTeamInvitation(teamId) ||
-                      isSelfLeavingTeam(teamId)
+                      isSelfLeavingTeam()
                     );
 
       // Solo el administrador puede eliminar el equipo.

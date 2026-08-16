@@ -121,6 +121,16 @@ export function getTeamGhosts(team) {
     return normalized;
 }
 
+function getGhostMasterIds(ghosts) {
+    const masterIds = {};
+    for (const ghost of ghosts || []) {
+        for (const masterId of ghost?.masters || []) {
+            masterIds[masterId] = true;
+        }
+    }
+    return masterIds;
+}
+
 export function getGhostById(team, ghostId) {
     if (!team || !ghostId) return null;
     return getTeamGhosts(team).find((ghost) => ghost.id === ghostId) || null;
@@ -218,6 +228,7 @@ export async function addTeamGhost(teamId, data = {}) {
     const updatedGhosts = [...getTeamGhosts(team), newGhost];
     await updateDoc(doc(db, 'teams', teamId), {
         ghosts: updatedGhosts,
+        ghostMasterIds: getGhostMasterIds(updatedGhosts),
         updatedAt: now
     });
     return newGhost;
@@ -256,6 +267,7 @@ export async function updateTeamGhost(teamId, ghostId, data = {}) {
     const now = updatedFields.updatedAt;
     await updateDoc(doc(db, 'teams', teamId), {
         ghosts: updatedGhosts,
+        ghostMasterIds: getGhostMasterIds(updatedGhosts),
         updatedAt: now
     });
     return updatedGhosts.find((ghost) => ghost.id === ghostId) || null;
@@ -272,6 +284,7 @@ export async function removeTeamGhost(teamId, ghostId) {
     const updatedGhosts = getTeamGhosts(team).filter((ghost) => ghost.id !== ghostId);
     await updateDoc(doc(db, 'teams', teamId), {
         ghosts: updatedGhosts,
+        ghostMasterIds: getGhostMasterIds(updatedGhosts),
         updatedAt: now
     });
     return ghostId;
@@ -341,6 +354,7 @@ export async function addGhostWorkday(teamId, ghostId, workDay, assignedBy = nul
 
     await updateDoc(doc(db, 'teams', teamId), {
         ghosts: updatedGhosts,
+        ghostMasterIds: getGhostMasterIds(updatedGhosts),
         updatedAt: now
     });
     return entry;
@@ -369,6 +383,7 @@ export async function removeGhostWorkday(teamId, ghostId, workdayId) {
 
     await updateDoc(doc(db, 'teams', teamId), {
         ghosts: updatedGhosts,
+        ghostMasterIds: getGhostMasterIds(updatedGhosts),
         updatedAt: now
     });
     return workdayId;
@@ -411,6 +426,7 @@ export async function clearGhostWorkdays(teamId, ghostId) {
 
     await updateDoc(doc(db, 'teams', teamId), {
         ghosts: updatedGhosts,
+        ghostMasterIds: getGhostMasterIds(updatedGhosts),
         updatedAt: now
     });
     return { removedWorksdays, removedOvertime };
@@ -503,6 +519,7 @@ export async function createTeam(teamName) {
                 [user.uid]: createTeamPermissions(true)
             },
             ghosts: [],
+            ghostMasterIds: {},
             projectBudget: 0,
             projectBudgetCurrency: 'MXN',
             active: true,

@@ -70,6 +70,13 @@ describe('firestore expense rules contract', () => {
     expect(rules).toMatch(/isValidManualExpenseData\(request\.resource\.data\)/);
   });
 
+  it('valida todos los recibos sin usar iteradores no compatibles', () => {
+    const body = extractFunctionBody(rules, 'areValidExpenseReceipts');
+    expect(body).toContain('receipts.size() <= 10');
+    expect(body).toContain('isValidReceipt(receipts[9])');
+    expect(rules).not.toMatch(/\.all\(/);
+  });
+
   it('impide que pagos inválidos contaminen los gastos automáticos', () => {
     expect(rules).toMatch(/function isValidTeamPaymentData\(data\)/);
     expect(rules).toMatch(/data\.userId in teamData\(data\.teamId\)\.members/);
@@ -249,18 +256,23 @@ describe('firestore ghosts rules contract', () => {
     expect(body).toContain('"updatedAt"');
   });
 
-  it('define isMasterGhostUpdate para masters listados en ghosts[].masters', () => {
+  it('define isMasterGhostUpdate con un mapa de masters persistido', () => {
     const body = extractFunctionBody(rules, 'isMasterGhostUpdate');
     expect(body).toContain('isTeamMember');
-    expect(body).toContain('ghosts');
-    expect(body).toContain('masters');
-    expect(body).toContain('request.auth.uid in ghostItem.masters');
+    expect(body).toContain('ghostMasterIds');
+    expect(body).toContain('request.auth.uid in resource.data.ghostMasterIds');
+    expect(rules).not.toMatch(/\.any\(/);
   });
 
   it('permite a masters actualizar el equipo cuando solo cambian ghosts/updatedAt', () => {
     const updateSection = rules.split('match /teams/{teamId}')[1] || '';
     expect(updateSection).toContain('isMasterGhostUpdate(teamId)');
     expect(updateSection).toContain('isGhostsUpdate()');
+  });
+
+  it('permite sincronizar ghostMasterIds junto con la lista de fantasmas', () => {
+    const body = extractFunctionBody(rules, 'isGhostsUpdate');
+    expect(body).toContain('"ghostMasterIds"');
   });
 
   it('permite crear jornadas de fantasmas solo con ghosts.control', () => {
