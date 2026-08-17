@@ -135,9 +135,7 @@
   });
 
   $effect(() => {
-    if (teamId && canViewCharges) {
-      return subscribeToCompanyClients();
-    }
+    if (!teamId || !canViewCharges) return;
     return subscribeToCompanyClients();
   });
 

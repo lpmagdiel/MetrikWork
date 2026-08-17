@@ -304,7 +304,16 @@
     return { loader: routeLoaders[cleanPath] || routeLoaders["/"], teamId: null };
   });
 
-  let routeModulePromise = $derived(loadRouteModule(routeInfo.loader));
+  const routeModulePromises = new Map();
+  let routeModulePromise = $derived.by(() => {
+    const loader = routeInfo.loader;
+    let pending = routeModulePromises.get(loader);
+    if (!pending) {
+      pending = loadRouteModule(loader);
+      routeModulePromises.set(loader, pending);
+    }
+    return pending;
+  });
 
   let canRender = $derived(
     $authReady &&

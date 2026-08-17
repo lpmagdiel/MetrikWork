@@ -19,6 +19,27 @@ export const selectedTeam = derived(
 
 let teamsUnsubscribe;
 
+function applyTeamPatch(teamId, patch = {}) {
+    const updatedPatch = { ...patch, updatedAt: patch.updatedAt || new Date().toISOString() };
+    teamsStore.update((teams) => {
+        let didChange = false;
+        const next = teams.map((entry) => {
+            if (entry?.id !== teamId) return entry;
+            const merged = { ...entry, ...updatedPatch };
+            if (
+                merged.ghosts === entry.ghosts &&
+                merged.ghostMasterIds === entry.ghostMasterIds &&
+                merged.updatedAt === entry.updatedAt
+            ) {
+                return entry;
+            }
+            didChange = true;
+            return merged;
+        });
+        return didChange ? next : teams;
+    });
+}
+
 function normalizeCompanyProfile(profile = {}) {
     const fields = ['name', 'taxId', 'email', 'phone', 'address', 'iban', 'bankName', 'bizum'];
     return Object.fromEntries(
@@ -226,9 +247,15 @@ export async function addTeamGhost(teamId, data = {}) {
         updatedAt: now
     };
     const updatedGhosts = [...getTeamGhosts(team), newGhost];
+    const updatedGhostMasterIds = getGhostMasterIds(updatedGhosts);
     await updateDoc(doc(db, 'teams', teamId), {
         ghosts: updatedGhosts,
-        ghostMasterIds: getGhostMasterIds(updatedGhosts),
+        ghostMasterIds: updatedGhostMasterIds,
+        updatedAt: now
+    });
+    applyTeamPatch(teamId, {
+        ghosts: updatedGhosts,
+        ghostMasterIds: updatedGhostMasterIds,
         updatedAt: now
     });
     return newGhost;
@@ -265,9 +292,15 @@ export async function updateTeamGhost(teamId, ghostId, data = {}) {
     );
 
     const now = updatedFields.updatedAt;
+    const updatedGhostMasterIds = getGhostMasterIds(updatedGhosts);
     await updateDoc(doc(db, 'teams', teamId), {
         ghosts: updatedGhosts,
-        ghostMasterIds: getGhostMasterIds(updatedGhosts),
+        ghostMasterIds: updatedGhostMasterIds,
+        updatedAt: now
+    });
+    applyTeamPatch(teamId, {
+        ghosts: updatedGhosts,
+        ghostMasterIds: updatedGhostMasterIds,
         updatedAt: now
     });
     return updatedGhosts.find((ghost) => ghost.id === ghostId) || null;
@@ -282,9 +315,15 @@ export async function removeTeamGhost(teamId, ghostId) {
 
     const now = new Date().toISOString();
     const updatedGhosts = getTeamGhosts(team).filter((ghost) => ghost.id !== ghostId);
+    const updatedGhostMasterIds = getGhostMasterIds(updatedGhosts);
     await updateDoc(doc(db, 'teams', teamId), {
         ghosts: updatedGhosts,
-        ghostMasterIds: getGhostMasterIds(updatedGhosts),
+        ghostMasterIds: updatedGhostMasterIds,
+        updatedAt: now
+    });
+    applyTeamPatch(teamId, {
+        ghosts: updatedGhosts,
+        ghostMasterIds: updatedGhostMasterIds,
         updatedAt: now
     });
     return ghostId;
@@ -351,10 +390,16 @@ export async function addGhostWorkday(teamId, ghostId, workDay, assignedBy = nul
             ? { ...g, [targetArray]: updatedEntries, [otherArray]: currentGhost?.[otherArray] || [], updatedAt: now }
             : g
     );
+    const updatedGhostMasterIds = getGhostMasterIds(updatedGhosts);
 
     await updateDoc(doc(db, 'teams', teamId), {
         ghosts: updatedGhosts,
-        ghostMasterIds: getGhostMasterIds(updatedGhosts),
+        ghostMasterIds: updatedGhostMasterIds,
+        updatedAt: now
+    });
+    applyTeamPatch(teamId, {
+        ghosts: updatedGhosts,
+        ghostMasterIds: updatedGhostMasterIds,
         updatedAt: now
     });
     return entry;
@@ -380,10 +425,16 @@ export async function removeGhostWorkday(teamId, ghostId, workdayId) {
             updatedAt: now
         };
     });
+    const updatedGhostMasterIds = getGhostMasterIds(updatedGhosts);
 
     await updateDoc(doc(db, 'teams', teamId), {
         ghosts: updatedGhosts,
-        ghostMasterIds: getGhostMasterIds(updatedGhosts),
+        ghostMasterIds: updatedGhostMasterIds,
+        updatedAt: now
+    });
+    applyTeamPatch(teamId, {
+        ghosts: updatedGhosts,
+        ghostMasterIds: updatedGhostMasterIds,
         updatedAt: now
     });
     return workdayId;
@@ -423,10 +474,16 @@ export async function clearGhostWorkdays(teamId, ghostId) {
             updatedAt: now
         };
     });
+    const updatedGhostMasterIds = getGhostMasterIds(updatedGhosts);
 
     await updateDoc(doc(db, 'teams', teamId), {
         ghosts: updatedGhosts,
-        ghostMasterIds: getGhostMasterIds(updatedGhosts),
+        ghostMasterIds: updatedGhostMasterIds,
+        updatedAt: now
+    });
+    applyTeamPatch(teamId, {
+        ghosts: updatedGhosts,
+        ghostMasterIds: updatedGhostMasterIds,
         updatedAt: now
     });
     return { removedWorksdays, removedOvertime };

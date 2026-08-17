@@ -521,6 +521,42 @@ describe('team ghost mutators', () => {
         expect(firestoreMocks.updateDoc).not.toHaveBeenCalled();
     });
 
+    it('addGhostWorkday actualiza teamsStore para preservar cambios entre llamadas consecutivas', async () => {
+        setUser({ uid: 'admin-1', name: 'Admin' });
+        setTeamsStore([{
+            id: 'team-1',
+            admin: 'admin-1',
+            members: ['admin-1'],
+            ghosts: [
+                { id: 'g1', name: 'Fantasma 1', masters: ['admin-1'], worksdays: [], overtime: [] },
+                { id: 'g2', name: 'Fantasma 2', masters: ['admin-1'], worksdays: [], overtime: [] }
+            ]
+        }]);
+
+        const first = await addGhostWorkday('team-1', 'g1', {
+            date: '2026-01-15',
+            type: 'full-day',
+            taskTitle: 'Tarea 1'
+        });
+        expect(first.type).toBe('full-day');
+
+        const second = await addGhostWorkday('team-1', 'g2', {
+            date: '2026-01-15',
+            type: 'full-day',
+            taskTitle: 'Tarea 2'
+        });
+        expect(second.type).toBe('full-day');
+
+        const secondPayload = firestoreMocks.updateDoc.mock.calls[1][1];
+        const ghostsSent = secondPayload.ghosts;
+        const g1Sent = ghostsSent.find((g) => g.id === 'g1');
+        const g2Sent = ghostsSent.find((g) => g.id === 'g2');
+        expect(g1Sent.worksdays).toHaveLength(1);
+        expect(g1Sent.worksdays[0].taskTitle).toBe('Tarea 1');
+        expect(g2Sent.worksdays).toHaveLength(1);
+        expect(g2Sent.worksdays[0].taskTitle).toBe('Tarea 2');
+    });
+
     it('removeGhostWorkday elimina la obra del array correcto', async () => {
         setUser({ uid: 'admin-1' });
         setTeamsStore([{

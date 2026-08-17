@@ -2,13 +2,22 @@
   import { AlertCircle, CheckCheck, Info, X } from "lucide-svelte";
   let { type, message, duration=2000, show = $bindable() } = $props();
 
-    $effect(() => {
-        if(show){
-            setTimeout(() => {
-                show = false;
-            }, duration);
-        }
-    }); 
+  let hideTimer;
+
+  $effect(() => {
+    if (show) {
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => {
+        show = false;
+        hideTimer = null;
+      }, duration);
+    }
+
+    return () => {
+      clearTimeout(hideTimer);
+      hideTimer = null;
+    };
+  });
 </script>
 
 {#if show}
