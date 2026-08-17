@@ -7,6 +7,7 @@
     Mail,
     MapPin,
     Pencil,
+    Phone,
     Plus,
     Save,
     Search,
