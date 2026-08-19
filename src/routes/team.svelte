@@ -216,6 +216,42 @@
     }
   });
 
+  $effect(() => {
+    const teamId = team?.id;
+    const targetUserId = workdayTargetUserId;
+
+    if (!showWorkdayForm || !teamId || !targetUserId) {
+      isCheckingWorkday = false;
+      return;
+    }
+
+    let cancelled = false;
+    isCheckingWorkday = true;
+
+    hasWorkdayForDate(teamId, targetUserId)
+      .then((exists) => {
+        if (cancelled) return;
+        hasWorkdayToday = exists;
+        if (exists) {
+          if (workDay.type !== "overtime") workDay.type = "overtime";
+        } else if (workDay.type === "overtime") {
+          workDay.type = "full-day";
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("Error checking today's workday:", error);
+        hasWorkdayToday = false;
+      })
+      .finally(() => {
+        if (!cancelled) isCheckingWorkday = false;
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  });
+
   function openAddTask() {
     editingTaskId = null;
     taskForm = {
