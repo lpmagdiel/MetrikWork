@@ -61,6 +61,7 @@
   import { confirmAlert, promptAlert } from "../data/alerts.js";
   import { navigateTo } from "../router.js";
   import { openBudgetReport } from "../helpers/budgetReport.js";
+  import { openReportWindow } from "../helpers/reportExport.js";
   import CircleAddButton from "../components/CircleAddButton.svelte";
   import ClientPicker from "../components/ClientPicker.svelte";
   import SliceContainer from "../components/SliceContainer.svelte";
@@ -521,14 +522,21 @@
 
   async function exportBudgetPdf(budget) {
     if (!budget) return;
+    const reportWindow = openReportWindow();
+    if (!reportWindow) {
+      showNotification("Permite ventanas emergentes para exportar el PDF.", "error");
+      return;
+    }
     const checklist = await fetchChecklistSnapshot(budget.id);
     const ok = openBudgetReport({
       budget,
       checklist,
-      budgetNumber: budget.id?.slice(0, 6)?.toUpperCase() || "00000"
+      budgetNumber: budget.id?.slice(0, 6)?.toUpperCase() || "00000",
+      targetWindow: reportWindow
     });
     if (!ok) {
-      showNotification("Permite ventanas emergentes para exportar el PDF.", "error");
+      reportWindow.close();
+      showNotification("No se pudo generar el PDF del presupuesto.", "error");
     }
   }
 

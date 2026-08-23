@@ -539,7 +539,7 @@ export function buildInvoiceReport({ charge = {}, team = {} } = {}) {
  *
  * @returns {boolean} true si la ventana se abrió correctamente.
  */
-export function openInvoiceReport({ charge, team } = {}) {
+export function openInvoiceReport({ charge, team, targetWindow = null } = {}) {
   const report = buildInvoiceReport({ charge, team });
-  return openPrintableReport(report);
+  return openPrintableReport(report, targetWindow);
 }

@@ -374,7 +374,7 @@ export function buildBudgetReport({ budget, checklist = [], company = {}, budget
  *
  * @returns {boolean} true si la ventana se abrió correctamente.
  */
-export function openBudgetReport({ budget, checklist = [], company = {}, budgetNumber } = {}) {
+export function openBudgetReport({ budget, checklist = [], company = {}, budgetNumber, targetWindow = null } = {}) {
   const report = buildBudgetReport({ budget, checklist, company, budgetNumber });
-  return openPrintableReport(report);
+  return openPrintableReport(report, targetWindow);
 }

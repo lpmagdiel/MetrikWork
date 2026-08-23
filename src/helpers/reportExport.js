@@ -268,9 +268,14 @@ function buildReportHtml({
 </html>`;
 }
 
-export function openPrintableReport(report) {
+export function openReportWindow(features = "width=1100,height=1200") {
+  if (typeof window === "undefined") return null;
+  return window.open("", "_blank", features);
+}
+
+export function openPrintableReport(report, targetWindow = null) {
   if (typeof window === "undefined") return false;
-  const reportWindow = window.open("", "_blank", "width=1100,height=1200");
+  const reportWindow = targetWindow || openReportWindow();
   if (!reportWindow) return false;
   reportWindow.document.open();
   reportWindow.document.write(buildReportHtml(report, { includeActions: true }));
