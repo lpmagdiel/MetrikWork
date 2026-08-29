@@ -258,6 +258,41 @@ export default defineConfig(({ mode }) => {
                 }
               }
             },
+            // Activos de Tesseract.js (WASM core + modelos de idioma).
+            // El core se sirve desde jsDelivr y los modelos .traineddata
+            // desde el CDN de projectnaptha o jsDelivr. Cacheamos ambos
+            // para que el OCR funcione offline después del primer uso.
+            {
+              urlPattern: ({ url }) => (
+                url.origin === 'https://cdn.jsdelivr.net' &&
+                /tesseract\.js/i.test(url.pathname)
+              ),
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'metricwork-ocr-core',
+                cacheableResponse: { statuses: [0, 200] },
+                expiration: {
+                  maxEntries: 16,
+                  maxAgeSeconds: 60 * 60 * 24 * 90
+                }
+              }
+            },
+            {
+              urlPattern: ({ url }) => (
+                url.origin === 'https://tessdata.projectnaptha.com' ||
+                (url.origin === 'https://cdn.jsdelivr.net' &&
+                  /\.traineddata($|\?)/.test(url.pathname))
+              ),
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'metricwork-ocr-models',
+                cacheableResponse: { statuses: [0, 200] },
+                expiration: {
+                  maxEntries: 16,
+                  maxAgeSeconds: 60 * 60 * 24 * 365
+                }
+              }
+            },
             // Las peticiones a Firebase usan HTTP/2 streaming (canales
             // /Write/channel) que los Service Workers no pueden cachear.
             // Las dejamos pasar tal cual con NetworkOnly para evitar el

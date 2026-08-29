@@ -7,18 +7,26 @@
  * `localStorage.lastUpdateFeaturesVersion`.
  */
 export const updateData = {
-    version: "1.1.0", // Actualiza este valor en cada release
-    message: "MetricWork 1.1 - Creacion de equipos simplificada y sin planes",
+    version: "1.2.0", // Actualiza este valor en cada release
+    message: "MetricWork 1.2 - OCR en gastos y empleados temporales en pagos",
     features: [
-        "Creacion de equipos mas simple: ahora solo necesitas escribir un nombre para crear un equipo nuevo. Ya no hay que elegir plan ni capacidad al dar de alta un equipo.",
-        "Eliminamos los planes G/S/M/L y los campos de facturacion (teamSize, maxMembers, billingAmountEur, billingDate) del flujo de alta. Los equipos ya no tienen limite rigido de miembros impuesto por la aplicacion.",
-        "Permisos confirmados para fabiansolares719@gmail.com como administrador del sistema, junto al resto de correos administradores ya configurados.",
-        "Panel de administracion (/system-admin) actualizado: la tarjeta 'Planes mensuales' desaparece y las fichas de equipo ya no muestran el plan, solo el nombre y el numero de miembros.",
-        "Ajustes de equipo (/teams/:id/settings) rediseñados: se retiran las tarjetas de 'Plan actual', 'Fecha de pago' y 'Cantidad a pagar' para evitar referencias a planes que ya no se utilizan.",
-        "Reglas de Firestore actualizadas: isAllowedTeamCreateShape deja de exigir campos de plan y solo valida el nombre del equipo (1-80 caracteres), el admin y los miembros. Los campos restantes son opcionales pero se siguen validando si llegan en el documento.",
-        "isValidTeamSize y hasAvailableTeamMemberSlot son tolerantes con equipos sin campos de plan, evitando rechazos en equipos creados con el nuevo flujo.",
-        "Helpers de teamSizes.js neutralizados para mantener la compatibilidad con vistas legacy: getTeamSizeValue/getTeamMonthlyPrice/getTeamSizeOption/getTeamMemberLimit devuelven valores neutros (sin plan, sin precio, sin limite).",
-        "Cobertura de tests ampliada: nuevos tests para createTeam (nombre vacio, sin auth, no admin, fabiansolares719, sin campos de plan) y para las reglas de Firestore (no se exigen campos de plan, billingAmountEur y maxMembers son opcionales).",
-        "Suite de tests al dia: 193/193 tests pasan y el build de produccion se genera sin errores ni warnings nuevos.",
+        // OCR en gastos
+        "Nuevo escaneo automatico de tickets (OCR) en el formulario de gastos: al adjuntar una imagen, se lanza Tesseract.js en el navegador y se rellenan importe, fecha, proveedor, NIF/CIF, numero de factura y categoria.",
+        "Indicador animado durante el escaneo: barra de progreso con efecto shimmer, texto con puntos suspensivos animados y chip del recibo pulsando para que sepas que el OCR esta trabajando.",
+        "Los campos autocompletados por OCR se resaltan visualmente y llevan el sufijo '· OCR' en la etiqueta. El usuario siempre puede revisarlos y corregirlos antes de guardar.",
+        "Servicio Worker (Workbox) configurado para cachear el nucleo de Tesseract y los modelos .traineddata: tras el primer escaneo el OCR funciona sin conexion.",
+        "Modulo de OCR cargado bajo demanda (import dinamico) para no penalizar el bundle inicial; solo se descarga cuando el usuario abre el formulario de gastos.",
+        "Parser heuristico (src/data/receiptParser.js) con 31 tests unitarios: detecta importes con coma o punto decimal, fechas en formatos DD/MM/YYYY y '15 de enero de 2026', NIF/CIF/NIE, numeros de factura y categoria por palabras clave (gasolinera, hotel, restaurante, etc).",
+
+        // Reorganizacion del formulario de gastos
+        "El area 'Adjuntar ticket o factura' ahora aparece como primera seccion del formulario (antes de Gasto y Proveedor) para que el OCR tenga protagonismo desde el arranque.",
+        "Se elimino el boton 'Escanear' manual: el reconocimiento se ejecuta automaticamente al subir cada imagen, sin pasos extra para el usuario.",
+        "El formulario se reordeno en tres bloques claros: Recibo, Gasto y Proveedor, con los campos de deducible y notas en su seccion correspondiente.",
+
+        // Empleados temporales (fantasmas) en pagos
+        "Los empleados temporales (fantasmas) ya aparecen en el menu de Pagos del equipo con su avatar 👻 y la lista de masters asignados, aunque sin importe monetario (tarifa 0 por defecto).",
+        "Filtro reforzado para evitar que las jornadas de un fantasma se sumen al saldo del master que lo supervisa: aunque llegasen con el mismo userId, quedan descartadas antes del calculo.",
+        "Los fantasmas se muestran en los filtros 'Todos' y 'Pagados', nunca en 'No Pagados', y sus totales no contaminan el resumen 'Total a pagar' del equipo.",
+        "Los reportes PDF/Excel de pagos incluyen a los fantasmas como filas informativas (horas pendientes, horas extra) con la marca 'Sin tarifa' para que el usuario distinga lo que es gasto real de lo que es solo registro de horas.",
     ]
 };

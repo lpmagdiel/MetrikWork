@@ -15,6 +15,7 @@
     Plus,
     ReceiptText,
     Save,
+    Scan,
     Search,
     Trash2,
     Upload,
@@ -49,6 +50,8 @@
   import { destroyer, resizeImageFile, uploader } from "../data/fileHelper.js";
   import { optimizeCloudinary, stripImageFileExtension } from "../helpers/image.js";
   import { openSliceContainers } from "../data/ui.js";
+  import { recognizeImage, subscribeOcrProgress } from "../data/ocr.js";
+  import { parseReceiptText } from "../data/receiptParser.js";
   import CircleAddButton from "../components/CircleAddButton.svelte";
   import SliceContainer from "../components/SliceContainer.svelte";
   import TitleHeader from "../components/TitleHeader.svelte";
@@ -111,6 +114,29 @@
   let lightboxReceipts = $state(null);
   let lightboxIndex = $state(0);
   let lightboxRegistered = $state(false);
+
+  let scanningReceiptId = $state("");
+  let ocrAutoFilledFields = $state({});
+  let ocrLastSummary = $state(null);
+  let ocrStatus = $state({ status: "idle", progress: 0 });
+  let ocrStatusMessage = $state("");
+  let ocrAnimatedFrame = $state(0);
+
+  const OCR_STATUS_LABELS = {
+    "loading model": "Cargando modelo OCR",
+    "initialized api": "Inicializando OCR",
+    "initialized tesseract": "Inicializando Tesseract",
+    "loading language traineddata": "Cargando idioma",
+    "loading language traineddata (from cache)": "Cargando idioma (caché)",
+    "initialized language model": "Modelo listo",
+    "loading image": "Cargando imagen",
+    "recognizing text": "Reconociendo texto",
+    "done": "Escaneo completado",
+    "idle": "",
+    "ready": ""
+  };
+
+  const OCR_DOTS = ["", ".", "..", "..."];
 
   let period = $state("month");
   let startDate = $state(getMonthRange().start);
@@ -204,6 +230,30 @@
     openSliceContainers.update((count) => Math.max(0, count - 1));
   });
 
+  $effect(() => {
+    const unsubscribe = subscribeOcrProgress((payload) => {
+      ocrStatus = { status: payload.status || "idle", progress: Number(payload.progress) || 0 };
+      if (payload.status && payload.status !== "idle" && payload.status !== "ready") {
+        ocrStatusMessage = buildOcrStatusLabel(payload.status, ocrAnimatedFrame);
+      }
+    });
+    return unsubscribe;
+  });
+
+  // Anima los puntos suspensivos del mensaje de estado OCR.
+  $effect(() => {
+    if (!scanningReceiptId && ocrStatus.status !== "loading model"
+      && ocrStatus.status !== "loading image"
+      && ocrStatus.status !== "loading language traineddata"
+      && ocrStatus.status !== "recognizing text") {
+      return undefined;
+    }
+    const interval = setInterval(() => {
+      ocrAnimatedFrame = (ocrAnimatedFrame + 1) % 1024;
+    }, 350);
+    return () => clearInterval(interval);
+  });
+
   function getLocalDateKey(date = new Date()) {
     return [
       date.getFullYear(),
@@ -273,6 +323,8 @@
     expenseForm = createDefaultExpenseForm(currency);
     receipts = [];
     removedReceipts = [];
+    ocrAutoFilledFields = {};
+    ocrLastSummary = null;
     showExpenseForm = true;
   }
 
@@ -301,6 +353,8 @@
     };
     receipts = Array.isArray(expense.receipts) ? expense.receipts.map((receipt) => ({ ...receipt })) : [];
     removedReceipts = [];
+    ocrAutoFilledFields = {};
+    ocrLastSummary = null;
     showExpenseForm = true;
   }
 
@@ -311,6 +365,8 @@
       receipts = [];
       removedReceipts = [];
       isUploadingReceipts = false;
+      ocrAutoFilledFields = {};
+      ocrLastSummary = null;
       if (receiptFileInput) receiptFileInput.value = "";
     }
   });
@@ -355,7 +411,12 @@
             quality: 0.85,
           });
           const url = await uploader(resized, CLOUDINARY_PRESET_EXPENSES);
-          receipts = [...receipts, { url, name: file.name }];
+          const newReceipt = { url, name: file.name };
+          receipts = [...receipts, newReceipt];
+          // Dispara el OCR en segundo plano; no bloquea el alta del
+          // siguiente recibo. El primer escaneo puede tardar varios
+          // segundos mientras se carga el modelo del idioma.
+          handleScanReceipt(newReceipt).catch(() => {});
         } catch (error) {
           console.error("Error uploading expense receipt:", error);
           showErrorAlert(
@@ -378,6 +439,85 @@
       removedReceipts = [...removedReceipts, target.url];
     }
     receipts = receipts.filter((_, itemIndex) => itemIndex !== index);
+  }
+
+  async function fetchReceiptAsBlob(url) {
+    const response = await fetch(url, { mode: "cors" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.blob();
+  }
+
+  async function handleScanReceipt(receipt) {
+    if (!receipt?.url || scanningReceiptId) return;
+    if (typeof window === "undefined") return;
+    scanningReceiptId = receipt.url;
+    ocrStatus = { status: "loading image", progress: 0 };
+    ocrStatusMessage = "Preparando imagen";
+    ocrAnimatedFrame = 0;
+    try {
+      const imageSource = await fetchReceiptAsBlob(receipt.url);
+      const { text, confidence } = await recognizeImage(imageSource);
+      const result = parseReceiptText(text);
+      ocrLastSummary = {
+        confidence: Number(confidence) || 0,
+        filledFields: result.summary.filledFields,
+        totalFields: result.summary.totalFields,
+        receiptName: receipt.name
+      };
+      applyOcrFields(result.fields);
+      ocrStatus = { status: "done", progress: 1 };
+      ocrStatusMessage = `Escaneo completado (${result.summary.filledFields}/${result.summary.totalFields} campos)`;
+    } catch (error) {
+      console.warn("OCR no disponible:", error);
+      ocrStatus = { status: "error", progress: 0 };
+      ocrStatusMessage = "No se pudo procesar la imagen automáticamente";
+      showInfoAlert(
+        "OCR no disponible",
+        "No se pudo procesar la imagen automáticamente. Rellena los campos a mano.",
+      );
+    } finally {
+      scanningReceiptId = "";
+    }
+  }
+
+  function buildOcrStatusLabel(status, frame) {
+    const baseLabel = OCR_STATUS_LABELS[status] || (status ? `Procesando (${status})` : "");
+    if (!baseLabel) return "";
+    const dots = OCR_DOTS[frame % OCR_DOTS.length];
+    return `${baseLabel}${dots}`;
+  }
+
+  function applyOcrFields(fields) {
+    if (!fields) return;
+    const next = {};
+    if (fields.amount != null && !expenseForm.amount) {
+      expenseForm.amount = String(fields.amount);
+      next.amount = true;
+    }
+    if (fields.date) {
+      expenseForm.date = fields.date;
+      if (expenseForm.status === "paid" && !expenseForm.paidAt) {
+        expenseForm.paidAt = fields.date;
+      }
+      next.date = true;
+    }
+    if (fields.vendorName && !expenseForm.vendorName) {
+      expenseForm.vendorName = fields.vendorName;
+      next.vendorName = true;
+    }
+    if (fields.vendorTaxId && !expenseForm.vendorTaxId) {
+      expenseForm.vendorTaxId = fields.vendorTaxId;
+      next.vendorTaxId = true;
+    }
+    if (fields.invoiceNumber && !expenseForm.invoiceNumber) {
+      expenseForm.invoiceNumber = fields.invoiceNumber;
+      next.invoiceNumber = true;
+    }
+    if (fields.category && EXPENSE_CATEGORIES.some((c) => c.value === fields.category)) {
+      expenseForm.category = fields.category;
+      next.category = true;
+    }
+    ocrAutoFilledFields = { ...ocrAutoFilledFields, ...next };
   }
 
   function openReceiptLightbox(expense, index = 0) {
@@ -764,6 +904,81 @@
         </div>
 
         <section class="form-section">
+          <h3>Recibo</h3>
+          <div class="receipts-field full-field">
+            <div class="receipts-heading">
+              <span><FileImage size={16} /> Adjuntar ticket o factura</span>
+              <small>{receipts.length}/{MAX_RECEIPTS}</small>
+            </div>
+
+            {#if ocrStatusMessage && (scanningReceiptId || ocrStatus.status === "done")}
+              <div class="ocr-status" role="status" aria-live="polite">
+                <LoaderCircle size={15} class="spin" />
+                <span>{ocrStatusMessage}</span>
+                {#if scanningReceiptId}
+                  <div class="ocr-progress">
+                    <div class="ocr-progress-bar" style={`width: ${Math.round((ocrStatus.progress || 0) * 100)}%`}></div>
+                  </div>
+                {/if}
+              </div>
+            {/if}
+
+            {#if receipts.length}
+              <ul class="receipts-list" aria-label="Recibos adjuntos">
+                {#each receipts as receipt, index (receipt.url)}
+                  <li class="receipt-chip" class:receipt-chip-scanning={scanningReceiptId === receipt.url}>
+                    <div class="receipt-thumb">
+                      <img src={optimizeCloudinary(receipt.url, 80, { height: 80, crop: "fill" })} alt={receipt.name} loading="lazy" decoding="async" />
+                    </div>
+                    <div class="receipt-meta">
+                      <strong>{stripImageFileExtension(receipt.name, "Recibo")}</strong>
+                      <small>
+                        {#if scanningReceiptId === receipt.url}
+                          <span class="receipt-chip-status">
+                            <LoaderCircle size={11} class="spin" /> Escaneando…
+                          </span>
+                        {:else}
+                          {receipt.name}
+                        {/if}
+                      </small>
+                    </div>
+                    <button type="button" class="receipt-remove" aria-label={`Quitar ${receipt.name}`} onclick={() => removeReceipt(index)} disabled={isSaving || scanningReceiptId === receipt.url}>
+                      <X size={16} />
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+              {#if ocrLastSummary && !scanningReceiptId}
+                <p class="ocr-summary">
+                  <Scan size={13} />
+                  OCR {ocrLastSummary.filledFields}/{ocrLastSummary.totalFields} campos ·
+                  confianza {Math.round(ocrLastSummary.confidence)}%
+                </p>
+              {/if}
+            {/if}
+
+            <div class="receipts-actions">
+              <button type="button" class="receipt-add" onclick={openReceiptPicker} disabled={isUploadingReceipts || isSaving || receipts.length >= MAX_RECEIPTS}>
+                {#if isUploadingReceipts}
+                  <LoaderCircle size={17} class="spin" /> Subiendo...
+                {:else}
+                  <Upload size={17} /> Adjuntar imagen
+                {/if}
+              </button>
+              <p class="receipts-hint">Sube una foto del ticket. Lo escaneamos automáticamente para rellenar el formulario.</p>
+            </div>
+            <input
+              bind:this={receiptFileInput}
+              type="file"
+              accept="image/*"
+              multiple
+              onchange={handleReceiptsChange}
+              style="display:none"
+            />
+          </div>
+        </section>
+
+        <section class="form-section">
           <h3>Gasto</h3>
           <label class="full-field">
             <span>Concepto *</span>
@@ -774,11 +989,11 @@
             <textarea rows="3" maxlength="600" bind:value={expenseForm.description} placeholder="Detalle del gasto"></textarea>
           </label>
           <div class="form-grid">
-            <label>
+            <label class:autofilled={ocrAutoFilledFields.amount}>
               <span>Importe *</span>
               <div class="amount-field"><input type="number" min="0.01" max="1000000000" step="0.01" inputmode="decimal" bind:value={expenseForm.amount} required /><b>{currency}</b></div>
             </label>
-            <label>
+            <label class:autofilled={ocrAutoFilledFields.category}>
               <span>Categoría</span>
               <select bind:value={expenseForm.category}>
                 {#each EXPENSE_CATEGORIES as category (category.value)}
@@ -786,7 +1001,7 @@
                 {/each}
               </select>
             </label>
-            <label>
+            <label class:autofilled={ocrAutoFilledFields.date}>
               <span>Fecha *</span>
               <input type="date" bind:value={expenseForm.date} required />
             </label>
@@ -812,20 +1027,24 @@
               </select>
             </label>
           </div>
+          <label class="check-field">
+            <input type="checkbox" bind:checked={expenseForm.deductible} />
+            <span>Marcar como potencialmente deducible</span>
+          </label>
         </section>
 
         <section class="form-section">
-          <h3>Proveedor y justificante</h3>
+          <h3>Proveedor</h3>
           <div class="form-grid">
-            <label>
+            <label class:autofilled={ocrAutoFilledFields.vendorName}>
               <span>Proveedor</span>
               <input type="text" maxlength="120" bind:value={expenseForm.vendorName} placeholder="Nombre o empresa" />
             </label>
-            <label>
+            <label class:autofilled={ocrAutoFilledFields.vendorTaxId}>
               <span>NIF/CIF</span>
               <input type="text" maxlength="40" bind:value={expenseForm.vendorTaxId} placeholder="Documento fiscal" />
             </label>
-            <label>
+            <label class:autofilled={ocrAutoFilledFields.invoiceNumber}>
               <span>N.º factura / ticket</span>
               <input type="text" maxlength="80" bind:value={expenseForm.invoiceNumber} placeholder="Referencia" />
             </label>
@@ -838,52 +1057,6 @@
                 {/each}
               </select>
             </label>
-          </div>
-          <label class="check-field">
-            <input type="checkbox" bind:checked={expenseForm.deductible} />
-            <span>Marcar como potencialmente deducible</span>
-          </label>
-          <div class="receipts-field full-field">
-            <div class="receipts-heading">
-              <span><FileImage size={16} /> Tickets / facturas adjuntos</span>
-              <small>{receipts.length}/{MAX_RECEIPTS}</small>
-            </div>
-            {#if receipts.length}
-              <ul class="receipts-list" aria-label="Recibos adjuntos">
-                {#each receipts as receipt, index (receipt.url)}
-                  <li class="receipt-chip">
-                    <div class="receipt-thumb">
-                      <img src={optimizeCloudinary(receipt.url, 80, { height: 80, crop: "fill" })} alt={receipt.name} loading="lazy" decoding="async" />
-                    </div>
-                    <div class="receipt-meta">
-                      <strong>{stripImageFileExtension(receipt.name, "Recibo")}</strong>
-                      <small>{receipt.name}</small>
-                    </div>
-                    <button type="button" class="receipt-remove" aria-label={`Quitar ${receipt.name}`} onclick={() => removeReceipt(index)} disabled={isSaving}>
-                      <X size={16} />
-                    </button>
-                  </li>
-                {/each}
-              </ul>
-            {/if}
-            <div class="receipts-actions">
-              <button type="button" class="receipt-add" onclick={openReceiptPicker} disabled={isUploadingReceipts || isSaving || receipts.length >= MAX_RECEIPTS}>
-                {#if isUploadingReceipts}
-                  <LoaderCircle size={17} class="spin" /> Subiendo...
-                {:else}
-                  <Upload size={17} /> Adjuntar imagen
-                {/if}
-              </button>
-              <p class="receipts-hint">Fotos de tickets o facturas. Se guardan al confirmar el gasto.</p>
-            </div>
-            <input
-              bind:this={receiptFileInput}
-              type="file"
-              accept="image/*"
-              multiple
-              onchange={handleReceiptsChange}
-              style="display:none"
-            />
           </div>
           <label class="full-field">
             <span>Notas internas</span>
@@ -1315,6 +1488,107 @@
     cursor: pointer;
   }
   .receipt-remove:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .receipt-chip-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .receipt-chip-scanning {
+    border-color: color-mix(in srgb, var(--accent-color) 65%, var(--border-color));
+    background: color-mix(in srgb, var(--accent-color) 12%, var(--bg-card));
+    animation: ocr-chip-pulse 1.4s ease-in-out infinite;
+  }
+
+  .receipt-chip-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--accent-color);
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+
+  .ocr-status {
+    margin: 8px 0 12px;
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--accent-color) 10%, var(--bg-input));
+    border: 1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
+    color: var(--accent-ink);
+    font-size: 12px;
+    font-weight: 800;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .ocr-status > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .ocr-progress {
+    width: 100%;
+    height: 4px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent-color) 18%, transparent);
+    overflow: hidden;
+  }
+  .ocr-progress-bar {
+    height: 100%;
+    background: var(--accent-color);
+    transition: width 0.25s ease;
+    background-image: linear-gradient(
+      90deg,
+      var(--accent-color) 0%,
+      color-mix(in srgb, var(--accent-color) 60%, var(--accent-ink)) 50%,
+      var(--accent-color) 100%
+    );
+    background-size: 200% 100%;
+    animation: ocr-progress-shimmer 1.2s linear infinite;
+  }
+
+  @keyframes ocr-progress-shimmer {
+    from { background-position: 100% 0; }
+    to   { background-position: -100% 0; }
+  }
+
+  @keyframes ocr-chip-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-color) 35%, transparent); }
+    50%      { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent-color) 0%, transparent); }
+  }
+
+  .ocr-summary {
+    margin: 8px 0 0;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: var(--bg-accent-subtle);
+    color: var(--accent-ink);
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  label.autofilled > input,
+  label.autofilled > select,
+  label.autofilled > textarea,
+  label.autofilled .amount-field input {
+    background: color-mix(in srgb, var(--accent-color) 10%, var(--bg-input));
+    border-color: color-mix(in srgb, var(--accent-color) 55%, var(--border-color));
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-color) 18%, transparent);
+  }
+  label.autofilled > span::after {
+    content: ' · OCR';
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--accent-color);
+    margin-left: 4px;
+  }
   .receipts-actions {
     display: flex;
     flex-wrap: wrap;
