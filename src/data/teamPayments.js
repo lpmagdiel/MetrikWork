@@ -1,6 +1,7 @@
 import { db } from './firebase.js';
 import { collection, addDoc, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 import { getWorksByTeamId } from './works.js';
+import { getTeamGhosts } from './teams.js';
 import { getBankName } from '../helpers/banks.js';
 
 const MONEY_EPSILON = 0.01;
@@ -8,6 +9,12 @@ const MONEY_EPSILON = 0.01;
 function roundMetric(value, decimals = 2) {
     const factor = 10 ** decimals;
     return Math.round((Number(value) || 0) * factor) / factor;
+}
+
+function isGhostWorkEntry(work) {
+    if (!work) return false;
+    if (work.isGhost) return true;
+    return typeof work.userId === 'string' && work.userId.startsWith('ghost-');
 }
 
 function getWorkUnits(work) {
@@ -136,7 +143,10 @@ export async function getTeamPaymentsData(teamId) {
             const dailyRate = Number(settings.dailyRate) || 0;
             const extraHourRate = Number(settings.extraHourRate) || 0;
 
-            const userWorks = sortWorksByDate(works[userId] || []);
+            // Defensa: nunca mezclar jornadas de fantasmas en el saldo de un
+            // miembro real aunque lleguen al mismo `userId`.
+            const rawUserWorks = sortWorksByDate(works[userId] || []);
+            const userWorks = rawUserWorks.filter((work) => !isGhostWorkEntry(work));
             const userPayments = payments
                 .filter(p => p.userId === userId)
                 .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
@@ -200,7 +210,88 @@ export async function getTeamPaymentsData(teamId) {
             };
         });
 
-        return memberBalances;
+        // 5. Listar fantasmas como entradas separadas para que sus horas
+        // queden visibles en el menú de pagos. Los fantasmas no acumulan
+        // importes (tarifa 0) y por defecto sólo admiten pago en efectivo.
+        const ghosts = getTeamGhosts(teamData);
+        const ghostBalances = ghosts.map((ghost) => {
+            const ghostUserId = `ghost-${ghost.id}`;
+            const masterIds = Array.isArray(ghost.masters) ? ghost.masters : [];
+            const masterNameById = new Map(
+                (membersData || [])
+                    .filter((m) => m?.id)
+                    .map((m) => [m.id, m.name || m.email || "Sin nombre"])
+            );
+            const annotatedWorks = (works[ghostUserId] || [])
+                .filter((work) => isGhostWorkEntry(work))
+                .map((work) => ({
+                    ...work,
+                    workUnits: roundMetric(getWorkUnits(work), 4),
+                    workAmount: 0,
+                    paidAmount: 0,
+                    pendingAmount: 0,
+                    pendingWorkUnits: 0,
+                    pendingOvertimeHours: 0,
+                    paymentStatus: 'unpaid',
+                    paid: false,
+                }));
+
+            const pendingWorks = annotatedWorks.map((work) => ({
+                ...work,
+                pendingAmount: 0,
+            }));
+
+            return {
+                id: ghostUserId,
+                name: ghost.name,
+                isGhost: true,
+                ghostId: ghost.id,
+                masters: masterIds,
+                masterNames: masterIds
+                    .map((id) => masterNameById.get(id))
+                    .filter(Boolean),
+                totalFullDays: annotatedWorks.filter((w) => w.type === 'full-day').length,
+                totalHalfDays: annotatedWorks.filter((w) => w.type === 'half-day').length,
+                totalVariableHours: annotatedWorks
+                    .filter((w) => w.type === 'variable' && w.timerMode !== 'overtime')
+                    .reduce((sum, w) => sum + getVariableHours(w), 0),
+                totalWorkDays: roundMetric(
+                    annotatedWorks.reduce((sum, w) => sum + getWorkUnits(w), 0),
+                    4
+                ),
+                totalOvertimeHours: roundMetric(
+                    annotatedWorks.reduce((sum, w) => sum + (Number(w.overtimeHours) || 0), 0),
+                    4
+                ),
+                totalEarned: 0,
+                totalPaid: 0,
+                balance: 0,
+                overpaidAmount: 0,
+                pendingWorkDays: roundMetric(
+                    annotatedWorks.reduce((sum, w) => sum + getWorkUnits(w), 0),
+                    4
+                ),
+                pendingOvertimeHours: roundMetric(
+                    annotatedWorks.reduce((sum, w) => sum + (Number(w.overtimeHours) || 0), 0),
+                    4
+                ),
+                pendingEarned: 0,
+                pendingWorks,
+                unappliedPaidAmount: 0,
+                dailyRate: 0,
+                extraHourRate: 0,
+                privateProfile: {},
+                payments: [],
+                works: annotatedWorks,
+            };
+        });
+
+        const memberBalanceIds = new Set(memberBalances.map((m) => m.id));
+        const filteredGhostBalances = ghostBalances.filter(
+            (ghost) => !memberBalanceIds.has(ghost.id)
+        );
+
+        return [...memberBalances, ...filteredGhostBalances];
     } catch (error) {
         console.error("Error calculating team payments:", error);
         throw error;

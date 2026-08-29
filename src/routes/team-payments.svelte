@@ -46,14 +46,24 @@
         bizum: "Bizum",
     };
 
+    let ghostBalances = $derived(memberBalances.filter((m) => m.isGhost));
+    let regularBalances = $derived(memberBalances.filter((m) => !m.isGhost));
+
     let filteredMembers = $derived.by(() => {
-        if (filterStatus === 'paid') return memberBalances.filter(m => m.balance <= 0.01);
-        if (filterStatus === 'unpaid') return memberBalances.filter(m => m.balance > 0.01);
-        return memberBalances;
+        if (filterStatus === 'paid') {
+            return [
+                ...regularBalances.filter((m) => m.balance <= 0.01),
+                ...ghostBalances,
+            ];
+        }
+        if (filterStatus === 'unpaid') {
+            return regularBalances.filter((m) => m.balance > 0.01);
+        }
+        return [...regularBalances, ...ghostBalances];
     });
 
     let pendingPaymentSummary = $derived.by(() => {
-        const membersWithBalance = memberBalances.filter((member) => Number(member.balance) > 0.01);
+        const membersWithBalance = regularBalances.filter((member) => Number(member.balance) > 0.01);
         const totalToPay = membersWithBalance.reduce((acc, member) => acc + (Number(member.balance) || 0), 0);
         return {
             totalToPay,
@@ -108,6 +118,7 @@
     }
 
     function openPaymentModal(member) {
+        if (!member || member.isGhost) return;
         selectedMember = member;
         paymentType = "total";
         paymentMethod = "cash";
@@ -698,15 +709,28 @@
                     : "Todos";
         const totals = filteredMembers.reduce(
             (acc, member) => {
+                if (member.isGhost) return acc;
                 acc.earned += Number(member.totalEarned) || 0;
                 acc.paid += Number(member.totalPaid) || 0;
                 acc.balance += Number(member.balance) || 0;
-                acc.workDays += Number(member.pendingWorkDays) || 0;
-                acc.overtime += Number(member.pendingOvertimeHours) || 0;
                 return acc;
             },
             { earned: 0, paid: 0, balance: 0, workDays: 0, overtime: 0 },
         );
+        const workDays = filteredMembers.reduce(
+            (sum, member) => sum + (Number(member.pendingWorkDays) || 0),
+            0
+        );
+        const overtime = filteredMembers.reduce(
+            (sum, member) => sum + (Number(member.pendingOvertimeHours) || 0),
+            0
+        );
+        totals.workDays = workDays;
+        totals.overtime = overtime;
+
+        const memberLabel = (member) => member.isGhost
+            ? `👻 ${member?.name || "Fantasma"}`
+            : (member?.name || member?.email || "Usuario");
 
         return {
             title: "Reporte de pagos y tiempo",
@@ -732,16 +756,17 @@
                 },
                 {
                     title: "Balance por integrante",
-                    headers: ["Integrante", "Dias pendientes", "Horas extra pendientes", "Tarifa diaria", "Hora extra", "Total ganado", "Pagado", "Saldo", "Estado"],
+                    headers: ["Integrante", "Tipo", "Dias pendientes", "Horas extra pendientes", "Tarifa diaria", "Hora extra", "Total ganado", "Pagado", "Saldo", "Estado"],
                     rows: filteredMembers.map((member) => [
-                        member?.name || member?.email || "Usuario",
+                        memberLabel(member),
+                        member.isGhost ? "Fantasma" : "Miembro",
                         formatMetric(member.pendingWorkDays),
                         `${formatMetric(member.pendingOvertimeHours)}h`,
-                        formatMoney(member.dailyRate),
-                        formatMoney(member.extraHourRate),
-                        formatMoney(member.totalEarned),
-                        formatMoney(member.totalPaid),
-                        formatMoney(member.balance),
+                        member.isGhost ? "Sin tarifa" : formatMoney(member.dailyRate),
+                        member.isGhost ? "Sin tarifa" : formatMoney(member.extraHourRate),
+                        member.isGhost ? "Sin tarifa" : formatMoney(member.totalEarned),
+                        member.isGhost ? "—" : formatMoney(member.totalPaid),
+                        member.isGhost ? formatMoney(0) : formatMoney(member.balance),
                         member.balance > 0.01 ? "Pendiente" : "Al dia",
                     ]),
                 },
@@ -750,14 +775,14 @@
                     headers: ["Integrante", "Fecha", "Tipo", "Dias", "Horas extra", "Nota / tarea", "Ubicación GPS", "Importe"],
                     rows: filteredMembers.flatMap((member) =>
                         (member.pendingWorks || []).map((work) => [
-                            member?.name || member?.email || "Usuario",
+                            memberLabel(member),
                             formatDate(work.date),
                             getWorkTypeLabel(work),
                             formatMetric(getPendingWorkUnits(work)),
                             `${formatMetric(getPendingOvertimeHours(work))}h`,
                             work.taskTitle || work.note || "",
                             getWorkMemberLocationLabel(work) || "Sin GPS",
-                            formatMoney(getWorkAmount(work, member, "pending")),
+                            member.isGhost ? formatMoney(0) : formatMoney(getWorkAmount(work, member, "pending")),
                         ]),
                     ),
                 },
@@ -766,7 +791,7 @@
                     headers: ["Integrante", "Fecha", "Tipo", "Forma de pago", "Registrado por", "Monto"],
                     rows: filteredMembers.flatMap((member) =>
                         (member.payments || []).map((payment) => [
-                            member?.name || member?.email || "Usuario",
+                            memberLabel(member),
                             formatDateTime(payment.date),
                             payment.type === "total" ? "Pago total" : "Pago parcial",
                             getPaymentMethodLabel(payment.method),
@@ -872,15 +897,41 @@
                     </thead>
                     <tbody>
                         {#each filteredMembers as member}
-                            <tr>
+                            <tr class:ghost-row={member.isGhost}>
                                 <td class="member-cell">
-                                    <div class="avatar">{(member?.name || member?.email || "?").charAt(0).toUpperCase()}</div>
-                                    <span>{member?.name || member?.email || "Usuario"}</span>
+                                    <div class="avatar" class:avatar-ghost={member.isGhost}>
+                                        {#if member.isGhost}
+                                            <span aria-hidden="true">👻</span>
+                                        {:else}
+                                            {(member?.name || member?.email || "?").charAt(0).toUpperCase()}
+                                        {/if}
+                                    </div>
+                                    <div class="member-cell-stack">
+                                        <span>{member?.name || member?.email || "Usuario"}</span>
+                                        {#if member.isGhost}
+                                            <small class="ghost-tag">
+                                                <span aria-hidden="true">👻</span>
+                                                Fantasma{member.masterNames?.length ? ` · ${member.masterNames.join(', ')}` : ''}
+                                            </small>
+                                        {/if}
+                                    </div>
                                 </td>
                                 <td>{formatMetric(member.pendingWorkDays)}</td>
                                 <td>{formatMetric(member.pendingOvertimeHours)}h</td>
-                                <td>{formatMoney(member.totalEarned)}</td>
-                                <td>{formatMoney(member.totalPaid)}</td>
+                                <td>
+                                    {#if member.isGhost}
+                                        <span class="muted-amount">Sin tarifa</span>
+                                    {:else}
+                                        {formatMoney(member.totalEarned)}
+                                    {/if}
+                                </td>
+                                <td>
+                                    {#if member.isGhost}
+                                        <span class="muted-amount">—</span>
+                                    {:else}
+                                        {formatMoney(member.totalPaid)}
+                                    {/if}
+                                </td>
                                 <td class="balance-cell">
                                     <span class="badge {member.balance > 0.01 ? 'unpaid' : 'paid'}">
                                         {member.balance > 0.01 ? 'No Pagado' : 'Pagado'} ({formatMoney(member.balance)})
@@ -891,7 +942,9 @@
                                         <button class="icon-btn details" onclick={() => openDetailsModal(member)} title="Ver detalles">
                                             <Eye size={18} />
                                         </button>
-                                        {#if member.balance > 0.01}
+                                        {#if member.isGhost}
+                                            <span class="status-ok ghost-status">Sólo registro</span>
+                                        {:else if member.balance > 0.01}
                                             {#if canCreatePayments}
                                                 <button class="pay-btn" onclick={() => openPaymentModal(member)}>
                                                     <DollarSign size={16} />
@@ -920,17 +973,30 @@
 
             <div class="mobile-members-list">
                 {#each filteredMembers as member}
-                    <article class="mobile-member-card">
+                    <article class="mobile-member-card" class:ghost-row={member.isGhost}>
                         <div class="mobile-member-summary">
                             <div class="member-cell mobile">
-                                <div class="avatar">{(member?.name || member?.email || "?").charAt(0).toUpperCase()}</div>
+                                <div class="avatar" class:avatar-ghost={member.isGhost}>
+                                    {#if member.isGhost}
+                                        <span aria-hidden="true">👻</span>
+                                    {:else}
+                                        {(member?.name || member?.email || "?").charAt(0).toUpperCase()}
+                                    {/if}
+                                </div>
                                 <div class="mobile-member-text">
                                     <h3>{member?.name || member?.email || "Usuario"}</h3>
-                                    <span>{formatMetric(member.pendingWorkDays)} días pendientes · {formatMetric(member.pendingOvertimeHours)}h extra</span>
+                                    {#if member.isGhost}
+                                        <small class="ghost-tag">
+                                            <span aria-hidden="true">👻</span>
+                                            Fantasma{member.masterNames?.length ? ` · ${member.masterNames.join(', ')}` : ''}
+                                        </small>
+                                    {:else}
+                                        <span>{formatMetric(member.pendingWorkDays)} días pendientes · {formatMetric(member.pendingOvertimeHours)}h extra</span>
+                                    {/if}
                                 </div>
                             </div>
                             <div class="mobile-balance">
-                                <span class="balance-label">Saldo</span>
+                                <span class="balance-label">{member.isGhost ? 'Saldo' : 'Saldo'}</span>
                                 <strong class:positive={member.balance <= 0.01}>{formatMoney(member.balance)}</strong>
                             </div>
                         </div>
@@ -954,11 +1020,11 @@
                                 <div class="mobile-metrics">
                                     <div>
                                         <span>Total ganado</span>
-                                        <strong>{formatMoney(member.totalEarned)}</strong>
+                                        <strong>{member.isGhost ? 'Sin tarifa' : formatMoney(member.totalEarned)}</strong>
                                     </div>
                                     <div>
                                         <span>Pagado</span>
-                                        <strong>{formatMoney(member.totalPaid)}</strong>
+                                        <strong>{member.isGhost ? '—' : formatMoney(member.totalPaid)}</strong>
                                     </div>
                                     <div>
                                         <span>Días pendientes</span>
@@ -975,7 +1041,9 @@
                                         <Eye size={17} />
                                         <span>Historial</span>
                                     </button>
-                                    {#if member.balance > 0.01}
+                                    {#if member.isGhost}
+                                        <span class="status-ok ghost-status">Sólo registro</span>
+                                    {:else if member.balance > 0.01}
                                         {#if canCreatePayments}
                                             <button class="pay-btn" onclick={() => openPaymentModal(member)}>
                                                 <DollarSign size={16} />
@@ -1166,8 +1234,23 @@
         <SliceContainer bind:show={showDetailsModal}>
             <div class="details-modal">
                 <div class="modal-header">
-                    <div class="avatar large">{(selectedMemberDetails?.name || selectedMemberDetails?.email || "?").charAt(0).toUpperCase()}</div>
-                    <h3>Historial de {selectedMemberDetails?.name || selectedMemberDetails?.email || "Usuario"}</h3>
+                    <div class="avatar large" class:avatar-ghost={selectedMemberDetails?.isGhost}>
+                        {#if selectedMemberDetails?.isGhost}
+                            <span aria-hidden="true">👻</span>
+                        {:else}
+                            {(selectedMemberDetails?.name || selectedMemberDetails?.email || "?").charAt(0).toUpperCase()}
+                        {/if}
+                    </div>
+                    <h3>
+                        {selectedMemberDetails?.isGhost ? '👻 ' : ''}Historial de {selectedMemberDetails?.name || selectedMemberDetails?.email || "Usuario"}
+                    </h3>
+                    {#if selectedMemberDetails?.isGhost}
+                        <p class="modal-subtitle">
+                            Fantasma · {selectedMemberDetails?.masterNames?.length
+                                ? `a cargo de ${selectedMemberDetails.masterNames.join(', ')}`
+                                : 'sin masters asignados'}
+                        </p>
+                    {/if}
                 </div>
 
                 <div class="details-tabs">
@@ -1208,6 +1291,9 @@
                     <div class="tab">
                         <h4><DollarSign size={16} /> Pagos Recibidos</h4>
                         <div class="scroll-list">
+                            {#if selectedMemberDetails?.isGhost}
+                                <p class="empty-msg">Los fantasmas no generan pagos (sólo registro de horas).</p>
+                            {/if}
                             {#each selectedMemberDetails?.payments || [] as payment}
                                 <div class="history-item payment-item">
                                     <div class="item-info">
@@ -1437,6 +1523,51 @@
         gap: 12px;
         font-weight: 700;
         color: var(--text-primary);
+    }
+
+    .member-cell-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+    }
+
+    .ghost-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        text-transform: none;
+        color: var(--text-secondary);
+        font-weight: 700;
+        letter-spacing: 0;
+    }
+
+    .ghost-row {
+        background: rgba(124, 58, 237, 0.04);
+    }
+
+    .avatar-ghost {
+        background: rgba(124, 58, 237, 0.12);
+        font-size: 20px;
+    }
+
+    .muted-amount {
+        color: var(--text-secondary);
+        font-weight: 700;
+        font-size: 13px;
+    }
+
+    .ghost-status {
+        color: var(--text-secondary);
+        font-size: 13px;
+    }
+
+    .modal-subtitle {
+        margin: 6px 0 0;
+        color: var(--text-secondary);
+        font-size: 13px;
+        font-weight: 600;
     }
 
     .member-cell.mobile {
@@ -1865,6 +1996,10 @@
         height: 56px;
         font-size: 22px;
         border-radius: var(--radius-md);
+    }
+
+    .avatar.large.avatar-ghost {
+        font-size: 28px;
     }
 
     .details-tabs {
