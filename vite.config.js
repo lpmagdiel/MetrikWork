@@ -149,6 +149,12 @@ function pushNotificationApiPlugin() {
         apiModuleUrl('heic-convert.js'),
         'HEIC convert'
       );
+      mountApiHandler(
+        server,
+        '/api/ocr',
+        apiModuleUrl('ocr.js'),
+        'OCR'
+      );
     },
   };
 }

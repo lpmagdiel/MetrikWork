@@ -1,27 +1,24 @@
 /**
- * Cliente OCR basado en la API de InteliOCR.
+ * Cliente OCR para el navegador.
  *
- * Sustituye al cliente Tesseract.js anterior. La API recibe una imagen
- * (JPG/PNG/WebP/PDF) y devuelve un objeto estructurado con los campos
- * ya extraídos del recibo/factura (proveedor, fecha, total, NIF,
- * número de factura, líneas, etc.).
+ * El navegador NO contiene la clave de InteliOCR: habla exclusivamente
+ * con el endpoint serverless `/api/ocr`, que añade la cabecera
+ * `X-API-Key` y reenvía la imagen al upstream.
  *
- * Variables de entorno (Vite, expuestas al cliente):
- *   VITE_OCR_API_KEY    - clave con formato `ioc_<prefix>_<secret>`
- *   VITE_OCR_ENDPOINT   - URL base opcional (por defecto la pública)
+ * El endpoint devuelve la respuesta cruda de InteliOCR
+ * (`{ success, data, meta }`); aquí la mapeamos a la forma
+ * `{ text, confidence, fields, raw, meta }` que espera
+ * `applyOcrFields()` en `team-expenses.svelte`.
  *
- * El cliente `InteliOCR` original vive en
- * `inteliOCR/examples/javascript-usage.js`; aquí se reexporta envuelto
- * en una capa que:
- *   - normaliza la respuesta a la forma `{ text, confidence, fields }`
- *     que espera `applyOcrFields()` en `team-expenses.svelte`
- *   - maneja errores con la misma jerarquía `OcrError / OCR_ERROR_CODES`
- *   - expone el progreso de la subida para alimentar la UI
+ * Variables de entorno del servidor (NO expuestas al cliente):
+ *   OCR_API_KEY    - clave InteliOCR (`ioc_<prefix>_<secret>`)
+ *   OCR_ENDPOINT   - URL base opcional
+ *
+ * El cliente `InteliOCR` ya no se usa directamente desde el navegador.
  */
 
 const OCR_LOG_PREFIX = '[OCR]';
-const DEFAULT_ENDPOINT =
-    'https://inteliapi-inteliocr-api-f1bso8-15ce77-186-240-153-209.sslip.io';
+const OCR_ENDPOINT_PATH = '/api/ocr';
 
 const OCR_ERROR_CODES = Object.freeze({
     UNSUPPORTED: 'unsupported',
@@ -37,77 +34,6 @@ class OcrError extends Error {
         this.name = 'OcrError';
         this.code = code;
         if (cause) this.cause = cause;
-    }
-}
-
-class InteliOCR {
-    constructor({ apiKey, endpoint = DEFAULT_ENDPOINT, timeoutMs = 60_000 } = {}) {
-        if (!apiKey) throw new Error('InteliOCR: apiKey is required');
-        this.apiKey = apiKey;
-        this.endpoint = endpoint.replace(/\/+$/, '');
-        this.timeoutMs = timeoutMs;
-    }
-
-    async ocr(file, opts = {}) {
-        const fd = new FormData();
-        const blob = this._toBlob(file);
-        fd.append('file', blob, this._filename(file));
-        if (opts.type) fd.append('type', opts.type);
-
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(new Error('timeout')), this.timeoutMs);
-        if (opts.signal) {
-            if (opts.signal.aborted) ctrl.abort(opts.signal.reason);
-            else opts.signal.addEventListener('abort', () => ctrl.abort(opts.signal.reason), { once: true });
-        }
-
-        let res;
-        try {
-            res = await fetch(`${this.endpoint}/v1/ocr`, {
-                method: 'POST',
-                headers: {
-                    'X-API-Key': this.apiKey
-                },
-                body: fd,
-                signal: ctrl.signal
-            });
-        } catch (e) {
-            clearTimeout(timer);
-            if (e.name === 'AbortError') {
-                const err = new Error(`InteliOCR: request aborted (${e.message || 'timeout'})`);
-                err.code = 'ABORTED';
-                throw err;
-            }
-            throw new Error(`InteliOCR: network error — ${e.message}`);
-        }
-        clearTimeout(timer);
-
-        let payload = null;
-        try { payload = await res.json(); } catch (_) { /* non-JSON body */ }
-
-        if (!res.ok) {
-            const err = new Error(payload?.error?.message || `HTTP ${res.status}`);
-            err.code = payload?.error?.code || `HTTP_${res.status}`;
-            err.status = res.status;
-            err.details = payload?.error?.details || null;
-            err.requestId = payload?.meta?.request_id || null;
-            throw err;
-        }
-
-        return payload;
-    }
-
-    _toBlob(file) {
-        if (typeof Blob !== 'undefined' && file instanceof Blob) return file;
-        if (typeof Buffer !== 'undefined' && Buffer.isBuffer(file)) {
-            return new Blob([file], { type: 'application/octet-stream' });
-        }
-        throw new Error('InteliOCR: file must be a Blob, File or Buffer');
-    }
-
-    _filename(file) {
-        if (typeof File !== 'undefined' && file instanceof File && file.name) return file.name;
-        return 'upload';
     }
 }
 
@@ -191,14 +117,10 @@ function buildRawText(data) {
     return lines.join('\n');
 }
 
-function classifyError(error) {
-    if (error?.code === 'ABORTED') return OCR_ERROR_CODES.NETWORK;
-    const status = Number(error?.status || 0);
-    if (status === 401 || status === 403 || /api[_-]?key/i.test(error?.message || '')) {
-        return OCR_ERROR_CODES.AUTH;
-    }
-    if (status >= 500) return OCR_ERROR_CODES.MODEL;
-    if (status >= 400 || /network|fetch|abort|timeout/i.test(error?.message || '')) {
+function classifyError(status, message) {
+    if (status === 401 || status === 403) return OCR_ERROR_CODES.AUTH;
+    if (status === 404 || status === 405) return OCR_ERROR_CODES.MODEL;
+    if (status >= 500 || /network|fetch|abort|timeout/i.test(message || '')) {
         return OCR_ERROR_CODES.NETWORK;
     }
     return OCR_ERROR_CODES.UNKNOWN;
@@ -206,7 +128,6 @@ function classifyError(error) {
 
 // -------------------- API pública --------------------
 
-let cachedClient = null;
 let progressListeners = new Set();
 
 function notifyProgress(payload) {
@@ -215,38 +136,6 @@ function notifyProgress(payload) {
             console.warn(OCR_LOG_PREFIX, 'Listener de progreso falló:', error);
         }
     }
-}
-
-function getApiKey() {
-    return (
-        import.meta.env.VITE_OCR_API_KEY ||
-        import.meta.env.OCR_API_KEY ||
-        ''
-    );
-}
-
-function getEndpoint() {
-    return import.meta.env.VITE_OCR_ENDPOINT || DEFAULT_ENDPOINT;
-}
-
-export function isOcrConfigured() {
-    return Boolean(getApiKey());
-}
-
-function getClient() {
-    if (!isOcrConfigured()) {
-        throw new OcrError(
-            OCR_ERROR_CODES.UNSUPPORTED,
-            'OCR no configurado (falta VITE_OCR_API_KEY)'
-        );
-    }
-    if (!cachedClient) {
-        cachedClient = new InteliOCR({
-            apiKey: getApiKey(),
-            endpoint: getEndpoint()
-        });
-    }
-    return cachedClient;
 }
 
 /**
@@ -259,8 +148,9 @@ export function subscribeOcrProgress(listener) {
 }
 
 /**
- * Reconoce un recibo y devuelve `{ text, confidence, fields, raw }`.
- * `source` debe ser un File/Blob (JPG/PNG/WebP/PDF, hasta 10 MB).
+ * Reconoce un recibo y devuelve `{ text, confidence, fields, raw, meta }`.
+ * `source` debe ser un Blob/File/URL http(s). Si es una URL, el servidor
+ * la descarga; si es un Blob, se envía directamente como multipart.
  */
 export async function recognizeImage(source, options = {}) {
     if (typeof window === 'undefined') {
@@ -268,19 +158,19 @@ export async function recognizeImage(source, options = {}) {
     }
     notifyProgress({ status: 'loading model', progress: 0 });
     try {
-        const client = getClient();
         const type = options.type || 'receipt';
-        const response = await client.ocr(source, { type });
-        const data = response?.data || {};
-        const meta = response?.meta || {};
+        const payload = await postToProxy(source, type);
+        const data = payload?.data || {};
+        const meta = payload?.meta || {};
         const fields = mapDataToFields(data);
         const text = buildRawText(data);
-        // La API no expone una `confidence` numérica por campo; usamos la
-        // latencia como proxy de "éxito" (>0 y <30 s = razonable) y
-        // devolvemos 90 cuando hay `total` y 70 cuando faltan campos.
+        // La API no expone confidence por campo; calculamos un proxy a
+        // partir del número de campos extraídos (con `total` pondera más).
         const hasTotal = fields.amount != null;
         const filledCount = Object.keys(fields).length;
-        const confidence = hasTotal ? Math.min(95, 70 + filledCount * 4) : Math.max(40, filledCount * 15);
+        const confidence = hasTotal
+            ? Math.min(95, 70 + filledCount * 4)
+            : Math.max(40, filledCount * 15);
         notifyProgress({ status: 'done', progress: 1 });
         return {
             text,
@@ -297,7 +187,7 @@ export async function recognizeImage(source, options = {}) {
     } catch (error) {
         const code = error instanceof OcrError
             ? error.code
-            : classifyError(error);
+            : classifyError(error?.status, error?.message);
         console.warn(OCR_LOG_PREFIX, 'Error en OCR:', error);
         notifyProgress({ status: 'error', progress: 0, code });
         throw new OcrError(
@@ -308,24 +198,83 @@ export async function recognizeImage(source, options = {}) {
     }
 }
 
+async function postToProxy(source, type) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(new Error('timeout')), 60_000);
+    try {
+        // Si `source` es una URL http(s), la pasamos como JSON.
+        // Si es Blob/File, la enviamos como multipart/form-data directo
+        // al proxy (que la reenviará a InteliOCR).
+        if (typeof source === 'string') {
+            const response = await fetch(OCR_ENDPOINT_PATH, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: source, type }),
+                signal: ctrl.signal
+            });
+            return await readJson(response);
+        }
+        const fd = new FormData();
+        fd.append('file', source, source?.name || 'receipt');
+        fd.append('type', type);
+        const response = await fetch(OCR_ENDPOINT_PATH, {
+            method: 'POST',
+            body: fd,
+            signal: ctrl.signal
+        });
+        return await readJson(response);
+    } catch (error) {
+        if (error?.name === 'AbortError') {
+            const err = new Error('OCR: petición cancelada por timeout');
+            err.code = 'ABORTED';
+            throw err;
+        }
+        if (error instanceof OcrError) throw error;
+        const err = new Error(`OCR: error de red — ${error?.message || error}`);
+        err.code = 'NETWORK';
+        throw err;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+async function readJson(response) {
+    let payload = null;
+    try { payload = await response.json(); } catch (_) { /* non-JSON */ }
+    if (!response.ok) {
+        const err = new Error(payload?.error || `HTTP ${response.status}`);
+        err.status = response.status;
+        err.code = payload?.code;
+        err.requestId = payload?.requestId || null;
+        throw err;
+    }
+    return payload;
+}
+
 /**
- * Probe simple: ¿está configurada la clave de la API? No hace red.
+ * Probe simple: ¿está configurado el OCR? En el cliente esto siempre
+ * devuelve `true` si el proxy está disponible — la clave vive solo en
+ * el servidor. La comprobación real se hace en tiempo de petición.
  */
+export function isOcrConfigured() {
+    return true;
+}
+
 export function isOcrLikelySupported() {
-    return isOcrConfigured();
+    return true;
 }
 
 export async function ensureOcrSupport() {
-    return isOcrConfigured();
+    return true;
 }
 
 export function getOcrStatus() {
     return {
-        configured: isOcrConfigured(),
-        supported: isOcrConfigured(),
-        ready: Boolean(cachedClient),
-        endpoint: getEndpoint()
+        configured: true,
+        supported: true,
+        ready: true,
+        endpoint: OCR_ENDPOINT_PATH
     };
 }
 
-export { InteliOCR, OcrError, OCR_ERROR_CODES };
+export { OcrError, OCR_ERROR_CODES };

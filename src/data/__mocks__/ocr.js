@@ -1,22 +1,22 @@
 /**
  * Mock del módulo OCR para tests.
- * jsdom + Vitest no pueden hacer fetch a la API real.
+ * jsdom + Vitest no pueden hacer fetch al proxy serverless.
  */
 
 export function isOcrConfigured() {
-    return false;
+    return true;
 }
 
 export function isOcrLikelySupported() {
-    return false;
+    return true;
 }
 
 export async function ensureOcrSupport() {
-    return false;
+    return true;
 }
 
 export function getOcrStatus() {
-    return { configured: false, supported: false, ready: false, endpoint: '' };
+    return { configured: true, supported: true, ready: true, endpoint: '/api/ocr' };
 }
 
 export async function recognizeImage() {
@@ -49,5 +49,3 @@ export const OCR_ERROR_CODES = Object.freeze({
     MODEL: 'model',
     UNKNOWN: 'unknown'
 });
-
-export class InteliOCR {}
