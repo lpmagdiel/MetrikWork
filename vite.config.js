@@ -195,12 +195,11 @@ export default defineConfig(({ mode }) => {
     plugins: [
       svelte(),
       VitePWA({
+        strategies: 'injectManifest',
+        srcDir: 'src',
+        filename: 'service-worker.js',
         registerType: 'autoUpdate',
-        includeAssets: [
-          'icon.png',
-          'icons/android/launchericon-192x192.png',
-          'icons/android/launchericon-512x512.png'
-        ],
+        injectRegister: 'auto',
         manifest: {
           name: 'MetricWork',
           short_name: 'MetricWork',
@@ -229,87 +228,8 @@ export default defineConfig(({ mode }) => {
             }
           ]
         },
-        workbox: {
-          cleanupOutdatedCaches: true,
-          navigateFallback: '/index.html',
-          // Evita que el fallback SPA se aplique a endpoints de Firebase.
-          // Si Workbox los tratara como navegaciones devolvería index.html
-          // y rompería las conexiones HTTP/2 streaming de Firestore.
-          navigateFallbackDenylist: [
-            /^\/api\//,
-            /^https:\/\/firestore\.googleapis\.com\//,
-            /^https:\/\/fcm\.googleapis\.com\//,
-            /^https:\/\/fcmregistrations\.googleapis\.com\//,
-            /^https:\/\/identitytoolkit\.googleapis\.com\//,
-            /^https:\/\/securetoken\.googleapis\.com\//,
-            /^https:\/\/firebasestorage\.googleapis\.com\//
-          ],
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,webp}'],
-          runtimeCaching: [
-            {
-              urlPattern: ({ url, request }) => (
-                request.destination === 'image' &&
-                url.origin === self.location.origin
-              ),
-              handler: 'CacheFirst',
-              options: {
-                cacheName: 'metricwork-local-images',
-                cacheableResponse: {
-                  statuses: [200]
-                },
-                expiration: {
-                  maxEntries: 80,
-                  maxAgeSeconds: 60 * 60 * 24 * 30
-                }
-              }
-            },
-            {
-              urlPattern: ({ url, request }) => (
-                request.destination === 'image' &&
-                url.origin === 'https://res.cloudinary.com'
-              ),
-              handler: 'CacheFirst',
-              options: {
-                cacheName: 'metricwork-cloudinary-images',
-                cacheableResponse: {
-                  statuses: [0, 200]
-                },
-                expiration: {
-                  maxEntries: 120,
-                  maxAgeSeconds: 60 * 60 * 24 * 30
-                }
-              }
-            },
-            // Las peticiones a Firebase usan HTTP/2 streaming (canales
-            // /Write/channel) que los Service Workers no pueden cachear.
-            // Las dejamos pasar tal cual con NetworkOnly para evitar el
-            // error "A ServiceWorker intercepted the request and encountered
-            // an unexpected error".
-            {
-              urlPattern: ({ url }) => (
-                url.hostname === 'firestore.googleapis.com' ||
-                url.hostname === 'fcm.googleapis.com' ||
-                url.hostname === 'fcmregistrations.googleapis.com' ||
-                url.hostname === 'identitytoolkit.googleapis.com' ||
-                url.hostname === 'securetoken.googleapis.com' ||
-                url.hostname === 'firebasestorage.googleapis.com'
-              ),
-              handler: 'NetworkOnly',
-              method: 'GET'
-            },
-            {
-              urlPattern: ({ url }) => (
-                url.hostname === 'firestore.googleapis.com' ||
-                url.hostname === 'fcm.googleapis.com' ||
-                url.hostname === 'fcmregistrations.googleapis.com' ||
-                url.hostname === 'identitytoolkit.googleapis.com' ||
-                url.hostname === 'securetoken.googleapis.com' ||
-                url.hostname === 'firebasestorage.googleapis.com'
-              ),
-              handler: 'NetworkOnly',
-              method: 'POST'
-            }
-          ]
+        injectManifest: {
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,webp}']
         },
         devOptions: {
           enabled: false
