@@ -1,31 +1,10 @@
 /**
- * Mock del módulo OCR para tests (jsdom no soporta WASM).
- * Las pruebas que necesiten OCR deben mockear `./ocr.js` con
- * `vi.mock('./ocr.js', () => import('./__mocks__/ocr.js'))`.
+ * Mock del módulo OCR para tests.
+ * jsdom + Vitest no pueden hacer fetch a la API real.
  */
 
-export async function getOcrWorker() {
-    return {
-        recognize: async () => ({ data: { text: '', confidence: 0 } }),
-        setParameters: async () => {},
-        terminate: async () => {}
-    };
-}
-
-export async function recognizeImage() {
-    return { text: '', confidence: 0, language: 'spa' };
-}
-
-export async function recognizeImageRemote() {
-    return { text: '', confidence: 0, language: 'spa', source: 'remote' };
-}
-
-export async function disposeOcrWorker() {
-    return undefined;
-}
-
-export function getOcrStatus() {
-    return { available: false, supported: false, language: 'spa', ready: false };
+export function isOcrConfigured() {
+    return false;
 }
 
 export function isOcrLikelySupported() {
@@ -34,6 +13,20 @@ export function isOcrLikelySupported() {
 
 export async function ensureOcrSupport() {
     return false;
+}
+
+export function getOcrStatus() {
+    return { configured: false, supported: false, ready: false, endpoint: '' };
+}
+
+export async function recognizeImage() {
+    return {
+        text: '',
+        confidence: 0,
+        fields: {},
+        raw: {},
+        meta: { requestId: null, latencyMs: null, model: null, pages: null }
+    };
 }
 
 export function subscribeOcrProgress() {
@@ -51,8 +44,10 @@ export class OcrError extends Error {
 
 export const OCR_ERROR_CODES = Object.freeze({
     UNSUPPORTED: 'unsupported',
-    WORKER: 'worker',
+    AUTH: 'auth',
     NETWORK: 'network',
     MODEL: 'model',
     UNKNOWN: 'unknown'
 });
+
+export class InteliOCR {}

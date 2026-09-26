@@ -1,29 +1,31 @@
 /**
- * Cliente OCR basado en Tesseract.js.
+ * Cliente OCR basado en la API de InteliOCR.
  *
- * El worker se crea de forma lazy la primera vez que se necesita para no
- * penalizar el bundle ni el arranque de la app. Se reutiliza entre llamadas.
+ * Sustituye al cliente Tesseract.js anterior. La API recibe una imagen
+ * (JPG/PNG/WebP/PDF) y devuelve un objeto estructurado con los campos
+ * ya extraídos del recibo/factura (proveedor, fecha, total, NIF,
+ * número de factura, líneas, etc.).
  *
- * Los activos de Tesseract (core WASM + modelos de idioma) se sirven desde
- * la propia PWA en `/tesseract/*` (plugin `tesseractAssetsPlugin` en
- * `vite.config.js`) en lugar del CDN. Esto evita:
- *   - restricciones del CSP (production no permite `cdn.jsdelivr.net`)
- *   - bloqueos del Worker desde Blob URL en iOS Safari standalone
- *   - fallos de CORS cuando el modelo .traineddata no incluye ACAO
+ * Variables de entorno (Vite, expuestas al cliente):
+ *   VITE_OCR_API_KEY    - clave con formato `ioc_<prefix>_<secret>`
+ *   VITE_OCR_ENDPOINT   - URL base opcional (por defecto la pública)
  *
- * Modelo de idioma por defecto: español (`spa`).
+ * El cliente `InteliOCR` original vive en
+ * `inteliOCR/examples/javascript-usage.js`; aquí se reexporta envuelto
+ * en una capa que:
+ *   - normaliza la respuesta a la forma `{ text, confidence, fields }`
+ *     que espera `applyOcrFields()` en `team-expenses.svelte`
+ *   - maneja errores con la misma jerarquía `OcrError / OCR_ERROR_CODES`
+ *   - expone el progreso de la subida para alimentar la UI
  */
 
-const DEFAULT_LANGUAGE = 'spa';
 const OCR_LOG_PREFIX = '[OCR]';
-
-const TESSERACT_WORKER_PATH = '/tesseract/worker.min.js';
-const TESSERACT_CORE_PATH = '/tesseract';
-const TESSERACT_LANG_PATH = '/tesseract/lang';
+const DEFAULT_ENDPOINT =
+    'https://inteliapi-inteliocr-api-f1bso8-15ce77-186-240-153-209.sslip.io';
 
 const OCR_ERROR_CODES = Object.freeze({
     UNSUPPORTED: 'unsupported',
-    WORKER: 'worker',
+    AUTH: 'auth',
     NETWORK: 'network',
     MODEL: 'model',
     UNKNOWN: 'unknown'
@@ -38,95 +40,217 @@ class OcrError extends Error {
     }
 }
 
-let workerPromise = null;
-let currentLanguage = null;
-let progressListeners = new Set();
+class InteliOCR {
+    constructor({ apiKey, endpoint = DEFAULT_ENDPOINT, timeoutMs = 60_000 } = {}) {
+        if (!apiKey) throw new Error('InteliOCR: apiKey is required');
+        this.apiKey = apiKey;
+        this.endpoint = endpoint.replace(/\/+$/, '');
+        this.timeoutMs = timeoutMs;
+    }
 
-function isTesseractAvailable() {
-    return typeof window !== 'undefined'
-        && typeof document !== 'undefined'
-        && typeof Worker !== 'undefined';
-}
+    async ocr(file, opts = {}) {
+        const fd = new FormData();
+        const blob = this._toBlob(file);
+        fd.append('file', blob, this._filename(file));
+        if (opts.type) fd.append('type', opts.type);
 
-function isOcrLikelySupported() {
-    if (!isTesseractAvailable()) return false;
-    try {
-        const probe = new Worker(
-            URL.createObjectURL(new Blob(['self.onmessage=()=>{}'], { type: 'application/javascript' }))
-        );
-        probe.terminate();
-        URL.revokeObjectURL(probe.objectURL || '');
-        return true;
-    } catch (error) {
-        console.warn(OCR_LOG_PREFIX, 'No se pudo instanciar Worker:', error);
-        return false;
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(new Error('timeout')), this.timeoutMs);
+        if (opts.signal) {
+            if (opts.signal.aborted) ctrl.abort(opts.signal.reason);
+            else opts.signal.addEventListener('abort', () => ctrl.abort(opts.signal.reason), { once: true });
+        }
+
+        let res;
+        try {
+            res = await fetch(`${this.endpoint}/v1/ocr`, {
+                method: 'POST',
+                headers: {
+                    'X-API-Key': this.apiKey
+                },
+                body: fd,
+                signal: ctrl.signal
+            });
+        } catch (e) {
+            clearTimeout(timer);
+            if (e.name === 'AbortError') {
+                const err = new Error(`InteliOCR: request aborted (${e.message || 'timeout'})`);
+                err.code = 'ABORTED';
+                throw err;
+            }
+            throw new Error(`InteliOCR: network error — ${e.message}`);
+        }
+        clearTimeout(timer);
+
+        let payload = null;
+        try { payload = await res.json(); } catch (_) { /* non-JSON body */ }
+
+        if (!res.ok) {
+            const err = new Error(payload?.error?.message || `HTTP ${res.status}`);
+            err.code = payload?.error?.code || `HTTP_${res.status}`;
+            err.status = res.status;
+            err.details = payload?.error?.details || null;
+            err.requestId = payload?.meta?.request_id || null;
+            throw err;
+        }
+
+        return payload;
+    }
+
+    _toBlob(file) {
+        if (typeof Blob !== 'undefined' && file instanceof Blob) return file;
+        if (typeof Buffer !== 'undefined' && Buffer.isBuffer(file)) {
+            return new Blob([file], { type: 'application/octet-stream' });
+        }
+        throw new Error('InteliOCR: file must be a Blob, File or Buffer');
+    }
+
+    _filename(file) {
+        if (typeof File !== 'undefined' && file instanceof File && file.name) return file.name;
+        return 'upload';
     }
 }
 
-async function loadTesseract() {
-    const mod = await import('tesseract.js');
-    return mod.default || mod;
-}
+// -------------------- Mapeo de respuesta -> campos de gasto --------------------
 
-async function probeTesseractWorker() {
-    if (!isOcrLikelySupported()) return false;
-    try {
-        const tesseract = await loadTesseract();
-        const worker = await tesseract.createWorker(DEFAULT_LANGUAGE, 1, {
-            workerPath: TESSERACT_WORKER_PATH,
-            corePath: TESSERACT_CORE_PATH,
-            langPath: TESSERACT_LANG_PATH,
-            workerBlobURL: false,
-            logger: () => {}
-        });
-        await worker.terminate();
-        return true;
-    } catch (error) {
-        console.warn(OCR_LOG_PREFIX, 'Probe de worker Tesseract falló:', error);
-        return false;
+const CURRENCY_SYMBOLS = ['€', '$', '£', '¥'];
+
+function toNumber(value) {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (typeof value === 'string') {
+        const cleaned = value.replace(/[^\d,.\-]/g, '').replace(',', '.');
+        const parsed = Number(cleaned);
+        return Number.isFinite(parsed) ? parsed : null;
     }
+    return null;
 }
 
-let supportProbePromise = null;
-async function ensureOcrSupport() {
-    if (!isOcrLikelySupported()) return false;
-    if (!supportProbePromise) {
-        supportProbePromise = probeTesseractWorker().catch(() => false);
+function normalizeDate(value) {
+    if (!value) return null;
+    if (typeof value !== 'string') return null;
+    const text = value.trim();
+    // ISO YYYY-MM-DD
+    const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(text);
+    if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+    // DD/MM/YYYY o DD-MM-YYYY
+    const dmy = /^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/.exec(text);
+    if (dmy) {
+        let [, d, m, y] = dmy;
+        if (y.length === 2) y = `20${y}`;
+        if (Number(y) < 1990 || Number(y) > 2100) return null;
+        const day = String(d).padStart(2, '0');
+        const month = String(m).padStart(2, '0');
+        return `${y}-${month}-${day}`;
     }
-    return supportProbePromise;
+    return null;
 }
 
-function classifyWorkerError(err) {
-    const message = String(err?.message || err || '').toLowerCase();
-    if (!message) return OCR_ERROR_CODES.UNKNOWN;
-    if (/failed to fetch|networkerror|network request failed|load failed|cors/i.test(message)) {
+function mapDataToFields(data) {
+    if (!data || typeof data !== 'object') return {};
+    const fields = {};
+    const amount = toNumber(data.total);
+    if (amount != null) fields.amount = amount;
+    const date = normalizeDate(data.date);
+    if (date) fields.date = date;
+    if (typeof data.merchant === 'string' && data.merchant.trim()) {
+        fields.vendorName = data.merchant.trim();
+    }
+    if (typeof data.vendor_tax_id === 'string' && data.vendor_tax_id.trim()) {
+        fields.vendorTaxId = data.vendor_tax_id.trim().toUpperCase();
+    }
+    if (typeof data.invoice_number === 'string' && data.invoice_number.trim()) {
+        fields.invoiceNumber = data.invoice_number.trim();
+    }
+    return fields;
+}
+
+function buildRawText(data) {
+    if (!data) return '';
+    const lines = [];
+    if (data.merchant) lines.push(String(data.merchant));
+    if (data.vendor_tax_id) lines.push(`NIF: ${data.vendor_tax_id}`);
+    if (data.date) lines.push(`Fecha: ${data.date}`);
+    if (data.invoice_number) lines.push(`Factura: ${data.invoice_number}`);
+    if (Array.isArray(data.items)) {
+        for (const item of data.items) {
+            const desc = item?.description ?? '';
+            const qty = item?.quantity != null ? ` x ${item.quantity}` : '';
+            const price = item?.total ?? item?.unit_price;
+            if (desc || price != null) {
+                lines.push(`${desc}${qty} = ${price ?? ''}`.trim());
+            }
+        }
+    }
+    if (data.subtotal != null) lines.push(`Subtotal: ${data.subtotal}`);
+    if (data.tax != null) lines.push(`Impuestos: ${data.tax}`);
+    if (data.total != null) {
+        const curr = data.currency && !CURRENCY_SYMBOLS.includes(data.currency) ? ` ${data.currency}` : '';
+        lines.push(`TOTAL${curr}: ${data.total}`);
+    }
+    return lines.join('\n');
+}
+
+function classifyError(error) {
+    if (error?.code === 'ABORTED') return OCR_ERROR_CODES.NETWORK;
+    const status = Number(error?.status || 0);
+    if (status === 401 || status === 403 || /api[_-]?key/i.test(error?.message || '')) {
+        return OCR_ERROR_CODES.AUTH;
+    }
+    if (status >= 500) return OCR_ERROR_CODES.MODEL;
+    if (status >= 400 || /network|fetch|abort|timeout/i.test(error?.message || '')) {
         return OCR_ERROR_CODES.NETWORK;
-    }
-    if (/worker|importscripts|blob|security/i.test(message)) {
-        return OCR_ERROR_CODES.WORKER;
-    }
-    if (/traineddata|model|language|404|not found/i.test(message)) {
-        return OCR_ERROR_CODES.MODEL;
     }
     return OCR_ERROR_CODES.UNKNOWN;
 }
 
+// -------------------- API pública --------------------
+
+let cachedClient = null;
+let progressListeners = new Set();
+
 function notifyProgress(payload) {
     for (const listener of progressListeners) {
-        try {
-            listener(payload);
-        } catch (error) {
+        try { listener(payload); } catch (error) {
             console.warn(OCR_LOG_PREFIX, 'Listener de progreso falló:', error);
         }
     }
 }
 
+function getApiKey() {
+    return (
+        import.meta.env.VITE_OCR_API_KEY ||
+        import.meta.env.OCR_API_KEY ||
+        ''
+    );
+}
+
+function getEndpoint() {
+    return import.meta.env.VITE_OCR_ENDPOINT || DEFAULT_ENDPOINT;
+}
+
+export function isOcrConfigured() {
+    return Boolean(getApiKey());
+}
+
+function getClient() {
+    if (!isOcrConfigured()) {
+        throw new OcrError(
+            OCR_ERROR_CODES.UNSUPPORTED,
+            'OCR no configurado (falta VITE_OCR_API_KEY)'
+        );
+    }
+    if (!cachedClient) {
+        cachedClient = new InteliOCR({
+            apiKey: getApiKey(),
+            endpoint: getEndpoint()
+        });
+    }
+    return cachedClient;
+}
+
 /**
- * Suscribe un listener para recibir actualizaciones de progreso del OCR.
- * Devuelve una función para cancelar la suscripción.
- *
- * @param {(payload: { status: string, progress: number, source?: string }) => void} listener
- * @returns {() => void}
+ * Suscribe un listener para recibir actualizaciones de progreso.
  */
 export function subscribeOcrProgress(listener) {
     if (typeof listener !== 'function') return () => {};
@@ -135,99 +259,47 @@ export function subscribeOcrProgress(listener) {
 }
 
 /**
- * Garantiza que el worker esté cargado para el idioma pedido.
- *
- * @param {string} language
- * @returns {Promise<object>} instancia del worker
- */
-export async function getOcrWorker(language = DEFAULT_LANGUAGE) {
-    if (!isTesseractAvailable()) {
-        throw new OcrError(
-            OCR_ERROR_CODES.UNSUPPORTED,
-            'OCR no disponible en este entorno'
-        );
-    }
-    if (workerPromise && currentLanguage === language) {
-        return workerPromise;
-    }
-    if (workerPromise) {
-        await disposeOcrWorker().catch(() => {});
-    }
-    currentLanguage = language;
-    notifyProgress({ status: 'loading model', progress: 0 });
-    workerPromise = (async () => {
-        const tesseract = await loadTesseract();
-        const worker = await tesseract.createWorker(language, 1, {
-            workerPath: TESSERACT_WORKER_PATH,
-            corePath: TESSERACT_CORE_PATH,
-            langPath: TESSERACT_LANG_PATH,
-            workerBlobURL: false,
-            logger: (message) => {
-                if (!message?.status) return;
-                notifyProgress({
-                    status: message.status,
-                    progress: Number(message.progress ?? 0)
-                });
-                if (typeof console !== 'undefined') {
-                    console.debug(OCR_LOG_PREFIX, message.status, message.progress ?? '');
-                }
-            },
-            errorHandler: (err) => {
-                const code = classifyWorkerError(err);
-                console.warn(OCR_LOG_PREFIX, 'Error en worker:', err);
-                notifyProgress({ status: 'error', progress: 0, code });
-            }
-        });
-        // Configuración optimizada para tickets de recibo: bloque
-        // uniforme de texto en lugar del PSM "fully automatic" por
-        // defecto (más robusto con fotos de móvil y tickets doblados).
-        try {
-            await worker.setParameters({
-                tessedit_pageseg_mode: '6',
-                preserve_interword_spaces: '1'
-            });
-        } catch (error) {
-            console.warn(OCR_LOG_PREFIX, 'No se pudo ajustar PSM:', error);
-        }
-        notifyProgress({ status: 'ready', progress: 1 });
-        return worker;
-    })();
-    return workerPromise;
-}
-
-/**
- * Reconoce texto a partir de una imagen (URL, Blob o File).
- *
- * @param {string|Blob|File} source
- * @param {{ language?: string, label?: string }} [options]
- * @returns {Promise<{ text: string, confidence: number, language: string }>}
+ * Reconoce un recibo y devuelve `{ text, confidence, fields, raw }`.
+ * `source` debe ser un File/Blob (JPG/PNG/WebP/PDF, hasta 10 MB).
  */
 export async function recognizeImage(source, options = {}) {
-    const language = options.language || DEFAULT_LANGUAGE;
-    let worker;
+    if (typeof window === 'undefined') {
+        throw new OcrError(OCR_ERROR_CODES.UNSUPPORTED, 'OCR no disponible en este entorno');
+    }
+    notifyProgress({ status: 'loading model', progress: 0 });
     try {
-        worker = await getOcrWorker(language);
-        const result = await worker.recognize(source);
-        const text = String(result?.data?.text || '').trim();
-        const confidence = Number(result?.data?.confidence ?? 0);
+        const client = getClient();
+        const type = options.type || 'receipt';
+        const response = await client.ocr(source, { type });
+        const data = response?.data || {};
+        const meta = response?.meta || {};
+        const fields = mapDataToFields(data);
+        const text = buildRawText(data);
+        // La API no expone una `confidence` numérica por campo; usamos la
+        // latencia como proxy de "éxito" (>0 y <30 s = razonable) y
+        // devolvemos 90 cuando hay `total` y 70 cuando faltan campos.
+        const hasTotal = fields.amount != null;
+        const filledCount = Object.keys(fields).length;
+        const confidence = hasTotal ? Math.min(95, 70 + filledCount * 4) : Math.max(40, filledCount * 15);
         notifyProgress({ status: 'done', progress: 1 });
-        return { text, confidence, language };
+        return {
+            text,
+            confidence,
+            fields,
+            raw: data,
+            meta: {
+                requestId: meta.request_id || null,
+                latencyMs: meta.latency_ms || null,
+                model: meta.model || null,
+                pages: meta.pages || null
+            }
+        };
     } catch (error) {
-        const code = error?.code
-            || (error instanceof OcrError ? error.code : null)
-            || classifyWorkerError(error);
-        if (!isTesseractAvailable()) {
-            throw new OcrError(
-                OCR_ERROR_CODES.UNSUPPORTED,
-                'OCR no disponible en este entorno',
-                error
-            );
-        }
-        if (code === OCR_ERROR_CODES.WORKER || code === OCR_ERROR_CODES.NETWORK) {
-            workerPromise = null;
-            currentLanguage = null;
-            supportProbePromise = null;
-        }
+        const code = error instanceof OcrError
+            ? error.code
+            : classifyError(error);
+        console.warn(OCR_LOG_PREFIX, 'Error en OCR:', error);
+        notifyProgress({ status: 'error', progress: 0, code });
         throw new OcrError(
             code,
             error?.message || 'Error desconocido en OCR',
@@ -237,94 +309,23 @@ export async function recognizeImage(source, options = {}) {
 }
 
 /**
- * Reconoce texto delegando al endpoint server-side `/api/ocr`. Pensado
- * como fallback para navegadores donde Tesseract.js no puede correr
- * localmente (típicamente iOS Safari standalone / WebView restrictivo).
- *
- * El parámetro `source` debe ser una URL http(s) absoluta (por ejemplo
- * la URL de Cloudinary ya subida). La función descarga la imagen en el
- * servidor y devuelve el texto extraído.
- *
- * @param {string} url
- * @param {{ language?: string }} [options]
- * @returns {Promise<{ text: string, confidence: number, language: string, source: 'remote' }>}
+ * Probe simple: ¿está configurada la clave de la API? No hace red.
  */
-export async function recognizeImageRemote(url, options = {}) {
-    if (!url || typeof url !== 'string') {
-        throw new OcrError(OCR_ERROR_CODES.UNKNOWN, 'recognizeImageRemote requiere una URL http(s)');
-    }
-    const language = options.language || DEFAULT_LANGUAGE;
-    notifyProgress({ status: 'loading model', progress: 0 });
-    let response;
-    try {
-        response = await fetch('/api/ocr', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url, language })
-        });
-    } catch (error) {
-        throw new OcrError(
-            OCR_ERROR_CODES.NETWORK,
-            `OCR remoto sin conexión: ${error?.message || error}`,
-            error
-        );
-    }
-    if (!response.ok) {
-        let detail = `HTTP ${response.status}`;
-        try {
-            const data = await response.json();
-            if (data?.error) detail = data.error;
-            if (data?.detail) detail = `${data.error}: ${data.detail}`;
-        } catch {}
-        const code = response.status >= 500 ? OCR_ERROR_CODES.MODEL : OCR_ERROR_CODES.NETWORK;
-        throw new OcrError(code, `OCR remoto falló: ${detail}`);
-    }
-    let payload;
-    try {
-        payload = await response.json();
-    } catch (error) {
-        throw new OcrError(OCR_ERROR_CODES.UNKNOWN, 'OCR remoto devolvió respuesta no-JSON', error);
-    }
-    notifyProgress({ status: 'done', progress: 1 });
-    return {
-        text: String(payload?.text || ''),
-        confidence: Number(payload?.confidence ?? 0),
-        language: String(payload?.language || language),
-        source: 'remote'
-    };
+export function isOcrLikelySupported() {
+    return isOcrConfigured();
 }
 
-export async function disposeOcrWorker() {
-    if (!workerPromise) return;
-    try {
-        const worker = await workerPromise;
-        await worker.terminate();
-    } catch (error) {
-        console.warn(OCR_LOG_PREFIX, 'No se pudo terminar el worker:', error);
-    } finally {
-        workerPromise = null;
-        currentLanguage = null;
-        notifyProgress({ status: 'idle', progress: 0 });
-    }
+export async function ensureOcrSupport() {
+    return isOcrConfigured();
 }
 
 export function getOcrStatus() {
     return {
-        available: isTesseractAvailable(),
-        supported: isOcrLikelySupported(),
-        language: currentLanguage || DEFAULT_LANGUAGE,
-        ready: Boolean(workerPromise)
+        configured: isOcrConfigured(),
+        supported: isOcrConfigured(),
+        ready: Boolean(cachedClient),
+        endpoint: getEndpoint()
     };
 }
 
-/**
- * Probe pesado (carga el módulo Tesseract e intenta crear el worker).
- * Se usa en la UI antes de mostrar el primer ticket para no declarar
- * "no soportado" en navegadores donde el probe rápido falla pero el
- * worker real sí funciona (caso típico de iOS Safari standalone).
- *
- * @returns {Promise<boolean>}
- */
-export { ensureOcrSupport };
-
-export { isOcrLikelySupported, OcrError, OCR_ERROR_CODES };
+export { InteliOCR, OcrError, OCR_ERROR_CODES };

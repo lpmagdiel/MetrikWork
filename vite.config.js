@@ -3,129 +3,6 @@ import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { VitePWA } from 'vite-plugin-pwa'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { copyFile, mkdir, stat } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
-import https from 'node:https'
-
-const TESSERACT_LANG = 'spa'
-// El CDN tessdata.projectnaptha.com ya no aloja los modelos. Usamos el
-// repositorio oficial de Tesseract OCR (tessdata_fast) en GitHub raw.
-const TESSERACT_TRAINEDDATA_URL =
-    `https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/${TESSERACT_LANG}.traineddata`
-const TESSERACT_TRAINEDDATA_LOCAL = `public/tesseract/lang/${TESSERACT_LANG}.traineddata`
-
-function tesseractAssetsPlugin() {
-    const coreDir = resolve(
-        process.cwd(),
-        'node_modules/tesseract.js-core'
-    )
-    const workerSrc = resolve(
-        process.cwd(),
-        'node_modules/tesseract.js/dist/worker.min.js'
-    )
-    const targetDir = resolve(process.cwd(), 'public/tesseract')
-
-    async function ensureDir(dir) {
-        if (!existsSync(dir)) await mkdir(dir, { recursive: true })
-    }
-
-    async function copyIfMissing(src, dest) {
-        try {
-            await stat(dest)
-        } catch {
-            await copyFile(src, dest)
-        }
-    }
-
-    async function copyAllAssets() {
-        if (!existsSync(coreDir)) {
-            console.warn('[tesseract-assets] tesseract.js-core no está instalado; se omiten los assets.')
-            return
-        }
-        if (!existsSync(workerSrc)) {
-            console.warn('[tesseract-assets] tesseract.js/dist/worker.min.js no encontrado.')
-            return
-        }
-        await ensureDir(targetDir)
-        await ensureDir(resolve(targetDir, 'lang'))
-        await copyIfMissing(workerSrc, resolve(targetDir, 'worker.min.js'))
-        const coreFiles = [
-            'tesseract-core.wasm',
-            'tesseract-core.wasm.js',
-            'tesseract-core-simd.wasm',
-            'tesseract-core-simd.wasm.js',
-            'tesseract-core-simd-lstm.wasm',
-            'tesseract-core-simd-lstm.wasm.js',
-            'tesseract-core-lstm.wasm',
-            'tesseract-core-lstm.wasm.js'
-        ]
-        for (const file of coreFiles) {
-            const src = resolve(coreDir, file)
-            if (!existsSync(src)) continue
-            await copyIfMissing(src, resolve(targetDir, file))
-        }
-        await fetchTraineddata()
-    }
-
-    function fetchTraineddata() {
-        const localDest = resolve(process.cwd(), TESSERACT_TRAINEDDATA_LOCAL)
-        if (existsSync(localDest)) return Promise.resolve()
-        return new Promise((resolveFetch) => {
-            const request = https.get(TESSERACT_TRAINEDDATA_URL, (response) => {
-                if (response.statusCode === 301 || response.statusCode === 302) {
-                    https.get(response.headers.location, (redirected) => writeStream(redirected, localDest, resolveFetch))
-                        .on('error', () => resolveFetch())
-                    return
-                }
-                if (response.statusCode !== 200) {
-                    console.warn('[tesseract-assets] No se pudo descargar el modelo de idioma (HTTP ' + response.statusCode + ').')
-                    response.resume()
-                    resolveFetch()
-                    return
-                }
-                writeStream(response, localDest, resolveFetch)
-            })
-            request.on('error', (error) => {
-                console.warn('[tesseract-assets] Falló la descarga del modelo de idioma:', error.message)
-                resolveFetch()
-            })
-        })
-    }
-
-    async function writeStream(response, dest, done) {
-        const fs = await import('node:fs')
-        const stream = fs.createWriteStream(dest)
-        response.pipe(stream)
-        stream.on('finish', () => stream.close(() => done()))
-        stream.on('error', () => done())
-    }
-
-    return {
-        name: 'tesseract-assets',
-        async buildStart() {
-            await copyAllAssets()
-        },
-        async configureServer(server) {
-            await copyAllAssets()
-            const fs = await import('node:fs')
-            server.middlewares.use('/tesseract', (req, res, next) => {
-                const url = req.url.split('?')[0]
-                const candidates = [
-                    resolve(targetDir, url === '/' ? 'worker.min.js' : url.slice(1)),
-                    resolve(coreDir, url.slice(1))
-                ]
-                for (const candidate of candidates) {
-                    if (existsSync(candidate)) {
-                        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
-                        fs.createReadStream(candidate).pipe(res)
-                        return
-                    }
-                }
-                next()
-            })
-        }
-    }
-}
 
 function cloudinaryApiPlugin() {
   let cloudName, apiKey, apiSecret;
@@ -272,12 +149,6 @@ function pushNotificationApiPlugin() {
         apiModuleUrl('heic-convert.js'),
         'HEIC convert'
       );
-      mountApiHandler(
-        server,
-        '/api/ocr',
-        apiModuleUrl('ocr.js'),
-        'OCR'
-      );
     },
   };
 }
@@ -323,7 +194,6 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [
       svelte(),
-      tesseractAssetsPlugin(),
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: [
@@ -375,10 +245,6 @@ export default defineConfig(({ mode }) => {
             /^https:\/\/firebasestorage\.googleapis\.com\//
           ],
           globPatterns: ['**/*.{js,css,html,ico,png,svg,webp}'],
-          // Los `.wasm` de Tesseract no se precachean (varios MB cada
-          // uno): se cachean bajo demanda con la regla `CacheFirst`
-          // definida más abajo para `/tesseract/*`.
-          globIgnores: ['**/*.wasm', '**/*.wasm.js'],
           runtimeCaching: [
             {
               urlPattern: ({ url, request }) => (
@@ -411,25 +277,6 @@ export default defineConfig(({ mode }) => {
                 expiration: {
                   maxEntries: 120,
                   maxAgeSeconds: 60 * 60 * 24 * 30
-                }
-              }
-            },
-            // Activos de Tesseract.js servidos por la propia PWA
-            // (`/tesseract/*`). El core WASM y el modelo de idioma se
-            // self-hostean para evitar restricciones de CSP, fallos de
-            // CORS y bloqueos del Worker en iOS Safari standalone.
-            {
-              urlPattern: ({ url }) => (
-                url.origin === self.location.origin &&
-                url.pathname.startsWith('/tesseract/')
-              ),
-              handler: 'CacheFirst',
-              options: {
-                cacheName: 'metricwork-ocr-core',
-                cacheableResponse: { statuses: [0, 200] },
-                expiration: {
-                  maxEntries: 32,
-                  maxAgeSeconds: 60 * 60 * 24 * 365
                 }
               }
             },

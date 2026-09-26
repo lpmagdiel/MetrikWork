@@ -34,8 +34,7 @@
     "qrcode": "^1.5.4",
     "svelte-dnd-action": "^0.9.69",
     "svelte-gestures": "^5.2.2",
-    "sweetalert2": "^11.26.24",
-    "tesseract.js": "^7.0.0"
+    "sweetalert2": "^11.26.24"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
