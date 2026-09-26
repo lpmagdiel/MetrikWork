@@ -69,6 +69,21 @@ importers:
       vitest:
         specifier: ^4.1.9
         version: 4.1.9(@types/node@25.2.3)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(vite@7.3.3(@types/node@25.2.3)(lightningcss@1.31.1)(terser@5.46.0))
+      workbox-cacheable-response:
+        specifier: ^7.3.0
+        version: 7.4.0
+      workbox-expiration:
+        specifier: ^7.3.0
+        version: 7.4.0
+      workbox-precaching:
+        specifier: ^7.3.0
+        version: 7.4.0
+      workbox-routing:
+        specifier: ^7.3.0
+        version: 7.4.0
+      workbox-strategies:
+        specifier: ^7.3.0
+        version: 7.4.0
 
 packages:
 
