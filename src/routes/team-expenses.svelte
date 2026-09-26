@@ -137,13 +137,13 @@
   const OCR_ALERT_DEDUPE_MS = 2 * 60 * 1000;
   const OCR_UNCONFIGURED_TITLE = "Escaneo automático no disponible";
   const OCR_UNCONFIGURED_BODY =
-    "Falta configurar la clave de OCR (VITE_OCR_API_KEY) en el entorno. Rellena los campos a mano.";
+    "Falta configurar la clave de OCR (OCR_API_KEY) en el servidor. Rellena los campos a mano.";
   const OCR_NETWORK_TITLE = "OCR sin conexión";
   const OCR_NETWORK_BODY =
     "No se pudo conectar con el servicio de OCR. Comprueba la conexión y vuelve a intentarlo.";
   const OCR_AUTH_TITLE = "Clave de OCR no válida";
   const OCR_AUTH_BODY =
-    "La clave de OCR configurada fue rechazada por el servicio. Revisa VITE_OCR_API_KEY.";
+    "La clave de OCR configurada fue rechazada por el servicio. Revisa OCR_API_KEY.";
   const OCR_GENERIC_TITLE = "OCR no disponible";
   const OCR_GENERIC_BODY =
     "No se pudo procesar la imagen automáticamente. Rellena los campos a mano.";
