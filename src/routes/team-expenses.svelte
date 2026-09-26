@@ -489,12 +489,6 @@
     receipts = receipts.filter((_, itemIndex) => itemIndex !== index);
   }
 
-  async function fetchReceiptAsBlob(url) {
-    const response = await fetch(url, { mode: "cors" });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response.blob();
-  }
-
   $effect(() => {
     if (typeof window === "undefined") return;
     ocrSupported = isOcrLikelySupported();
@@ -521,8 +515,9 @@
     ocrAnimatedFrame = 0;
 
     try {
-      const imageSource = await fetchReceiptAsBlob(receipt.url);
-      const result = await recognizeImage(imageSource);
+      // El proxy de OCR recibe la URL pública de Cloudinary y descarga la
+      // imagen desde el servidor; /api/ocr acepta JSON, no multipart.
+      const result = await recognizeImage(receipt.url);
       const fields = result.fields || {};
       const totalFields = 5;
       const filledFields = Object.keys(fields).filter(

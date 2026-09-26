@@ -31,7 +31,11 @@ function sendJson(res, status, payload) {
 }
 
 async function readJsonBody(req) {
-    if (req.body && typeof req.body === 'object') return req.body;
+    // Vercel puede haber parseado application/json. Este proxy no acepta
+    // multipart: recibe la URL pública para evitar duplicar la subida.
+    if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
+        return req.body;
+    }
     let total = 0;
     const chunks = [];
     for await (const chunk of req) {
@@ -80,6 +84,13 @@ export default async function handler(req, res) {
     if (req.method !== 'POST') {
         res.setHeader('Allow', 'POST');
         return sendJson(res, 405, { error: 'Method not allowed' });
+    }
+
+    const requestContentType = String(req.headers['content-type'] || '').toLowerCase();
+    if (requestContentType && !requestContentType.includes('application/json')) {
+        return sendJson(res, 415, {
+            error: 'El endpoint OCR acepta application/json con la URL pública de la imagen'
+        });
     }
 
     const apiKey = process.env.OCR_API_KEY;
