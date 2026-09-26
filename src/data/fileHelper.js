@@ -120,7 +120,14 @@ export const resizer = async (fileURL, max = 800, options = {}) => {
     }
     ctx.fillStyle = options.background || '#ffffff';
     ctx.fillRect(0, 0, width, height);
+    // Preprocesado para OCR: grayscale + aumento de contraste. Mejora la
+    // legibilidad de tickets con sombras o fotos a contraluz. Si el caller
+    // pasa `preprocess: false` (por ejemplo para avatares) se omite.
+    if (options.preprocess !== false) {
+        ctx.filter = 'grayscale(1) contrast(1.35)';
+    }
     ctx.drawImage(image, 0, 0, width, height);
+    ctx.filter = 'none';
     return canvasToDataUrl(canvas, options.type || "image/webp", options.quality ?? 0.7);
 }
 
@@ -137,6 +144,45 @@ export const resizeImageFile = async (file, max = 800, options = {}) => {
         URL.revokeObjectURL(objectUrl);
     }
 }
+
+/**
+ * Detecta si un archivo es HEIC/HEIF (formato nativo del iPhone que
+ * Chrome/Android/Firefox no decodifican en `<img>` ni `<canvas>`).
+ */
+export const isHeicFile = (file) => {
+    if (!file) return false;
+    const type = (file.type || '').toLowerCase();
+    if (type === 'image/heic' || type === 'image/heif') return true;
+    return /\.(heic|heif)$/i.test(file.name || '');
+};
+
+/**
+ * Convierte una imagen HEIC/HEIF a JPEG (Blob) llamando al endpoint
+ * serverless `/api/heic-convert`. Devuelve un Blob JPEG listo para
+ * procesar con `resizeImageFile` o subir directamente a Cloudinary.
+ */
+export const convertHeicToJpeg = async (file) => {
+    if (!file) throw new Error('Archivo HEIC no proporcionado');
+    const formData = new FormData();
+    formData.append('file', file, file.name || 'receipt.heic');
+    const response = await fetch('/api/heic-convert', {
+        method: 'POST',
+        body: formData
+    });
+    if (!response.ok) {
+        let message = `HTTP ${response.status}`;
+        try {
+            const data = await response.json();
+            if (data?.error) message = data.error;
+        } catch {
+            // respuesta no-JSON
+        }
+        const error = new Error(message);
+        error.code = 'HEIC_CONVERT_FAILED';
+        throw error;
+    }
+    return response.blob();
+};
 
 /**
  * 

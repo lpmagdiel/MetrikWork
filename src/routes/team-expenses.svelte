@@ -47,10 +47,23 @@
   } from "../data/stores.js";
   import { confirmAlert, showErrorAlert, showInfoAlert } from "../data/alerts.js";
   import { navigateTo } from "../router.js";
-  import { destroyer, resizeImageFile, uploader } from "../data/fileHelper.js";
+  import {
+    convertHeicToJpeg,
+    destroyer,
+    isHeicFile,
+    resizeImageFile,
+    uploader
+  } from "../data/fileHelper.js";
   import { optimizeCloudinary, stripImageFileExtension } from "../helpers/image.js";
   import { openSliceContainers } from "../data/ui.js";
-  import { recognizeImage, subscribeOcrProgress } from "../data/ocr.js";
+  import {
+    OCR_ERROR_CODES,
+    ensureOcrSupport,
+    isOcrLikelySupported,
+    recognizeImage,
+    recognizeImageRemote,
+    subscribeOcrProgress
+  } from "../data/ocr.js";
   import { parseReceiptText } from "../data/receiptParser.js";
   import CircleAddButton from "../components/CircleAddButton.svelte";
   import SliceContainer from "../components/SliceContainer.svelte";
@@ -121,6 +134,42 @@
   let ocrStatus = $state({ status: "idle", progress: 0 });
   let ocrStatusMessage = $state("");
   let ocrAnimatedFrame = $state(0);
+  let ocrLastAlertAt = $state(0);
+  let ocrSupported = $state(true);
+
+  const OCR_ALERT_DEDUPE_MS = 2 * 60 * 1000;
+  const OCR_UNSUPPORTED_TITLE = "Escaneo automático no disponible";
+  const OCR_UNSUPPORTED_BODY_IOS =
+    "Tu iPhone no permite cargar el motor de OCR en este momento. Rellena los campos a mano o prueba desde otro navegador.";
+  const OCR_UNSUPPORTED_BODY_GENERIC =
+    "Este navegador no soporta el escaneo automático de tickets. Rellena los campos a mano.";
+  const OCR_NETWORK_TITLE = "OCR sin conexión";
+  const OCR_NETWORK_BODY =
+    "No se pudo descargar el modelo de OCR. Comprueba la conexión y vuelve a intentarlo.";
+  const OCR_GENERIC_TITLE = "OCR no disponible";
+  const OCR_GENERIC_BODY =
+    "No se pudo procesar la imagen automáticamente. Rellena los campos a mano.";
+  const OCR_HEIC_TITLE = "Foto HEIC no compatible";
+  const OCR_HEIC_BODY =
+    "No se pudo convertir la foto HEIC del iPhone. Activa 'Formato más compatible' en Ajustes > Cámara, o sube una imagen JPEG.";
+
+  function detectIosSafari() {
+    if (typeof navigator === "undefined") return false;
+    const ua = navigator.userAgent || "";
+    const isIOS = /iPad|iPhone|iPod/.test(ua)
+      || (ua.includes("Mac") && typeof document !== "undefined" && document.documentElement?.dataset?.touch === "true")
+      || (navigator.platform === "MacIntel" && typeof navigator.maxTouchPoints === "number" && navigator.maxTouchPoints > 1);
+    const isWebkit = /WebKit/.test(ua);
+    const isCriOS = /CriOS/.test(ua);
+    const isFxiOS = /FxiOS/.test(ua);
+    return isIOS && isWebkit && !isCriOS && !isFxiOS;
+  }
+
+  function showOcrAlertOnce(now, title, body) {
+    if (now - ocrLastAlertAt < OCR_ALERT_DEDUPE_MS) return;
+    ocrLastAlertAt = now;
+    showInfoAlert(title, body);
+  }
 
   const OCR_STATUS_LABELS = {
     "loading model": "Cargando modelo OCR",
@@ -386,7 +435,9 @@
   async function handleReceiptsChange(event) {
     const files = Array.from(event.currentTarget.files || []);
     event.currentTarget.value = "";
-    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+    const imageFiles = files.filter((file) =>
+      file.type.startsWith("image/") || /\.(heic|heif)$/i.test(file.name || "")
+    );
     if (!imageFiles.length) {
       showErrorAlert("Archivos no válidos", "Selecciona una o varias imágenes.");
       return;
@@ -406,9 +457,24 @@
     try {
       for (const file of filesToUpload) {
         try {
-          const resized = await resizeImageFile(file, 1600, {
-            type: "image/webp",
-            quality: 0.85,
+          let processableFile = file;
+          if (isHeicFile(file)) {
+            try {
+              const jpegBlob = await convertHeicToJpeg(file);
+              processableFile = new File([jpegBlob], (file.name || 'receipt').replace(/\.(heic|heif)$/i, '.jpg'), {
+                type: 'image/jpeg',
+                lastModified: file.lastModified || Date.now()
+              });
+            } catch (heicError) {
+              console.error("Error converting HEIC:", heicError);
+              showErrorAlert(OCR_HEIC_TITLE, OCR_HEIC_BODY);
+              continue;
+            }
+          }
+          const resized = await resizeImageFile(processableFile, 2200, {
+            type: "image/jpeg",
+            quality: 0.9,
+            preprocess: true
           });
           const url = await uploader(resized, CLOUDINARY_PRESET_EXPENSES);
           const newReceipt = { url, name: file.name };
@@ -447,34 +513,96 @@
     return response.blob();
   }
 
+  $effect(() => {
+    if (typeof window === "undefined") return;
+    ocrSupported = isOcrLikelySupported();
+    ensureOcrSupport().then((ok) => {
+      if (ok) ocrSupported = true;
+    }).catch(() => {});
+  });
+
   async function handleScanReceipt(receipt) {
     if (!receipt?.url || scanningReceiptId) return;
     if (typeof window === "undefined") return;
+
+    // 1) Probe local: si parece soportado, intentamos Tesseract en el
+    // navegador (es más rápido y no consume función serverless).
+    let useLocal = ocrSupported;
+    if (!useLocal) {
+      const ok = await ensureOcrSupport().catch(() => false);
+      if (ok) {
+        ocrSupported = true;
+        useLocal = true;
+      }
+    }
+
     scanningReceiptId = receipt.url;
     ocrStatus = { status: "loading image", progress: 0 };
     ocrStatusMessage = "Preparando imagen";
     ocrAnimatedFrame = 0;
+
     try {
-      const imageSource = await fetchReceiptAsBlob(receipt.url);
-      const { text, confidence } = await recognizeImage(imageSource);
-      const result = parseReceiptText(text);
+      let text = "";
+      let confidence = 0;
+      let ocrSource = useLocal ? "local" : "remote";
+
+      if (useLocal) {
+        try {
+          ocrStatusMessage = "Procesando en el dispositivo";
+          const imageSource = await fetchReceiptAsBlob(receipt.url);
+          const result = await recognizeImage(imageSource);
+          text = result.text;
+          confidence = result.confidence;
+        } catch (localError) {
+          // Si Tesseract local falla por modelo/corpus, intentamos el
+          // fallback serverless sin mostrar error al usuario.
+          console.warn("OCR local falló, usando servidor:", localError);
+          ocrSource = "remote";
+          ocrStatusMessage = "Procesando en el servidor";
+          const result = await recognizeImageRemote(receipt.url);
+          text = result.text;
+          confidence = result.confidence;
+        }
+      } else {
+        ocrStatusMessage = "Procesando en el servidor";
+        const result = await recognizeImageRemote(receipt.url);
+        text = result.text;
+        confidence = result.confidence;
+      }
+
+      const parsed = parseReceiptText(text);
       ocrLastSummary = {
         confidence: Number(confidence) || 0,
-        filledFields: result.summary.filledFields,
-        totalFields: result.summary.totalFields,
+        filledFields: parsed.summary.filledFields,
+        totalFields: parsed.summary.totalFields,
         receiptName: receipt.name
       };
-      applyOcrFields(result.fields);
+      applyOcrFields(parsed.fields);
       ocrStatus = { status: "done", progress: 1 };
-      ocrStatusMessage = `Escaneo completado (${result.summary.filledFields}/${result.summary.totalFields} campos)`;
+      ocrStatusMessage = `Escaneo completado (${parsed.summary.filledFields}/${parsed.summary.totalFields} campos${ocrSource === "remote" ? " · servidor" : ""})`;
     } catch (error) {
+      const code = error?.code || OCR_ERROR_CODES.UNKNOWN;
+      const isIos = detectIosSafari();
       console.warn("OCR no disponible:", error);
-      ocrStatus = { status: "error", progress: 0 };
-      ocrStatusMessage = "No se pudo procesar la imagen automáticamente";
-      showInfoAlert(
-        "OCR no disponible",
-        "No se pudo procesar la imagen automáticamente. Rellena los campos a mano.",
-      );
+      ocrStatus = { status: "error", progress: 0, code };
+      ocrStatusMessage = code === OCR_ERROR_CODES.NETWORK
+        ? "No se pudo conectar con el servidor de OCR"
+        : "No se pudo procesar la imagen automáticamente";
+      const now = Date.now();
+      if (code === OCR_ERROR_CODES.UNSUPPORTED) {
+        ocrSupported = false;
+        showOcrAlertOnce(
+          now,
+          OCR_UNSUPPORTED_TITLE,
+          isIos ? OCR_UNSUPPORTED_BODY_IOS : OCR_UNSUPPORTED_BODY_GENERIC,
+        );
+      } else if (code === OCR_ERROR_CODES.NETWORK) {
+        showOcrAlertOnce(now, OCR_NETWORK_TITLE, OCR_NETWORK_BODY);
+      } else if (error?.message && /heic/i.test(error.message)) {
+        showOcrAlertOnce(now, OCR_HEIC_TITLE, OCR_HEIC_BODY);
+      } else {
+        showOcrAlertOnce(now, OCR_GENERIC_TITLE, OCR_GENERIC_BODY);
+      }
     } finally {
       scanningReceiptId = "";
     }
@@ -970,7 +1098,7 @@
             <input
               bind:this={receiptFileInput}
               type="file"
-              accept="image/*"
+              accept="image/heic,image/heif,image/jpeg,image/png,image/webp,image/*"
               multiple
               onchange={handleReceiptsChange}
               style="display:none"
