@@ -3,6 +3,7 @@
     AlertCircle,
     BarChart3,
     CalendarCheck,
+    ChartPie,
     ChevronDown,
     Clock,
     Download,
@@ -18,6 +19,7 @@
     WalletCards,
   } from "lucide-svelte";
   import LoadingSpinner from "../components/LoadingSpinner.svelte";
+  import PieChart from "../components/PieChart.svelte";
   import Toast from "../components/Toast.svelte";
   import TitleHeader from "../components/TitleHeader.svelte";
   import { navigateTo } from "../router.js";
@@ -63,6 +65,7 @@
   let endDate = $state(getPeriodRange("month").end);
   let selectedLocationId = $state("all");
   let selectedMemberId = $state("all");
+  let distributionChartType = $state("bar");
   let budgetAmount = $state(0);
   let budgetCurrency = $state("MXN");
   let messageToast = $state("");
@@ -580,6 +583,40 @@
   let maxLocationValue = $derived(Math.max(...locationSummaries.map((item) => item.total), 1));
   let maxCategoryValue = $derived(Math.max(...categoryTotals.map((item) => item.value), 1));
   let maxTrendValue = $derived(Math.max(...trend.map((item) => item.total), 1));
+
+  const locationPiePalette = [
+    "var(--info-color)",
+    "var(--accent-color)",
+    "var(--warning-color)",
+    "var(--success-color)",
+    "var(--purple-color)",
+    "var(--danger-color)",
+  ];
+
+  let locationDistribution = $derived(
+    locationSummaries.map((location, index) => ({
+      label: location.name,
+      value: location.total,
+      color: locationPiePalette[index % locationPiePalette.length],
+    })),
+  );
+
+  const categoryPiePalette = [
+    "var(--warning-color)",
+    "var(--accent-color)",
+    "var(--info-color)",
+    "var(--success-color)",
+    "var(--purple-color)",
+    "var(--danger-color)",
+  ];
+
+  let categoryDistribution = $derived(
+    categoryTotals.map((category, index) => ({
+      label: category.label,
+      value: category.value,
+      color: categoryPiePalette[index % categoryPiePalette.length],
+    })),
+  );
 
   $effect(() => {
     if (!team) return;
@@ -1137,6 +1174,30 @@
             {/each}
           </div>
 
+          <div class="chart-type-toggle" role="group" aria-label="Tipo de gráfico">
+            <span class="chart-type-label">Distribuciones</span>
+            <div class="chart-type-tabs">
+              <button
+                type="button"
+                class:active={distributionChartType === "bar"}
+                onclick={() => (distributionChartType = "bar")}
+                aria-pressed={distributionChartType === "bar"}
+              >
+                <BarChart3 size={15} />
+                <span>Barras</span>
+              </button>
+              <button
+                type="button"
+                class:active={distributionChartType === "pie"}
+                onclick={() => (distributionChartType = "pie")}
+                aria-pressed={distributionChartType === "pie"}
+              >
+                <ChartPie size={15} />
+                <span>Pastel</span>
+              </button>
+            </div>
+          </div>
+
           <div class="filter-row">
             <label class="compact-field">
               <span>Ubicación</span>
@@ -1274,21 +1335,29 @@
                   <p>Gastos</p>
                   <h2>Distribución</h2>
                 </div>
-                <BarChart3 size={20} />
+                {#if distributionChartType === "bar"}
+                  <BarChart3 size={20} />
+                {:else}
+                  <ChartPie size={20} />
+                {/if}
               </div>
-              <div class="bar-list">
-                {#each expenseDistribution as item}
-                  <div class="bar-row">
-                    <div class="bar-label">
-                      <span>{item.label}</span>
-                      <strong>{formatMoney(item.value)}</strong>
+              {#if distributionChartType === "pie"}
+                <PieChart data={expenseDistribution} valueFormatter={formatMoney} />
+              {:else}
+                <div class="bar-list">
+                  {#each expenseDistribution as item}
+                    <div class="bar-row">
+                      <div class="bar-label">
+                        <span>{item.label}</span>
+                        <strong>{formatMoney(item.value)}</strong>
+                      </div>
+                      <div class="bar-track">
+                        <i style={`width: ${(item.value / maxExpenseValue) * 100}%; background: ${item.color};`}></i>
+                      </div>
                     </div>
-                    <div class="bar-track">
-                      <i style={`width: ${(item.value / maxExpenseValue) * 100}%; background: ${item.color};`}></i>
-                    </div>
-                  </div>
-                {/each}
-              </div>
+                  {/each}
+                </div>
+              {/if}
             </article>
 
             <article class="panel">
@@ -1322,33 +1391,41 @@
                   <p>Mapa operativo</p>
                   <h2>Ubicaciones</h2>
                 </div>
-                <MapPin size={20} />
+                {#if distributionChartType === "bar"}
+                  <MapPin size={20} />
+                {:else}
+                  <ChartPie size={20} />
+                {/if}
               </div>
               {#if locationSummaries.length}
-                <div class="bar-list">
-                  {#each locationSummaries as location (location.id)}
-                    <div class="bar-row">
-                      <div class="bar-label">
-                        <span>{location.name}</span>
-                        <strong>{formatMoney(location.total)}</strong>
+                {#if distributionChartType === "pie"}
+                  <PieChart data={locationDistribution} valueFormatter={formatMoney} />
+                {:else}
+                  <div class="bar-list">
+                    {#each locationSummaries as location (location.id)}
+                      <div class="bar-row">
+                        <div class="bar-label">
+                          <span>{location.name}</span>
+                          <strong>{formatMoney(location.total)}</strong>
+                        </div>
+                        <div class="location-meta">
+                          <small>{location.membersCount} miembros</small>
+                          <small>{formatNumber(location.workDays)} días</small>
+                          <small>{formatMoney(location.products)} consumibles</small>
+                          <small>{formatMoney(location.budget)} presupuesto</small>
+                          {#if location.budget > 0}
+                            <small class:negative={location.remaining < 0}>
+                              {formatMoney(location.remaining)} restante
+                            </small>
+                          {/if}
+                        </div>
+                        <div class="bar-track">
+                          <i style={`width: ${(location.total / maxLocationValue) * 100}%; background: var(--info-color);`}></i>
+                        </div>
                       </div>
-                      <div class="location-meta">
-                        <small>{location.membersCount} miembros</small>
-                        <small>{formatNumber(location.workDays)} días</small>
-                        <small>{formatMoney(location.products)} consumibles</small>
-                        <small>{formatMoney(location.budget)} presupuesto</small>
-                        {#if location.budget > 0}
-                          <small class:negative={location.remaining < 0}>
-                            {formatMoney(location.remaining)} restante
-                          </small>
-                        {/if}
-                      </div>
-                      <div class="bar-track">
-                        <i style={`width: ${(location.total / maxLocationValue) * 100}%; background: var(--info-color);`}></i>
-                      </div>
-                    </div>
-                  {/each}
-                </div>
+                    {/each}
+                  </div>
+                {/if}
               {:else}
                 <div class="empty-inline">Sin ubicaciones con actividad.</div>
               {/if}
@@ -1586,22 +1663,30 @@
                   <p>Consumibles</p>
                   <h2>Categorías</h2>
                 </div>
-                <Package size={20} />
+                {#if distributionChartType === "bar"}
+                  <Package size={20} />
+                {:else}
+                  <ChartPie size={20} />
+                {/if}
               </div>
               {#if categoryTotals.length}
-                <div class="bar-list">
-                  {#each categoryTotals as item}
-                    <div class="bar-row">
-                      <div class="bar-label">
-                        <span>{item.label}</span>
-                        <strong>{formatMoney(item.value)}</strong>
+                {#if distributionChartType === "pie"}
+                  <PieChart data={categoryDistribution} valueFormatter={formatMoney} />
+                {:else}
+                  <div class="bar-list">
+                    {#each categoryTotals as item}
+                      <div class="bar-row">
+                        <div class="bar-label">
+                          <span>{item.label}</span>
+                          <strong>{formatMoney(item.value)}</strong>
+                        </div>
+                        <div class="bar-track">
+                          <i style={`width: ${(item.value / maxCategoryValue) * 100}%; background: var(--warning-color);`}></i>
+                        </div>
                       </div>
-                      <div class="bar-track">
-                        <i style={`width: ${(item.value / maxCategoryValue) * 100}%; background: var(--warning-color);`}></i>
-                      </div>
-                    </div>
-                  {/each}
-                </div>
+                    {/each}
+                  </div>
+                {/if}
               {:else}
                 <div class="empty-inline">Sin consumibles en este periodo.</div>
               {/if}
@@ -1808,6 +1893,52 @@
   .budget-form button {
     background: var(--text-primary);
     color: var(--bg-card);
+  }
+
+  .chart-type-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .chart-type-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .chart-type-tabs {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--bg-input);
+    border-radius: 999px;
+    padding: 3px;
+  }
+
+  .chart-type-tabs button {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 999px;
+    min-height: 30px;
+    padding: 0 12px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .chart-type-tabs button.active {
+    background: var(--bg-card);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-card);
   }
 
   .export-actions {

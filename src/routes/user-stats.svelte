@@ -2,6 +2,7 @@
   import {
     BarChart3,
     CalendarDays,
+    ChartPie,
     ChevronRight,
     Clock,
     DollarSign,
@@ -10,6 +11,7 @@
     WalletCards,
   } from "lucide-svelte";
   import LoadingSpinner from "../components/LoadingSpinner.svelte";
+  import PieChart from "../components/PieChart.svelte";
   import Toast from "../components/Toast.svelte";
   import TitleHeader from "../components/TitleHeader.svelte";
   import { getUserTeamPayments } from "../data/teamPayments.js";
@@ -24,6 +26,7 @@
   let period = $state("month");
   let startDate = $state(getMonthStart());
   let endDate = $state(getTodayDateString());
+  let distributionChartType = $state("bar");
   let messageToast = $state("");
   let typeToast = $state("success");
   let showToast = $state(false);
@@ -348,6 +351,30 @@
           {/each}
         </div>
 
+        <div class="chart-type-toggle" role="group" aria-label="Tipo de gráfico">
+          <span class="chart-type-label">Distribución</span>
+          <div class="chart-type-tabs">
+            <button
+              type="button"
+              class:active={distributionChartType === "bar"}
+              onclick={() => (distributionChartType = "bar")}
+              aria-pressed={distributionChartType === "bar"}
+            >
+              <BarChart3 size={15} />
+              <span>Barras</span>
+            </button>
+            <button
+              type="button"
+              class:active={distributionChartType === "pie"}
+              onclick={() => (distributionChartType = "pie")}
+              aria-pressed={distributionChartType === "pie"}
+            >
+              <ChartPie size={15} />
+              <span>Pastel</span>
+            </button>
+          </div>
+        </div>
+
         {#if period === "custom"}
           <div class="date-filters">
             <label>
@@ -417,21 +444,29 @@
                 <p>Distribución</p>
                 <h2>Tipo de trabajo</h2>
               </div>
-              <BarChart3 size={20} />
+              {#if distributionChartType === "bar"}
+                <BarChart3 size={20} />
+              {:else}
+                <ChartPie size={20} />
+              {/if}
             </div>
-            <div class="bar-list">
-              {#each distribution as item}
-                <div class="bar-row">
-                  <div class="bar-label">
-                    <span>{item.label}</span>
-                    <strong>{item.value}</strong>
+            {#if distributionChartType === "pie"}
+              <PieChart data={distribution} />
+            {:else}
+              <div class="bar-list">
+                {#each distribution as item}
+                  <div class="bar-row">
+                    <div class="bar-label">
+                      <span>{item.label}</span>
+                      <strong>{item.value}</strong>
+                    </div>
+                    <div class="bar-track">
+                      <i style={`width: ${(item.value / maxDistributionValue) * 100}%; background: ${item.color};`}></i>
+                    </div>
                   </div>
-                  <div class="bar-track">
-                    <i style={`width: ${(item.value / maxDistributionValue) * 100}%; background: ${item.color};`}></i>
-                  </div>
-                </div>
-              {/each}
-            </div>
+                {/each}
+              </div>
+            {/if}
           </article>
 
           <article class="panel">
@@ -683,6 +718,52 @@
   .period-tabs button.active {
     background: var(--text-primary);
     color: var(--bg-card);
+  }
+
+  .chart-type-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .chart-type-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .chart-type-tabs {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--bg-input);
+    border-radius: 999px;
+    padding: 3px;
+  }
+
+  .chart-type-tabs button {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 999px;
+    min-height: 30px;
+    padding: 0 12px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .chart-type-tabs button.active {
+    background: var(--bg-card);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-card);
   }
 
   .date-filters {
