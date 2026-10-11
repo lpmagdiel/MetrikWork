@@ -20,6 +20,7 @@ export * from './teamExpenseUtils.js';
 export * from './systemAdmin.js';
 export * from './teamSizes.js';
 export * from './templates.js';
+export * from './workBonuses.js';
 export * from './workLimits.js';
 export * from './permissions.js';
 export * from './offlineQueue.js';

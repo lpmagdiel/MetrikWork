@@ -29,7 +29,21 @@
         "workPolicy": {
           "nonWorkingDays": [0, 6],
           "overtimeLimitHours": 8,
-          "timezone": "Europe/Madrid"
+          "timezone": "Europe/Madrid",
+          "workBonuses": {
+            "weekend": { "enabled": false, "amount": 0 },
+            "holiday": { "enabled": false, "amount": 0 }
+          },
+          "holidays": [
+            {
+              "id": "2026-01-01",
+              "date": "2026-01-01",
+              "name": "Año Nuevo",
+              "notes": "",
+              "addedAt": "ISO-8601 timestamp",
+              "addedBy": "userId"
+            }
+          ]
         },
         "billing": {
           "plan": "M",

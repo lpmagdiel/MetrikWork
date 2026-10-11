@@ -52,6 +52,10 @@
     updateTeamGhost,
     removeTeamGhost,
     hasGhostCreatePermission,
+    getWorkBonuses,
+    normalizeWorkBonuses,
+    getTeamHolidays,
+    generateHolidayId,
   } from "../data/stores.js";
   import { navigateTo } from "../router.js";
   import { resizeImageFile, uploader } from "../data/fileHelper.js";
@@ -77,6 +81,14 @@
   let companyProfile = $state(createDefaultCompanyProfile());
   let overtimeLimitHours = $state(0);
   let nonWorkingDays = $state([]);
+  let weekendBonusEnabled = $state(false);
+  let weekendBonusAmount = $state(0);
+  let holidayBonusEnabled = $state(false);
+  let holidayBonusAmount = $state(0);
+  let holidayList = $state([]);
+  let newHolidayDate = $state("");
+  let newHolidayName = $state("");
+  let isSavingWorkPolicy = $state(false);
   let themePrimaryColor = $state("#a7f3d0");
   let photoPreview = $state("");
   let pendingPhoto = $state("");
@@ -184,6 +196,14 @@
       companyProfile = normalizeCompanyProfile(team.companyProfile);
       overtimeLimitHours = Number(team.overtimeLimitHours) || 0;
       nonWorkingDays = normalizeNonWorkingDays(team.nonWorkingDays);
+      const bonuses = normalizeWorkBonuses(team.workBonuses);
+      weekendBonusEnabled = Boolean(bonuses.weekend.enabled);
+      weekendBonusAmount = Number(bonuses.weekend.amount) || 0;
+      holidayBonusEnabled = Boolean(bonuses.holiday.enabled);
+      holidayBonusAmount = Number(bonuses.holiday.amount) || 0;
+      holidayList = [...getTeamHolidays(team)];
+      newHolidayDate = "";
+      newHolidayName = "";
       themePrimaryColor = normalizeThemeColor(team.themePrimaryColor) || "#a7f3d0";
       photoPreview = team.photoURL || "";
       pendingPhoto = "";
@@ -442,6 +462,123 @@
     nonWorkingDays = nonWorkingDays.includes(normalizedDay)
       ? nonWorkingDays.filter((selectedDay) => selectedDay !== normalizedDay)
       : [...nonWorkingDays, normalizedDay];
+  }
+
+  function formatHolidayDate(date) {
+    if (!date) return "";
+    const [year, month, day] = String(date).split("-").map(Number);
+    if (!year || !month || !day) return String(date);
+    return new Date(year, month - 1, day).toLocaleDateString("es-ES", {
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+    });
+  }
+
+  function buildHolidayDraft() {
+    return {
+      id: generateHolidayId(newHolidayDate),
+      date: newHolidayDate,
+      name: newHolidayName.trim().slice(0, 80),
+      notes: "",
+    };
+  }
+
+  async function handleSaveWorkBonuses() {
+    if (!team?.id || !canEditSettings || isSavingWorkPolicy) return;
+    isSavingWorkPolicy = true;
+    try {
+      const next = await import("../data/teams.js").then((mod) =>
+        mod.updateTeamWorkBonuses(team.id, {
+          weekend: {
+            enabled: weekendBonusEnabled,
+            amount: Number(weekendBonusAmount) || 0,
+          },
+          holiday: {
+            enabled: holidayBonusEnabled,
+            amount: Number(holidayBonusAmount) || 0,
+          },
+        })
+      );
+      weekendBonusEnabled = Boolean(next.weekend.enabled);
+      weekendBonusAmount = Number(next.weekend.amount) || 0;
+      holidayBonusEnabled = Boolean(next.holiday.enabled);
+      holidayBonusAmount = Number(next.holiday.amount) || 0;
+      await showSuccessAlert(
+        "Pluses actualizados",
+        "Los pluses de fin de semana y festivo se han guardado.",
+      );
+    } catch (error) {
+      await showErrorAlert(
+        "Error al guardar los pluses",
+        error?.message || "No se pudieron guardar los pluses del equipo.",
+      );
+    } finally {
+      isSavingWorkPolicy = false;
+    }
+  }
+
+  async function handleAddHoliday() {
+    if (!team?.id || !canEditSettings || isSavingWorkPolicy) return;
+    if (!newHolidayDate || !/^\d{4}-\d{2}-\d{2}$/.test(newHolidayDate)) {
+      await showErrorAlert(
+        "Fecha no válida",
+        "Selecciona una fecha correcta para el festivo.",
+      );
+      return;
+    }
+    const draft = buildHolidayDraft();
+    isSavingWorkPolicy = true;
+    try {
+      const entry = await import("../data/teams.js").then((mod) =>
+        mod.addTeamHoliday(team.id, draft)
+      );
+      holidayList = [...getTeamHolidays({ holidays: [...holidayList, entry] })];
+      newHolidayDate = "";
+      newHolidayName = "";
+      await showSuccessAlert(
+        "Festivo añadido",
+        `${entry.name || "Festivo"} se añadió a la lista del equipo.`,
+      );
+    } catch (error) {
+      await showErrorAlert(
+        "Error al añadir festivo",
+        error?.message || "No se pudo añadir el festivo.",
+      );
+    } finally {
+      isSavingWorkPolicy = false;
+    }
+  }
+
+  async function handleRemoveHoliday(holiday) {
+    if (!team?.id || !canEditSettings || !holiday?.id || isSavingWorkPolicy) return;
+    const confirmed = await confirmAlert({
+      title: "Quitar festivo",
+      text: `¿Eliminar el festivo "${holiday.name || formatHolidayDate(holiday.date)}"?`,
+      confirmButtonText: "Quitar",
+      danger: true,
+    });
+    if (!confirmed) return;
+    isSavingWorkPolicy = true;
+    try {
+      const removedId = await import("../data/teams.js").then((mod) =>
+        mod.removeTeamHoliday(team.id, holiday.id)
+      );
+      if (removedId) {
+        holidayList = holidayList.filter((entry) => entry.id !== removedId);
+      }
+      await showSuccessAlert(
+        "Festivo eliminado",
+        "El festivo se quitó de la configuración del equipo.",
+      );
+    } catch (error) {
+      await showErrorAlert(
+        "Error al quitar festivo",
+        error?.message || "No se pudo quitar el festivo.",
+      );
+    } finally {
+      isSavingWorkPolicy = false;
+    }
   }
 
   async function handlePhotoChange(event) {
@@ -1175,6 +1312,132 @@
                   </label>
                 {/each}
               </div>
+            </div>
+
+            <div class="profile-fields settings-field">
+              <span class="field-label">Pluses por jornada especial</span>
+              <div class="bonus-grid">
+                <div class="bonus-row">
+                  <label class="bonus-toggle">
+                    <input
+                      type="checkbox"
+                      bind:checked={weekendBonusEnabled}
+                      disabled={!canEditSettings}
+                    />
+                    <span class="bonus-toggle-label">Plus de fin de semana</span>
+                  </label>
+                  <div class="bonus-amount">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      bind:value={weekendBonusAmount}
+                      disabled={!canEditSettings || !weekendBonusEnabled}
+                      aria-label="Importe del plus de fin de semana por unidad de jornada"
+                    />
+                    <span class="bonus-amount-suffix">€/jornada</span>
+                  </div>
+                </div>
+                <p class="field-help">
+                  Se aplica a sábados y domingos automáticamente. Una media jornada cobra la mitad.
+                </p>
+
+                <div class="bonus-row">
+                  <label class="bonus-toggle">
+                    <input
+                      type="checkbox"
+                      bind:checked={holidayBonusEnabled}
+                      disabled={!canEditSettings}
+                    />
+                    <span class="bonus-toggle-label">Plus de festivo</span>
+                  </label>
+                  <div class="bonus-amount">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      bind:value={holidayBonusAmount}
+                      disabled={!canEditSettings || !holidayBonusEnabled}
+                      aria-label="Importe del plus de festivo por unidad de jornada"
+                    />
+                    <span class="bonus-amount-suffix">€/jornada</span>
+                  </div>
+                </div>
+                <p class="field-help">
+                  Se aplica a los días marcados como festivos en la lista de abajo. Solo a jornadas
+                  completas, medias o variables; las horas extra siguen pagando la tarifa extra.
+                </p>
+              </div>
+              {#if canEditSettings}
+                <button
+                  type="button"
+                  class="secondary-btn compact-btn bonus-save-btn"
+                  onclick={handleSaveWorkBonuses}
+                  disabled={isSavingWorkPolicy}
+                >
+                  <Save size={16} />
+                  <span>{isSavingWorkPolicy ? "Guardando pluses..." : "Guardar pluses"}</span>
+                </button>
+              {/if}
+            </div>
+
+            <div class="profile-fields settings-field">
+              <span class="field-label">Festivos del equipo</span>
+              {#if holidayList.length}
+                <ul class="holiday-list">
+                  {#each holidayList as holiday (holiday.id)}
+                    <li class="holiday-list-item">
+                      <div class="holiday-list-text">
+                        <strong>{holiday.name || "Festivo sin nombre"}</strong>
+                        <span class="holiday-date">{formatHolidayDate(holiday.date)}</span>
+                        {#if holiday.notes}
+                          <small>{holiday.notes}</small>
+                        {/if}
+                      </div>
+                      {#if canEditSettings}
+                        <button
+                          type="button"
+                          class="link-btn danger"
+                          onclick={() => handleRemoveHoliday(holiday)}
+                          disabled={isSavingWorkPolicy}
+                          aria-label={`Quitar festivo del ${formatHolidayDate(holiday.date)}`}
+                        >
+                          <XCircle size={16} />
+                          <span>Quitar</span>
+                        </button>
+                      {/if}
+                    </li>
+                  {/each}
+                </ul>
+              {:else}
+                <p class="field-help">Aún no has definido festivos. Añádelos abajo.</p>
+              {/if}
+              {#if canEditSettings}
+                <div class="holiday-form">
+                  <input
+                    type="date"
+                    bind:value={newHolidayDate}
+                    disabled={isSavingWorkPolicy}
+                    aria-label="Fecha del festivo"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Nombre (ej. Navidad)"
+                    bind:value={newHolidayName}
+                    disabled={isSavingWorkPolicy}
+                    aria-label="Nombre del festivo"
+                  />
+                  <button
+                    type="button"
+                    class="secondary-btn compact-btn"
+                    onclick={handleAddHoliday}
+                    disabled={isSavingWorkPolicy || !newHolidayDate}
+                  >
+                    <Plus size={16} />
+                    <span>Añadir festivo</span>
+                  </button>
+                </div>
+              {/if}
             </div>
           </div>
         </details>
@@ -2985,5 +3248,119 @@
       padding: 0 10px;
       font-size: 13px;
     }
+  }
+
+  .bonus-grid {
+    display: grid;
+    gap: 12px;
+  }
+
+  .bonus-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .bonus-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    color: var(--settings-text, #1f2937);
+    cursor: pointer;
+  }
+
+  .bonus-toggle input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--settings-primary, #6366f1);
+  }
+
+  .bonus-amount {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .bonus-amount input {
+    width: 110px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid var(--settings-input-border, #d1d5db);
+    background: var(--settings-input-bg, #fff);
+    color: var(--settings-text, #1f2937);
+  }
+
+  .bonus-amount input:disabled {
+    opacity: 0.5;
+  }
+
+  .bonus-amount-suffix {
+    font-size: 13px;
+    color: var(--settings-text-muted, #6b7280);
+  }
+
+  .bonus-save-btn {
+    align-self: flex-start;
+    margin-top: 4px;
+  }
+
+  .holiday-list {
+    list-style: none;
+    margin: 0 0 12px;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+  }
+
+  .holiday-list-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    background: var(--settings-input-bg, #f9fafb);
+    border: 1px solid var(--settings-input-border, #e5e7eb);
+    border-radius: 8px;
+  }
+
+  .holiday-list-text {
+    display: grid;
+    gap: 2px;
+  }
+
+  .holiday-list-text strong {
+    font-size: 14px;
+    color: var(--settings-text, #1f2937);
+  }
+
+  .holiday-date {
+    font-size: 13px;
+    color: var(--settings-text-muted, #6b7280);
+  }
+
+  .holiday-list-text small {
+    font-size: 12px;
+    color: var(--settings-text-muted, #6b7280);
+  }
+
+  .holiday-form {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .holiday-form input[type="date"],
+  .holiday-form input[type="text"] {
+    flex: 1 1 160px;
+    min-width: 140px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--settings-input-border, #d1d5db);
+    background: var(--settings-input-bg, #fff);
+    color: var(--settings-text, #1f2937);
   }
 </style>

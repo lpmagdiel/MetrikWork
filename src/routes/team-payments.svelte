@@ -164,6 +164,12 @@
                     balanceAfter: Math.max((Number(memberSnapshot.balance) || 0) - amountToPay, 0),
                     pendingWorkDaysBefore: memberSnapshot.pendingWorkDays,
                     pendingOvertimeHoursBefore: memberSnapshot.pendingOvertimeHours,
+                    pendingWeekendBonusBefore: memberSnapshot.pendingWeekendBonus,
+                    pendingHolidayBonusBefore: memberSnapshot.pendingHolidayBonus,
+                    pendingBonusesTotalBefore: (
+                        Number(memberSnapshot.pendingWeekendBonus || 0) +
+                        Number(memberSnapshot.pendingHolidayBonus || 0)
+                    ),
                     coveredWorks,
                 },
             );
@@ -636,14 +642,25 @@
                 <span class="label">Horas extra pendientes</span>
                 <span class="value">${escapeHtml(formatMetric(member?.pendingOvertimeHours ?? member?.totalOvertimeHours))}h</span>
             </div>
+            ${member?.bonuses?.enabled?.weekend || member?.bonuses?.enabled?.holiday ? `
+                <div class="box">
+                    <span class="label">Pluses</span>
+                    <span class="value">${escapeHtml(formatMoney((Number(member?.bonuses?.weekend) || 0) + (Number(member?.bonuses?.holiday) || 0)))}</span>
+                    <small>${member.bonuses.enabled.weekend ? `Fin de semana ${formatMoney(member.bonuses.weekend || 0)}` : ''}${member.bonuses.enabled.weekend && member.bonuses.enabled.holiday ? ' · ' : ''}${member.bonuses.enabled.holiday ? `Festivos ${formatMoney(member.bonuses.holiday || 0)}` : ''}</small>
+                </div>
+            ` : ''}
         </section>
 
         <h2>Resumen económico</h2>
         <table>
             <tbody>
                 <tr><td>Total generado por jornadas</td><td class="money">${escapeHtml(formatMoney(member?.totalEarned || 0))}</td></tr>
+                ${member?.bonuses?.enabled?.weekend ? `<tr><td>Plus de fin de semana</td><td class="money">${escapeHtml(formatMoney(member?.bonuses?.weekend || 0))}</td></tr>` : ''}
+                ${member?.bonuses?.enabled?.holiday ? `<tr><td>Plus de festivo</td><td class="money">${escapeHtml(formatMoney(member?.bonuses?.holiday || 0))}</td></tr>` : ''}
                 <tr><td>Pagado anteriormente</td><td class="money">${escapeHtml(formatMoney(paymentsBeforeThis))}</td></tr>
                 <tr><td>Saldo antes de este pago</td><td class="money">${escapeHtml(formatMoney(balanceBefore))}</td></tr>
+                ${Number(payment?.pendingWeekendBonusBefore) > 0 ? `<tr><td>Plus fin de semana liquidado en este pago</td><td class="money">${escapeHtml(formatMoney(payment.pendingWeekendBonusBefore))}</td></tr>` : ''}
+                ${Number(payment?.pendingHolidayBonusBefore) > 0 ? `<tr><td>Plus de festivo liquidado en este pago</td><td class="money">${escapeHtml(formatMoney(payment.pendingHolidayBonusBefore))}</td></tr>` : ''}
                 <tr><td>Tipo de pago</td><td class="money">${escapeHtml(payment?.type === "total" ? "Pago total" : "Pago parcial")}</td></tr>
                 <tr><td>Forma de pago</td><td class="money">${escapeHtml(paymentMethodLabel)}</td></tr>
                 <tr class="total-row"><td>Monto pagado</td><td class="money">${escapeHtml(formatMoney(paymentAmountValue))}</td></tr>
@@ -889,6 +906,7 @@
                             <th>Integrante</th>
                             <th>Días pendientes</th>
                             <th>Horas extra pendientes</th>
+                            <th>Pluses</th>
                             <th>Total Ganado</th>
                             <th>Pagado</th>
                             <th>Saldo Pendiente</th>
@@ -918,6 +936,19 @@
                                 </td>
                                 <td>{formatMetric(member.pendingWorkDays)}</td>
                                 <td>{formatMetric(member.pendingOvertimeHours)}h</td>
+                                <td>
+                                    {#if member.isGhost}
+                                        <span class="muted-amount">—</span>
+                                    {:else if (member?.bonuses?.total || 0) > 0}
+                                        <span class="bonus-pill" title={`Fin de semana: ${formatMoney(member.bonuses.weekend)} · Festivos: ${formatMoney(member.bonuses.holiday)}`}>
+                                            {formatMoney(member.bonuses.total)}
+                                        </span>
+                                    {:else if (member?.bonuses?.enabled?.weekend || member?.bonuses?.enabled?.holiday)}
+                                        <span class="muted-amount">0 €</span>
+                                    {:else}
+                                        <span class="muted-amount">Sin pluses</span>
+                                    {/if}
+                                </td>
                                 <td>
                                     {#if member.isGhost}
                                         <span class="muted-amount">Sin tarifa</span>
@@ -1034,6 +1065,25 @@
                                         <span>Horas extra pendientes</span>
                                         <strong>{formatMetric(member.pendingOvertimeHours)}h</strong>
                                     </div>
+                                    {#if !member.isGhost && (member.bonuses?.enabled?.weekend || member.bonuses?.enabled?.holiday)}
+                                        <div class="metrics-bonus">
+                                            <span>Pluses pendientes</span>
+                                            <strong>
+                                                {formatMoney((Number(member.pendingWeekendBonus) || 0) + (Number(member.pendingHolidayBonus) || 0))}
+                                            </strong>
+                                            <small>
+                                                {#if member.bonuses.enabled.weekend}
+                                                    Fin de semana: {formatMoney(member.pendingWeekendBonus || 0)}
+                                                {/if}
+                                                {#if member.bonuses.enabled.weekend && member.bonuses.enabled.holiday}
+                                                    ·
+                                                {/if}
+                                                {#if member.bonuses.enabled.holiday}
+                                                    Festivos: {formatMoney(member.pendingHolidayBonus || 0)}
+                                                {/if}
+                                            </small>
+                                        </div>
+                                    {/if}
                                 </div>
 
                                 <div class="mobile-actions">
@@ -1556,6 +1606,30 @@
         color: var(--text-secondary);
         font-weight: 700;
         font-size: 13px;
+    }
+
+    .bonus-pill {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: rgba(244, 114, 182, 0.15);
+        color: #be185d;
+        font-weight: 600;
+        font-size: 13px;
+    }
+
+    .mobile-metrics .metrics-bonus {
+        grid-column: 1 / -1;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding-top: 6px;
+        border-top: 1px dashed var(--surface-border, #e5e7eb);
+    }
+
+    .mobile-metrics .metrics-bonus small {
+        color: var(--text-secondary, #6b7280);
+        font-size: 12px;
     }
 
     .ghost-status {

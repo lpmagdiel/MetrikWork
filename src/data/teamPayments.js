@@ -3,6 +3,16 @@ import { collection, addDoc, query, where, getDocs, doc, getDoc } from 'firebase
 import { getWorksByTeamId } from './works.js';
 import { getTeamGhosts } from './teams.js';
 import { getBankName } from '../helpers/banks.js';
+import {
+    computeWorkBonusAmounts,
+    computeWorkEntryAmount,
+    getBonusConfig,
+    getHolidayDateSet,
+    getWorkBonuses,
+    getTeamHolidays,
+    summarizeBonuses,
+    WORK_BONUS_TYPES
+} from './workBonuses.js';
 
 const MONEY_EPSILON = 0.01;
 
@@ -36,6 +46,21 @@ function getWorkAmount(work, dailyRate, extraHourRate) {
     return base + overtime;
 }
 
+/**
+ * Importe total de una jornada, incluyendo los pluses de fin de semana
+ * y festivo que correspondan. Replica la forma legacy de `getWorkAmount`
+ * para no romper nada si el equipo no tiene los nuevos campos.
+ */
+function getWorkAmountWithBonuses(work, team, dailyRate, extraHourRate) {
+    const bonuses = getWorkBonuses(team);
+    const isAnyEnabled = WORK_BONUS_TYPES.some((type) => bonuses[type]?.enabled);
+    if (!isAnyEnabled) {
+        return getWorkAmount(work, dailyRate, extraHourRate);
+    }
+    const breakdown = computeWorkEntryAmount(work, team, { dailyRate, extraHourRate });
+    return breakdown.amount;
+}
+
 function sortWorksByDate(works = []) {
     return [...works].sort((a, b) => {
         const dateCompare = (a.date || '').localeCompare(b.date || '');
@@ -44,11 +69,13 @@ function sortWorksByDate(works = []) {
     });
 }
 
-function applyPaymentsToWorks(userWorks, totalPaid, dailyRate, extraHourRate) {
+function applyPaymentsToWorks(userWorks, totalPaid, dailyRate, extraHourRate, team = null) {
     let remainingPaid = Math.max(0, Number(totalPaid) || 0);
+    const holidaySet = getHolidayDateSet(team);
     const annotatedWorks = userWorks.map((work) => {
         const workUnits = getWorkUnits(work);
-        const workAmount = getWorkAmount(work, dailyRate, extraHourRate);
+        const workAmount = getWorkAmountWithBonuses(work, team, dailyRate, extraHourRate);
+        const bonusBreakdown = computeWorkBonusAmounts(work, getWorkBonuses(team), holidaySet);
         const paidAmount = Math.min(workAmount, remainingPaid);
         const pendingAmount = Math.max(workAmount - paidAmount, 0);
         const pendingRatio = workAmount > MONEY_EPSILON ? pendingAmount / workAmount : 0;
@@ -64,9 +91,19 @@ function applyPaymentsToWorks(userWorks, totalPaid, dailyRate, extraHourRate) {
             ...work,
             workUnits: roundMetric(workUnits, 4),
             workAmount,
+            baseAmount: Number.isFinite(bonusBreakdown.units) ? workUnits * dailyRate : workUnits * dailyRate,
+            overtimeAmount: (Number(work.overtimeHours) || 0) * extraHourRate,
+            weekendBonus: bonusBreakdown.weekend,
+            holidayBonus: bonusBreakdown.holiday,
+            bonusesTotal: bonusBreakdown.total,
+            weekendDay: bonusBreakdown.weekendDay,
+            holidayDay: bonusBreakdown.holidayDay,
             paidAmount,
             pendingAmount,
             pendingWorkUnits: roundMetric(workUnits * pendingRatio, 4),
+            pendingWeekendBonus: roundMetric(bonusBreakdown.weekend * pendingRatio, 4),
+            pendingHolidayBonus: roundCurrencySafe(bonusBreakdown.holiday * pendingRatio),
+            pendingBonusesTotal: roundCurrencySafe(bonusBreakdown.total * pendingRatio),
             pendingOvertimeHours: roundMetric((Number(work.overtimeHours) || 0) * pendingRatio, 4),
             paymentStatus,
             paid: paymentStatus === 'paid'
@@ -77,6 +114,8 @@ function applyPaymentsToWorks(userWorks, totalPaid, dailyRate, extraHourRate) {
     const pendingWorkDays = pendingWorks.reduce((sum, work) => sum + (Number(work.pendingWorkUnits) || 0), 0);
     const pendingOvertimeHours = pendingWorks.reduce((sum, work) => sum + (Number(work.pendingOvertimeHours) || 0), 0);
     const pendingEarned = pendingWorks.reduce((sum, work) => sum + (Number(work.pendingAmount) || 0), 0);
+    const pendingWeekendBonus = pendingWorks.reduce((sum, work) => sum + (Number(work.pendingWeekendBonus) || 0), 0);
+    const pendingHolidayBonus = pendingWorks.reduce((sum, work) => sum + (Number(work.pendingHolidayBonus) || 0), 0);
 
     return {
         annotatedWorks,
@@ -84,23 +123,53 @@ function applyPaymentsToWorks(userWorks, totalPaid, dailyRate, extraHourRate) {
         pendingWorkDays: roundMetric(pendingWorkDays, 4),
         pendingOvertimeHours: roundMetric(pendingOvertimeHours, 4),
         pendingEarned,
+        pendingWeekendBonus: roundCurrencySafe(pendingWeekendBonus),
+        pendingHolidayBonus: roundCurrencySafe(pendingHolidayBonus),
         unappliedPaidAmount: remainingPaid
     };
+}
+
+function roundCurrencySafe(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 0;
+    return Math.round(numeric * 100) / 100;
 }
 
 function normalizeCoveredWorks(coveredWorks = []) {
     if (!Array.isArray(coveredWorks)) return [];
     return coveredWorks
-        .map((work) => ({
-            id: work?.id || '',
-            date: work?.date || '',
-            type: work?.type || '',
-            amount: Math.max(0, Number(work?.paymentAppliedAmount ?? work?.pendingAmount ?? work?.amount) || 0),
-            pendingAmountBeforePayment: Math.max(0, Number(work?.pendingAmountBeforePayment ?? work?.pendingAmount) || 0),
-            workUnits: Math.max(0, Number(work?.pendingWorkUnits ?? work?.workUnits) || 0),
-            overtimeHours: Math.max(0, Number(work?.pendingOvertimeHours ?? work?.overtimeHours) || 0)
-        }))
-        .filter((work) => work.id || work.date || work.amount > 0);
+        .map((work) => {
+            const amount = Math.max(0, Number(work?.paymentAppliedAmount ?? work?.pendingAmount ?? work?.amount) || 0);
+            const baseAmount = Math.max(0, Number(work?.pendingBaseAmount ?? work?.baseAmount) || 0);
+            const overtimeAmount = Math.max(0, Number(work?.pendingOvertimeAmount ?? work?.overtimeAmount) || 0);
+            const weekendBonus = Math.max(0, Number(work?.pendingWeekendBonus ?? work?.weekendBonus) || 0);
+            const holidayBonus = Math.max(0, Number(work?.pendingHolidayBonus ?? work?.holidayBonus) || 0);
+            const bonusesTotal = Math.max(
+                0,
+                Number(
+                    work?.pendingBonusesTotal ?? (Number.isFinite(weekendBonus + holidayBonus)
+                        ? weekendBonus + holidayBonus
+                        : 0)
+                ) || 0
+            );
+            return {
+                id: work?.id || '',
+                date: work?.date || '',
+                type: work?.type || '',
+                amount,
+                baseAmount,
+                overtimeAmount,
+                weekendBonus,
+                holidayBonus,
+                bonusesTotal,
+                pendingAmountBeforePayment: Math.max(0, Number(work?.pendingAmountBeforePayment ?? work?.pendingAmount) || 0),
+                workUnits: Math.max(0, Number(work?.pendingWorkUnits ?? work?.workUnits) || 0),
+                overtimeHours: Math.max(0, Number(work?.pendingOvertimeHours ?? work?.overtimeHours) || 0),
+                weekendDay: Boolean(work?.weekendDay),
+                holidayDay: Boolean(work?.holidayDay)
+            };
+        })
+        .filter((work) => work.id || work.date || work.amount > 0 || work.bonusesTotal > 0);
 }
 
 export async function getTeamPaymentsData(teamId) {
@@ -170,7 +239,7 @@ export async function getTeamPaymentsData(teamId) {
                 if (work.overtimeHours > 0) {
                     totalOvertimeHours += Number(work.overtimeHours) || 0;
                 }
-                totalEarned += getWorkAmount(work, dailyRate, extraHourRate);
+                totalEarned += getWorkAmountWithBonuses(work, teamData, dailyRate, extraHourRate);
             });
 
             const totalPaid = userPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
@@ -182,8 +251,12 @@ export async function getTeamPaymentsData(teamId) {
                 pendingWorkDays,
                 pendingOvertimeHours,
                 pendingEarned,
+                pendingWeekendBonus,
+                pendingHolidayBonus,
                 unappliedPaidAmount
-            } = applyPaymentsToWorks(userWorks, totalPaid, dailyRate, extraHourRate);
+            } = applyPaymentsToWorks(userWorks, totalPaid, dailyRate, extraHourRate, teamData);
+
+            const bonusSummary = summarizeBonuses(userWorks, teamData, { dailyRate, extraHourRate });
 
             return {
                 id: userId,
@@ -200,13 +273,30 @@ export async function getTeamPaymentsData(teamId) {
                 pendingWorkDays,
                 pendingOvertimeHours,
                 pendingEarned,
+                pendingWeekendBonus,
+                pendingHolidayBonus,
                 pendingWorks,
                 unappliedPaidAmount,
                 dailyRate,
                 extraHourRate,
                 privateProfile,
                 payments: userPayments,
-                works: annotatedWorks
+                works: annotatedWorks,
+                bonuses: {
+                    weekend: bonusSummary.weekend,
+                    holiday: bonusSummary.holiday,
+                    total: bonusSummary.total,
+                    weekendUnits: bonusSummary.weekendUnits,
+                    holidayUnits: bonusSummary.holidayUnits,
+                    enabled: {
+                        weekend: getBonusConfig(teamData, 'weekend').enabled,
+                        holiday: getBonusConfig(teamData, 'holiday').enabled
+                    },
+                    config: {
+                        weekend: getBonusConfig(teamData, 'weekend'),
+                        holiday: getBonusConfig(teamData, 'holiday')
+                    }
+                }
             };
         });
 
@@ -328,6 +418,16 @@ export async function registerTeamPayment(teamId, userId, amount, type, register
         }
 
         ['balanceBefore', 'balanceAfter', 'pendingWorkDaysBefore', 'pendingOvertimeHoursBefore'].forEach((field) => {
+            if (Number.isFinite(Number(metadata[field]))) {
+                paymentDoc[field] = Number(metadata[field]);
+            }
+        });
+
+        [
+            'pendingWeekendBonusBefore',
+            'pendingHolidayBonusBefore',
+            'pendingBonusesTotalBefore'
+        ].forEach((field) => {
             if (Number.isFinite(Number(metadata[field]))) {
                 paymentDoc[field] = Number(metadata[field]);
             }

@@ -94,6 +94,8 @@ service cloud.firestore {
                "companyProfile",
                "overtimeLimitHours",
                "nonWorkingDays",
+               "workBonuses",
+               "holidays",
                "projectBudget",
                "projectBudgetCurrency",
                "billingDate",

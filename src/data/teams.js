@@ -6,6 +6,10 @@ import { createNotification } from './notifications.js';
 import { createTeamPermissions, normalizeCustomTeamRoles, normalizeTeamPermissions } from './permissions.js';
 import { normalizeNonWorkingDays } from './workLimits.js';
 import { isConfiguredSystemAdmin } from './systemAdminConfig.js';
+import {
+    normalizeWorkBonuses,
+    normalizeHolidays
+} from './workBonuses.js';
 
 export const teamsStore = writable([]);
 export const selectedTeamId = writable(null);
@@ -778,6 +782,136 @@ export async function updateTeamProfile(teamId, data) {
         console.error("Error updating team profile:", error);
         throw error;
     }
+}
+
+/**
+ * Actualiza la política de pluses del equipo (fin de semana y
+ * festivo). Si se omite un tipo, se mantienen los valores previos
+ * del equipo.
+ */
+export async function updateTeamWorkBonuses(teamId, bonuses) {
+    const user = get(userStore);
+    if (!user || !teamId) throw new Error('Faltan datos para actualizar los pluses del equipo');
+
+    const teamRef = doc(db, 'teams', teamId);
+    const teamSnapshot = await getDoc(teamRef);
+    if (!teamSnapshot.exists()) throw new Error('Equipo no encontrado');
+    const teamData = teamSnapshot.data();
+
+    const previous = normalizeWorkBonuses(teamData.workBonuses);
+    const next = { ...previous };
+    for (const type of ['weekend', 'holiday']) {
+        if (bonuses && bonuses[type] && typeof bonuses[type] === 'object') {
+            const incoming = bonuses[type];
+            next[type] = {
+                enabled: typeof incoming.enabled === 'boolean'
+                    ? incoming.enabled
+                    : previous[type].enabled,
+                amount: incoming.amount !== undefined
+                    ? Math.max(0, Number(incoming.amount) || 0)
+                    : previous[type].amount
+            };
+        }
+    }
+
+    await updateDoc(teamRef, {
+        workBonuses: next,
+        updatedAt: new Date().toISOString()
+    });
+    applyTeamPatch(teamId, {
+        workBonuses: next,
+        updatedAt: new Date().toISOString()
+    });
+    return next;
+}
+
+/**
+ * Reemplaza la lista de festivos del equipo, deduplicada y validada.
+ * El backend (Firestore) sigue siendo la fuente de verdad: aquí solo
+ * normalizamos para evitar entradas duplicadas antes de escribir.
+ */
+export async function updateTeamHolidays(teamId, holidays) {
+    const user = get(userStore);
+    if (!user || !teamId) throw new Error('Faltan datos para actualizar los festivos del equipo');
+
+    const teamRef = doc(db, 'teams', teamId);
+    const teamSnapshot = await getDoc(teamRef);
+    if (!teamSnapshot.exists()) throw new Error('Equipo no encontrado');
+
+    const normalized = normalizeHolidays(Array.isArray(holidays) ? holidays : []);
+    await updateDoc(teamRef, {
+        holidays: normalized,
+        updatedAt: new Date().toISOString()
+    });
+    applyTeamPatch(teamId, {
+        holidays: normalized,
+        updatedAt: new Date().toISOString()
+    });
+    return normalized;
+}
+
+export async function addTeamHoliday(teamId, holidayInput) {
+    const user = get(userStore);
+    if (!user || !teamId) throw new Error('Faltan datos para añadir festivo');
+
+    const teamRef = doc(db, 'teams', teamId);
+    const teamSnapshot = await getDoc(teamRef);
+    if (!teamSnapshot.exists()) throw new Error('Equipo no encontrado');
+    const teamData = teamSnapshot.data();
+
+    const previous = normalizeHolidays(teamData.holidays);
+    const incomingDate = String(holidayInput?.date || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(incomingDate)) {
+        throw new Error('La fecha del festivo no es válida');
+    }
+    if (previous.some((entry) => entry.date === incomingDate)) {
+        throw new Error('Ya existe un festivo para esa fecha');
+    }
+    const incomingName = String(holidayInput?.name || '').trim().slice(0, 80);
+    const entryId = String(holidayInput?.id || `holiday-${incomingDate}-${Math.random().toString(36).slice(2, 6)}`).trim();
+    const entry = {
+        id: entryId,
+        date: incomingDate,
+        name: incomingName,
+        notes: String(holidayInput?.notes || '').trim().slice(0, 240),
+        addedAt: new Date().toISOString(),
+        addedBy: user.uid
+    };
+    const next = normalizeHolidays([...previous, entry]);
+    await updateDoc(teamRef, {
+        holidays: next,
+        updatedAt: entry.addedAt
+    });
+    applyTeamPatch(teamId, {
+        holidays: next,
+        updatedAt: entry.addedAt
+    });
+    return entry;
+}
+
+export async function removeTeamHoliday(teamId, holidayId) {
+    const user = get(userStore);
+    if (!user || !teamId || !holidayId) throw new Error('Faltan datos para eliminar festivo');
+
+    const teamRef = doc(db, 'teams', teamId);
+    const teamSnapshot = await getDoc(teamRef);
+    if (!teamSnapshot.exists()) throw new Error('Equipo no encontrado');
+    const teamData = teamSnapshot.data();
+
+    const previous = normalizeHolidays(teamData.holidays);
+    const next = previous.filter((entry) => entry.id !== holidayId);
+    if (next.length === previous.length) {
+        return null;
+    }
+    await updateDoc(teamRef, {
+        holidays: next,
+        updatedAt: new Date().toISOString()
+    });
+    applyTeamPatch(teamId, {
+        holidays: next,
+        updatedAt: new Date().toISOString()
+    });
+    return holidayId;
 }
 
 export async function removeTeamMember(teamId, memberId) {
