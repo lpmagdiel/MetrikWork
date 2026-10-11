@@ -1245,7 +1245,7 @@
               <Palette size={17} />
               Jornada y apariencia
             </span>
-            <small>Horas extra, días no laborables y color</small>
+            <small>Horas extra, días no laborables, pluses y color</small>
             <ChevronDown size={18} />
           </summary>
           <div class="settings-panel-body">

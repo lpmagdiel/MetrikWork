@@ -539,7 +539,7 @@
       ocrStatusMessage = code === OCR_ERROR_CODES.NETWORK
         ? "No se pudo conectar con el servicio de OCR"
         : code === OCR_ERROR_CODES.AUTH
-          ? "La clave de OCR fue rechazada"
+          ? "El servicio de OCR rechazo la peticion"
           : "No se pudo procesar la imagen automáticamente";
       const now = Date.now();
       if (code === OCR_ERROR_CODES.UNSUPPORTED) {

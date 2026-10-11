@@ -22,7 +22,7 @@ self.skipWaiting();
 self.clientsClaim();
 
 // Obliga al navegador a detectar esta revisión del passthrough de Firebase.
-self.__METRICWORK_SW_VERSION__ = 'firestore-passthrough-2026-09-26-2';
+self.__METRICWORK_SW_VERSION__ = 'firestore-passthrough-2026-10-11-3';
 
 // ---------- Precache ----------
 precacheAndRoute(self.__WB_MANIFEST);
