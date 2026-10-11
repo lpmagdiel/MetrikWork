@@ -1,20 +1,31 @@
 /**
  * Cliente OCR para el navegador.
  *
- * El navegador NO contiene la clave de InteliOCR: habla exclusivamente
- * con el endpoint serverless `/api/ocr`, que añade la cabecera
- * `X-API-Key` y reenvía la imagen al upstream.
+ * El navegador habla exclusivamente con el endpoint serverless
+ * `/api/ocr`, que reenvía la imagen al servicio público de
+ * `inteliOCR` (repositorio de mantenimiento del propio equipo).
  *
- * El endpoint devuelve la respuesta cruda de InteliOCR
- * (`{ success, data, meta }`); aquí la mapeamos a la forma
- * `{ text, confidence, fields, raw, meta }` que espera
+ * El endpoint `/api/ocr` es sin estado y sin API key: el upstream es
+ * el servicio abierto desplegado en Dockploy (sin auth, con rate-limit
+ * por IP). Por seguridad y para evitar exponer la URL del upstream y
+ * quemar la cuota de CORS del usuario, mantenemos el proxy en el
+ * servidor.
+ *
+ * El servidor puede elegir engine (`basic` o `vision`) y lengua
+ * (`spa` o `eng`) por variable de entorno; nosotros seguimos hablando
+ * con un único contrato `{ success, data, meta }`. `mapDataToFields()`
+ * y `buildRawText()` traducen esa respuesta a la forma
+ * `{ text, confidence, fields, raw, meta }` que consume
  * `applyOcrFields()` en `team-expenses.svelte`.
  *
  * Variables de entorno del servidor (NO expuestas al cliente):
- *   OCR_API_KEY    - clave InteliOCR (`ioc_<prefix>_<secret>`)
- *   OCR_ENDPOINT   - URL base opcional
+ *   OCR_ENDPOINT   - URL base del servicio upstream (opcional)
+ *   OCR_ENGINE     - 'basic' | 'vision' | 'auto' (defecto 'basic')
+ *   OCR_LANG       - 'spa' | 'eng' (defecto 'spa')
  *
- * El cliente `InteliOCR` ya no se usa directamente desde el navegador.
+ * Si el upstream devuelve el engine 'tesseract.js' (modo `basic`),
+ * los campos estructurados los extrae `receiptParser.js` en el
+ * servidor y llegan ya mapeados al esquema del modo `vision`.
  */
 
 const OCR_LOG_PREFIX = '[OCR]';
@@ -204,7 +215,7 @@ async function postToProxy(source, type) {
     try {
         // Si `source` es una URL http(s), la pasamos como JSON.
         // Si es Blob/File, la enviamos como multipart/form-data directo
-        // al proxy (que la reenviará a InteliOCR).
+        // al proxy (que la reenviará a inteliOCR).
         if (typeof source === 'string') {
             const response = await fetch(OCR_ENDPOINT_PATH, {
                 method: 'POST',
@@ -273,7 +284,8 @@ export function getOcrStatus() {
         configured: true,
         supported: true,
         ready: true,
-        endpoint: OCR_ENDPOINT_PATH
+        endpoint: OCR_ENDPOINT_PATH,
+        service: 'inteliOCR (public, no auth)'
     };
 }
 

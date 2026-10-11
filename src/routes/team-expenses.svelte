@@ -137,13 +137,13 @@
   const OCR_ALERT_DEDUPE_MS = 2 * 60 * 1000;
   const OCR_UNCONFIGURED_TITLE = "Escaneo automático no disponible";
   const OCR_UNCONFIGURED_BODY =
-    "Falta configurar la clave de OCR (OCR_API_KEY) en el servidor. Rellena los campos a mano.";
+    "El OCR no responde desde el servidor. Revisa OCR_ENDPOINT / OCR_ENGINE / OCR_LANG en las variables del despliegue y vuelve a intentarlo.";
   const OCR_NETWORK_TITLE = "OCR sin conexión";
   const OCR_NETWORK_BODY =
     "No se pudo conectar con el servicio de OCR. Comprueba la conexión y vuelve a intentarlo.";
-  const OCR_AUTH_TITLE = "Clave de OCR no válida";
+  const OCR_AUTH_TITLE = "Servicio de OCR no disponible";
   const OCR_AUTH_BODY =
-    "La clave de OCR configurada fue rechazada por el servicio. Revisa OCR_API_KEY.";
+    "El servicio de OCR rechazo la peticion. Si usas motor 'vision' prueba a cambiar OCR_ENGINE=basic (o 'auto') en el servidor.";
   const OCR_GENERIC_TITLE = "OCR no disponible";
   const OCR_GENERIC_BODY =
     "No se pudo procesar la imagen automáticamente. Rellena los campos a mano.";
