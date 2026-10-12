@@ -138,6 +138,29 @@ function buildRawText(data) {
     return lines.join('\n');
 }
 
+/**
+ * Texto literal devuelto por el OCR. No debe confundirse con `buildRawText`,
+ * que es solo una representación de los campos estructurados para la UI.
+ */
+function getRawOcrText(data) {
+    if (!data || typeof data !== 'object') return '';
+    const value = data.raw_text ?? data.text ?? '';
+    return typeof value === 'string' ? value.replace(/\r\n?/g, '\n').trim() : '';
+}
+
+/**
+ * Un array vacío, o entradas sin una descripción, no cuentan como un listado
+ * de artículos que se pueda presentar al usuario.
+ */
+function hasDetectedItemList(data) {
+    if (!Array.isArray(data?.items)) return false;
+    return data.items.some((item) => {
+        if (!item || typeof item !== 'object') return false;
+        const description = item.description ?? item.name ?? item.title ?? '';
+        return typeof description === 'string' && description.trim().length > 0;
+    });
+}
+
 function classifyError(status, message) {
     if (status === 401 || status === 403) return OCR_ERROR_CODES.AUTH;
     if (status === 404 || status === 405) return OCR_ERROR_CODES.MODEL;
@@ -185,6 +208,7 @@ export async function recognizeImage(source, options = {}) {
         const meta = payload?.meta || {};
         const fields = mapDataToFields(data);
         const text = buildRawText(data);
+        const rawText = getRawOcrText(data);
         // La API no expone confidence por campo; calculamos un proxy a
         // partir del número de campos extraídos (con `total` pondera más).
         const hasTotal = fields.amount != null;
@@ -195,6 +219,8 @@ export async function recognizeImage(source, options = {}) {
         notifyProgress({ status: 'done', progress: 1 });
         return {
             text,
+            rawText,
+            hasItemList: hasDetectedItemList(data),
             confidence,
             fields,
             raw: data,
@@ -303,4 +329,4 @@ export function getOcrStatus() {
     };
 }
 
-export { OcrError, OCR_ERROR_CODES };
+export { OcrError, OCR_ERROR_CODES, getRawOcrText, hasDetectedItemList };

@@ -75,6 +75,7 @@
     "MetricWork";
 
   const MAX_RECEIPTS = 10;
+  const MAX_EXPENSE_DESCRIPTION_LENGTH = 600;
 
   const sourceLabels = {
     manual: "Manual",
@@ -551,6 +552,9 @@
         receiptName: receipt.name
       };
       applyOcrFields(fields);
+      if (!result.hasItemList) {
+        appendRawOcrTextToDescription(result.rawText);
+      }
       ocrStatus = { status: "done", progress: 1 };
       ocrStatusMessage = `Escaneo completado (${filledFields}/${totalFields} campos)`;
     } catch (error) {
@@ -618,6 +622,22 @@
       next.category = true;
     }
     ocrAutoFilledFields = { ...ocrAutoFilledFields, ...next };
+  }
+
+  // En altas nuevas, conservamos el texto del ticket cuando el OCR no ha
+  // conseguido separar sus artículos. Así se mantiene el detalle disponible
+  // sin sustituir una descripción que la persona ya hubiese escrito.
+  function appendRawOcrTextToDescription(rawText) {
+    if (editingExpense || typeof rawText !== "string") return;
+    const scannedText = rawText.trim();
+    if (!scannedText || expenseForm.description.includes(scannedText)) return;
+
+    const currentDescription = expenseForm.description.trimEnd();
+    const prefix = currentDescription ? "\n\nTexto del escaneo:\n" : "Texto del escaneo:\n";
+    const availableLength = MAX_EXPENSE_DESCRIPTION_LENGTH - currentDescription.length - prefix.length;
+    if (availableLength <= 0) return;
+
+    expenseForm.description = `${currentDescription}${prefix}${scannedText.slice(0, availableLength)}`;
   }
 
   function openReceiptLightbox(expense, index = 0) {
