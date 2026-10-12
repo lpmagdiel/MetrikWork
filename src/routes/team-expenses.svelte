@@ -126,6 +126,8 @@
   let lightboxRegistered = $state(false);
 
   let scanningReceiptId = $state("");
+  let ocrQueue = $state([]);
+  let isProcessingOcrQueue = $state(false);
   let ocrAutoFilledFields = $state({});
   let ocrLastSummary = $state(null);
   let ocrStatus = $state({ status: "idle", progress: 0 });
@@ -461,10 +463,9 @@
           const url = await uploader(resized, CLOUDINARY_PRESET_EXPENSES);
           const newReceipt = { url, name: file.name };
           receipts = [...receipts, newReceipt];
-          // Dispara el OCR en segundo plano; no bloquea el alta del
-          // siguiente recibo. El primer escaneo puede tardar varios
-          // segundos mientras se carga el modelo del idioma.
-          handleScanReceipt(newReceipt).catch(() => {});
+          // El OCR procesa una cola: así, al adjuntar varios recibos,
+          // ninguno se pierde mientras el anterior está en curso.
+          enqueueReceiptForOcr(newReceipt);
         } catch (error) {
           console.error("Error uploading expense receipt:", error);
           showErrorAlert(
@@ -494,8 +495,28 @@
     ocrSupported = isOcrLikelySupported();
   });
 
+  function enqueueReceiptForOcr(receipt) {
+    if (!receipt?.url || ocrQueue.some((item) => item.url === receipt.url)) return;
+    ocrQueue = [...ocrQueue, receipt];
+    void processOcrQueue();
+  }
+
+  async function processOcrQueue() {
+    if (isProcessingOcrQueue) return;
+    isProcessingOcrQueue = true;
+    try {
+      while (ocrQueue.length) {
+        const [receipt, ...remaining] = ocrQueue;
+        ocrQueue = remaining;
+        await handleScanReceipt(receipt);
+      }
+    } finally {
+      isProcessingOcrQueue = false;
+    }
+  }
+
   async function handleScanReceipt(receipt) {
-    if (!receipt?.url || scanningReceiptId) return;
+    if (!receipt?.url) return;
     if (typeof window === "undefined") return;
 
     if (!ocrSupported) {

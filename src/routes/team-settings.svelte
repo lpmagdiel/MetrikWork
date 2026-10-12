@@ -68,6 +68,9 @@
   let canViewSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "view"));
   let canCreateSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "create"));
   let canEditSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "edit"));
+  // Las reglas de Firestore permiten crear o editar esta política; la UI
+  // debe reflejar ambos permisos para no bloquear una escritura autorizada.
+  let canManageWorkPolicy = $derived(canCreateSettings || canEditSettings);
   let canDeleteSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "delete"));
   let teamId = $derived(team?.id || $selectedTeamId);
 
@@ -485,7 +488,7 @@
   }
 
   async function handleSaveWorkBonuses() {
-    if (!team?.id || !canEditSettings || isSavingWorkPolicy) return;
+    if (!team?.id || !canManageWorkPolicy || isSavingWorkPolicy) return;
     isSavingWorkPolicy = true;
     try {
       const next = await import("../data/teams.js").then((mod) =>
@@ -519,7 +522,7 @@
   }
 
   async function handleAddHoliday() {
-    if (!team?.id || !canEditSettings || isSavingWorkPolicy) return;
+    if (!team?.id || !canManageWorkPolicy || isSavingWorkPolicy) return;
     if (!newHolidayDate || !/^\d{4}-\d{2}-\d{2}$/.test(newHolidayDate)) {
       await showErrorAlert(
         "Fecha no válida",
@@ -551,7 +554,7 @@
   }
 
   async function handleRemoveHoliday(holiday) {
-    if (!team?.id || !canEditSettings || !holiday?.id || isSavingWorkPolicy) return;
+    if (!team?.id || !canManageWorkPolicy || !holiday?.id || isSavingWorkPolicy) return;
     const confirmed = await confirmAlert({
       title: "Quitar festivo",
       text: `¿Eliminar el festivo "${holiday.name || formatHolidayDate(holiday.date)}"?`,
@@ -1322,7 +1325,7 @@
                     <input
                       type="checkbox"
                       bind:checked={weekendBonusEnabled}
-                      disabled={!canEditSettings}
+                      disabled={!canManageWorkPolicy}
                     />
                     <span class="bonus-toggle-label">Plus de fin de semana</span>
                   </label>
@@ -1332,7 +1335,7 @@
                       min="0"
                       step="0.5"
                       bind:value={weekendBonusAmount}
-                      disabled={!canEditSettings || !weekendBonusEnabled}
+                      disabled={!canManageWorkPolicy || !weekendBonusEnabled}
                       aria-label="Importe del plus de fin de semana por unidad de jornada"
                     />
                     <span class="bonus-amount-suffix">€/jornada</span>
@@ -1347,7 +1350,7 @@
                     <input
                       type="checkbox"
                       bind:checked={holidayBonusEnabled}
-                      disabled={!canEditSettings}
+                      disabled={!canManageWorkPolicy}
                     />
                     <span class="bonus-toggle-label">Plus de festivo</span>
                   </label>
@@ -1357,7 +1360,7 @@
                       min="0"
                       step="0.5"
                       bind:value={holidayBonusAmount}
-                      disabled={!canEditSettings || !holidayBonusEnabled}
+                      disabled={!canManageWorkPolicy || !holidayBonusEnabled}
                       aria-label="Importe del plus de festivo por unidad de jornada"
                     />
                     <span class="bonus-amount-suffix">€/jornada</span>
@@ -1368,7 +1371,7 @@
                   completas, medias o variables; las horas extra siguen pagando la tarifa extra.
                 </p>
               </div>
-              {#if canEditSettings}
+              {#if canManageWorkPolicy}
                 <button
                   type="button"
                   class="secondary-btn compact-btn bonus-save-btn"
@@ -1394,7 +1397,7 @@
                           <small>{holiday.notes}</small>
                         {/if}
                       </div>
-                      {#if canEditSettings}
+                      {#if canManageWorkPolicy}
                         <button
                           type="button"
                           class="link-btn danger"
@@ -1412,7 +1415,7 @@
               {:else}
                 <p class="field-help">Aún no has definido festivos. Añádelos abajo.</p>
               {/if}
-              {#if canEditSettings}
+              {#if canManageWorkPolicy}
                 <div class="holiday-form">
                   <input
                     type="date"

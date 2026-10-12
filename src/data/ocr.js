@@ -56,7 +56,17 @@ function toNumber(value) {
     if (value === null || value === undefined) return null;
     if (typeof value === 'number') return Number.isFinite(value) ? value : null;
     if (typeof value === 'string') {
-        const cleaned = value.replace(/[^\d,.\-]/g, '').replace(',', '.');
+        let cleaned = value.replace(/[^\d,.\-]/g, '');
+        // El motor basic suele devolver números, pero mantenemos este
+        // normalizador para respuestas que traigan el formato europeo
+        // (p. ej. "1.234,56") sin convertirlas en NaN.
+        if (cleaned.includes(',') && cleaned.includes('.')) {
+            cleaned = cleaned.lastIndexOf(',') > cleaned.lastIndexOf('.')
+                ? cleaned.replace(/\./g, '').replace(',', '.')
+                : cleaned.replace(/,/g, '');
+        } else if (cleaned.includes(',')) {
+            cleaned = cleaned.replace(',', '.');
+        }
         const parsed = Number(cleaned);
         return Number.isFinite(parsed) ? parsed : null;
     }
@@ -253,10 +263,14 @@ async function readJson(response) {
     let payload = null;
     try { payload = await response.json(); } catch (_) { /* non-JSON */ }
     if (!response.ok) {
-        const err = new Error(payload?.error || `HTTP ${response.status}`);
+        const apiError = payload?.error;
+        const message = typeof apiError === 'string'
+            ? apiError
+            : apiError?.message || `HTTP ${response.status}`;
+        const err = new Error(message);
         err.status = response.status;
-        err.code = payload?.code;
-        err.requestId = payload?.requestId || null;
+        err.code = apiError?.code || payload?.code;
+        err.requestId = payload?.meta?.request_id || payload?.requestId || null;
         throw err;
     }
     return payload;
