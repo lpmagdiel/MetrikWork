@@ -12,6 +12,7 @@
     Trash2,
     Users,
   } from "lucide-svelte";
+  import { navigateTo } from "../router.js";
   import {
     notesStore,
     addNote,
@@ -82,6 +83,11 @@
   let selectedDateLabel = $derived(formatDisplayDate(selectedDate));
   let pendingTasksCount = $derived(
     assignedTasks.filter((task) => task.status !== "completed").length,
+  );
+  let planningTeams = $derived(
+    $teamsStore
+      .filter((team) => team?.admin === $userStore?.uid && team.active !== false && team.hidden !== true)
+      .sort((a, b) => (a.name || a.team || "").localeCompare(b.name || b.team || "", "es")),
   );
 
   $effect(() => {
@@ -178,6 +184,11 @@
 
   function isToday(day) {
     return day?.dateKey === toDateKey(new Date());
+  }
+
+  function openTeamPlanning(teamId) {
+    if (!teamId) return;
+    navigateTo(`/teams/${teamId}/planning`);
   }
 
   async function handleAddNote() {
@@ -277,6 +288,30 @@
         {/each}
       </div>
     </section>
+
+    {#if planningTeams.length}
+      <section class="planning-panel">
+        <div class="section-heading compact">
+          <div>
+            <p>Organización del equipo</p>
+            <h2>Planning de equipos</h2>
+          </div>
+          <CalendarDays size={20} class="muted-icon" />
+        </div>
+        <div class="planning-team-list">
+          {#each planningTeams as team (team.id)}
+            <button type="button" class="planning-team-link" onclick={() => openTeamPlanning(team.id)}>
+              <span class="planning-team-icon"><Users size={18} /></span>
+              <span class="planning-team-copy">
+                <strong>{team.name || team.team || "Equipo"}</strong>
+                <small>Abrir calendario de jornadas</small>
+              </span>
+              <ChevronRight size={19} aria-hidden="true" />
+            </button>
+          {/each}
+        </div>
+      </section>
+    {/if}
 
     <section class="day-panel">
       <div class="section-heading compact">
@@ -491,7 +526,8 @@
 
   .calendar-panel,
   .day-panel,
-  .records-panel {
+  .records-panel,
+  .planning-panel {
     background: var(--bg-card);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-card);
@@ -520,6 +556,63 @@
     display: flex;
     gap: 8px;
   }
+
+  .planning-team-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .planning-team-link {
+    width: 100%;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 11px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-align: left;
+  }
+
+  .planning-team-link:hover {
+    border-color: var(--accent-color);
+    background: var(--bg-success-subtle);
+  }
+
+  .planning-team-link:focus-visible {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 2px;
+  }
+
+  .planning-team-icon {
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    border-radius: 10px;
+    color: var(--accent-ink);
+    background: var(--bg-accent-subtle);
+  }
+
+  .planning-team-copy {
+    min-width: 0;
+    flex: 1;
+    display: grid;
+    gap: 2px;
+  }
+
+  .planning-team-copy strong,
+  .planning-team-copy small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .planning-team-copy strong { font-size: 14px; }
+  .planning-team-copy small { color: var(--text-secondary); font-size: 12px; }
 
   .icon-btn {
     width: 36px;
