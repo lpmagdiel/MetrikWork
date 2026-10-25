@@ -1,7 +1,7 @@
 <script>
   // @ts-nocheck
 
-  import { onDestroy } from "svelte";
+  import { onDestroy, tick } from "svelte";
   import {
     BarChart3,
     Crosshair,
@@ -97,10 +97,13 @@
   let remoteProfile = $state(null);
   let localVideo = $state();
   let remoteVideo = $state();
+  let remoteAudio = $state();
+  let remoteAudioNeedsInteraction = $state(false);
   let localStream = null;
   let remoteStream = null;
   let peerConnection = null;
   let candidateUnsubscribe = null;
+  let connectionFailureTimer = null;
   let hasHandledRemoteDescription = false;
   let currentCallId = "";
   let pendingRemoteCandidates = [];
@@ -118,8 +121,22 @@
   let remoteVideoEnabled = $derived(activeCall?.media?.[remoteUserId]?.videoEnabled !== false);
   let showRemoteAvatar = $derived(!remoteHasVideo || !remoteVideoEnabled);
   const pageSize = 20;
+  // TURN es opcional para no modificar los despliegues actuales. Sin él, WebRTC
+  // solo puede conectar directamente y algunas redes móviles, VPN o NAT simétricos
+  // no tendrán una ruta de audio/vídeo disponible.
+  const turnUrls = (import.meta.env.VITE_TURN_URL || "")
+    .split(",")
+    .map((url) => url.trim())
+    .filter(Boolean);
+  const turnUsername = import.meta.env.VITE_TURN_USERNAME || "";
+  const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL || "";
   const rtcConfig = {
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      ...(turnUrls.length && turnUsername && turnCredential
+        ? [{ urls: turnUrls, username: turnUsername, credential: turnCredential }]
+        : []),
+    ],
   };
   let appliedRouteParamsKey = $state("");
 
@@ -529,24 +546,108 @@
 
   async function prepareMedia() {
     localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+    if (!localStream.getAudioTracks().length) {
+      throw new Error("No se ha podido obtener una pista de audio del micrófono.");
+    }
     remoteStream = new MediaStream();
+    // Al aceptar, los nodos de vídeo se crean tras cambiar el estado de la llamada.
+    // Esperar al siguiente render evita que una asignación se pierda de forma intermitente.
+    await tick();
     if (localVideo) localVideo.srcObject = localStream;
-    if (remoteVideo) remoteVideo.srcObject = remoteStream;
+    attachRemoteStream();
+    await playRemoteAudio();
   }
 
   function createPeerConnection(candidateSide) {
-    peerConnection = new RTCPeerConnection(rtcConfig);
-    localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
-    peerConnection.ontrack = (event) => {
-      event.streams[0].getTracks().forEach((track) => remoteStream.addTrack(track));
+    const connection = new RTCPeerConnection(rtcConfig);
+    peerConnection = connection;
+    localStream.getTracks().forEach((track) => connection.addTrack(track, localStream));
+    connection.ontrack = (event) => {
+      if (!remoteStream) return;
+      // event.streams no está garantizado por todos los navegadores. Usar la
+      // pista directamente evita perder el audio cuando ese array llega vacío.
+      if (!remoteStream.getTracks().some((track) => track.id === event.track.id)) {
+        remoteStream.addTrack(event.track);
+      }
       remoteHasVideo = remoteStream.getVideoTracks().some((track) => track.readyState === "live");
-      if (remoteVideo) remoteVideo.srcObject = remoteStream;
+      attachRemoteStream();
+      playRemoteAudio();
     };
-    peerConnection.onicecandidate = (event) => {
+    connection.onicecandidate = (event) => {
       if (event.candidate && privateChatId && currentCallId) {
         addCallCandidate(privateChatId, currentCallId, candidateSide, event.candidate).catch(console.error);
       }
     };
+    connection.onconnectionstatechange = () => handleConnectionStateChange(connection);
+  }
+
+  function attachRemoteStream() {
+    if (remoteVideo) remoteVideo.srcObject = remoteStream;
+    if (remoteAudio) remoteAudio.srcObject = remoteStream;
+  }
+
+  async function playRemoteAudio() {
+    if (!remoteAudio) return;
+    try {
+      await remoteAudio.play();
+      remoteAudioNeedsInteraction = false;
+    } catch (error) {
+      // Safari y algunos navegadores móviles requieren una interacción explícita.
+      // Conservamos un control visible para desbloquear el sonido sin perder la llamada.
+      remoteAudioNeedsInteraction = true;
+      console.warn("El navegador bloqueó la reproducción automática del audio remoto:", error);
+    }
+  }
+
+  async function addRemoteCandidate(candidate) {
+    if (!candidate || !peerConnection) return;
+    if (!peerConnection.remoteDescription) {
+      pendingRemoteCandidates = [...pendingRemoteCandidates, candidate];
+      return;
+    }
+    try {
+      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (error) {
+      // Una candidata obsoleta no debe impedir que las demás completen la conexión.
+      console.warn("No se pudo añadir una candidata ICE remota:", error);
+    }
+  }
+
+  async function flushPendingRemoteCandidates() {
+    const candidates = pendingRemoteCandidates;
+    pendingRemoteCandidates = [];
+    await Promise.all(candidates.map((candidate) => addRemoteCandidate(candidate)));
+  }
+
+  function handleConnectionStateChange(connection) {
+    if (connection !== peerConnection) return;
+    const state = connection.connectionState;
+    if (state === "connected") {
+      clearTimeout(connectionFailureTimer);
+      connectionFailureTimer = null;
+      return;
+    }
+    if (state === "failed") {
+      handleConnectionFailure();
+      return;
+    }
+    if (state === "disconnected" && !connectionFailureTimer) {
+      connectionFailureTimer = setTimeout(() => {
+        if (connection === peerConnection && connection.connectionState === "disconnected") {
+          handleConnectionFailure();
+        }
+      }, 8000);
+    }
+  }
+
+  function handleConnectionFailure() {
+    clearTimeout(connectionFailureTimer);
+    connectionFailureTimer = null;
+    showErrorAlert(
+      "No se pudo establecer la llamada",
+      "La red no ha permitido conectar el audio y el vídeo. Comprueba la conexión e inténtalo de nuevo.",
+    );
+    cleanupCall(true);
   }
 
   async function startCall() {
@@ -574,11 +675,7 @@
         status: "ringing",
       });
       candidateUnsubscribe = subscribeToCallCandidates(chatId, currentCallId, "receiver", async (candidate) => {
-        if (peerConnection?.remoteDescription) {
-          await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-        } else {
-          pendingRemoteCandidates = [...pendingRemoteCandidates, candidate];
-        }
+        await addRemoteCandidate(candidate);
       });
     } catch (error) {
       console.error("Error starting call", error);
@@ -606,7 +703,7 @@
         status: "active",
       });
       candidateUnsubscribe = subscribeToCallCandidates(privateChatId, activeCall.id, "caller", async (candidate) => {
-        await peerConnection?.addIceCandidate(new RTCIceCandidate(candidate));
+        await addRemoteCandidate(candidate);
       });
       callStatus = "active";
     } catch (error) {
@@ -634,12 +731,7 @@
     if (isCaller && peerConnection && call.answer && !hasHandledRemoteDescription) {
       hasHandledRemoteDescription = true;
       await peerConnection.setRemoteDescription(new RTCSessionDescription(call.answer));
-      await Promise.all(
-        pendingRemoteCandidates.map((candidate) =>
-          peerConnection.addIceCandidate(new RTCIceCandidate(candidate)),
-        ),
-      );
-      pendingRemoteCandidates = [];
+      await flushPendingRemoteCandidates();
       callStatus = "active";
     }
   }
@@ -659,6 +751,8 @@
     }
     candidateUnsubscribe?.();
     candidateUnsubscribe = null;
+    clearTimeout(connectionFailureTimer);
+    connectionFailureTimer = null;
     peerConnection?.close();
     peerConnection = null;
     localStream?.getTracks().forEach((track) => track.stop());
@@ -666,6 +760,7 @@
     remoteStream = null;
     if (localVideo) localVideo.srcObject = null;
     if (remoteVideo) remoteVideo.srcObject = null;
+    if (remoteAudio) remoteAudio.srcObject = null;
     currentCallId = "";
     pendingRemoteCandidates = [];
     remoteHasVideo = false;
@@ -674,6 +769,7 @@
     callStatus = "idle";
     isMuted = false;
     isCameraOff = false;
+    remoteAudioNeedsInteraction = false;
   }
 
   function toggleMute() {
@@ -930,10 +1026,18 @@
             bind:this={remoteVideo}
             autoplay
             playsinline
+            muted
             class:hidden-video={showRemoteAvatar}
           ></video>
           <video bind:this={localVideo} autoplay playsinline muted class="local-video"></video>
+          <audio bind:this={remoteAudio} autoplay playsinline></audio>
         </div>
+
+        {#if remoteAudioNeedsInteraction}
+          <button class="enable-audio" type="button" onclick={playRemoteAudio}>
+            Activar audio
+          </button>
+        {/if}
 
         <div class="call-controls">
           <button type="button" onclick={toggleMute} title={isMuted ? "Activar micrófono" : "Silenciar"}>
@@ -1833,6 +1937,15 @@
     border-radius: 14px;
     border: 2px solid rgba(255, 255, 255, 0.28);
     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+  }
+
+  .enable-audio {
+    margin: 12px auto 0;
+    padding: 10px 16px;
+    border-radius: 10px;
+    background: #1f9d55;
+    color: white;
+    font-weight: 800;
   }
 
   .call-controls,
