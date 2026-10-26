@@ -100,13 +100,13 @@
   let team = $derived($selectedTeam);
   let teamId = $derived(team?.id || $selectedTeamId);
   let currency = $derived(team?.projectBudgetCurrency || "EUR");
-  let canViewPayments = $derived(hasTeamPermission(team, $userStore?.uid, "payments", "view"));
-  let canCreateExpenses = $derived(hasTeamPermission(team, $userStore?.uid, "payments", "create"));
-  let canEditExpenses = $derived(hasTeamPermission(team, $userStore?.uid, "payments", "edit"));
-  let canDeleteExpenses = $derived(hasTeamPermission(team, $userStore?.uid, "payments", "delete"));
+  let canViewExpenses = $derived(hasTeamPermission(team, $userStore?.uid, "expenses", "view"));
+  let canCreateExpenses = $derived(hasTeamPermission(team, $userStore?.uid, "expenses", "create"));
+  let canEditExpenses = $derived(hasTeamPermission(team, $userStore?.uid, "expenses", "edit"));
+  let canDeleteExpenses = $derived(hasTeamPermission(team, $userStore?.uid, "expenses", "delete"));
   let canViewStats = $derived(hasTeamPermission(team, $userStore?.uid, "stats", "view"));
   let canViewInventory = $derived(hasTeamPermission(team, $userStore?.uid, "inventory", "view"));
-  let canViewExpenses = $derived(canViewPayments || canViewStats);
+  let canAccessExpenses = $derived(canViewExpenses || canViewStats);
   let includeInventory = $derived(canViewInventory || canViewStats);
 
   let showExpenseForm = $state(false);
@@ -220,7 +220,7 @@
   let maxCategoryAmount = $derived(Math.max(...categoryBreakdown.map((item) => item.amount), 1));
 
   $effect(() => {
-    if (!teamId || !canViewExpenses) return subscribeToTeamExpenses(null);
+    if (!teamId || !canAccessExpenses) return subscribeToTeamExpenses(null);
     return subscribeToTeamExpenses(teamId, { includeInventory });
   });
 
@@ -241,7 +241,7 @@
   });
 
   $effect(() => {
-    if (!teamId || !canViewExpenses) {
+    if (!teamId || !canAccessExpenses) {
       subscribeToTeamLocations(null);
       return;
     }
@@ -797,7 +797,7 @@
 <div class="team-expenses-page">
   <Toast bind:show={showToast} message={messageToast} type={typeToast} />
 
-  {#if team && canViewExpenses}
+  {#if team && canAccessExpenses}
     <main class="expenses-content">
       <TitleHeader title="Gastos" description={team.name || team.team || "Equipo"} action={goToTeamHome} />
 
@@ -1246,7 +1246,7 @@
     <section class="empty-state page-state">
       <Users size={52} />
       <h2>Sin permiso</h2>
-      <p>Necesitas permiso para ver pagos o estadísticas del equipo.</p>
+      <p>Necesitas permiso para ver gastos o estadísticas del equipo.</p>
       <button onclick={goToTeamHome}>Volver al equipo</button>
     </section>
   {:else}

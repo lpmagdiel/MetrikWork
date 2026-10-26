@@ -5,25 +5,41 @@
     ChevronLeft,
     CircleSlash,
     DollarSign,
+    KeyRound,
     Plus,
     ReceiptText,
     RefreshCw,
     Search,
     ShieldCheck,
+    UserRound,
     Users,
     WalletCards,
     X,
   } from "lucide-svelte";
   import TitleHeader from "../components/TitleHeader.svelte";
+  import SliceContainer from "../components/SliceContainer.svelte";
   import { navigateTo } from "../router.js";
   import {
     adminTeamsStore,
+    adminUsersStateStore,
+    adminUsersStore,
     getTeamMemberLimitLabel,
+    loadAdminUsers,
+    setUserPassword,
     subscribeToAdminTeams,
     systemAdminStore,
   } from "../data/stores.js";
+  import { confirmAlert, showSuccessAlert } from "../data/alerts.js";
+  import { generateSecurePassword, getPasswordStrength } from "../helpers/passwords.js";
 
   let teamSearch = $state("");
+  let userSearch = $state("");
+  let showPasswordPanel = $state(false);
+  let selectedUser = $state(null);
+  let newPassword = $state("");
+  let confirmPassword = $state("");
+  let passwordError = $state("");
+  let isSavingPassword = $state(false);
 
   let filteredTeams = $derived.by(() => {
     const search = normalizeSearch(teamSearch);
@@ -38,6 +54,21 @@
     );
   });
 
+  let filteredUsers = $derived.by(() => {
+    const search = normalizeSearch(userSearch);
+    if (!search) return $adminUsersStore;
+
+    return $adminUsersStore.filter((user) =>
+      normalizeSearch([
+        user.name,
+        user.email,
+        user.uid,
+      ].join(" ")).includes(search),
+    );
+  });
+
+  let passwordStrength = $derived(getPasswordStrength(newPassword));
+
   let summary = $derived.by(() => {
     const teams = $adminTeamsStore;
     return {
@@ -46,6 +77,7 @@
         (total, team) => total + (Array.isArray(team.members) ? team.members.length : 0),
         0,
       ),
+      users: $adminUsersStore.length,
     };
   });
 
@@ -53,6 +85,100 @@
     if (!$systemAdminStore.isAdmin) return;
     return subscribeToAdminTeams();
   });
+
+  $effect(() => {
+    if (!$systemAdminStore.isAdmin) return;
+    reloadUsers();
+  });
+
+  async function reloadUsers() {
+    try {
+      await loadAdminUsers();
+    } catch (error) {
+      console.error("Error loading admin users:", error);
+    }
+  }
+
+  function openPasswordPanel(user) {
+    selectedUser = user;
+    newPassword = "";
+    confirmPassword = "";
+    passwordError = "";
+    showPasswordPanel = true;
+  }
+
+  function closePasswordPanel() {
+    showPasswordPanel = false;
+    selectedUser = null;
+    newPassword = "";
+    confirmPassword = "";
+    passwordError = "";
+  }
+
+  function fillGeneratedPassword() {
+    newPassword = generateSecurePassword();
+    confirmPassword = newPassword;
+    passwordError = "";
+  }
+
+  async function savePassword() {
+    if (isSavingPassword || !selectedUser) return;
+    passwordError = "";
+
+    if (newPassword !== confirmPassword) {
+      passwordError = "Las contraseñas no coinciden.";
+      return;
+    }
+
+    const target = selectedUser;
+
+    const confirmed = await confirmAlert({
+      title: "Cambiar la contraseña",
+      text: `Se asignará una contraseña nueva a ${getUserDisplayName(target)}. El usuario tendrá que iniciar sesión de nuevo con ella.`,
+      confirmButtonText: "Sí, cambiar",
+      danger: true,
+    });
+    if (!confirmed) return;
+
+    isSavingPassword = true;
+
+    try {
+      await setUserPassword(target.uid, newPassword);
+      isSavingPassword = false;
+      closePasswordPanel();
+      showSuccessAlert(
+        "Contraseña actualizada",
+        `La contraseña de ${getUserDisplayName(target)} se ha cambiado correctamente.`,
+      );
+      await reloadUsers();
+    } catch (error) {
+      console.error("Error changing user password:", error);
+      passwordError = error.message || "No se pudo cambiar la contraseña.";
+    } finally {
+      isSavingPassword = false;
+    }
+  }
+
+  function getUserDisplayName(user) {
+    return user?.name || user?.email || "Usuario";
+  }
+
+  function getUserProviderLabel(user) {
+    if (user?.hasPassword) return "Correo y contraseña";
+    if ((user?.providers || []).includes("google.com")) return "Google";
+    return "Sin acceso";
+  }
+
+  function formatDate(value) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+
+    return new Intl.DateTimeFormat("es-ES", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(date);
+  }
 
   function normalizeSearch(value) {
     return String(value || "")
@@ -138,6 +264,10 @@
         <span>Miembros</span>
         <strong>{summary.members}</strong>
       </article>
+      <article>
+        <span>Usuarios</span>
+        <strong>{summary.users}</strong>
+      </article>
     </section>
 
     <section class="teams-section">
@@ -214,7 +344,159 @@
         {/if}
       </div>
     </section>
+
+    <section class="users-section">
+      <div class="section-heading">
+        <div>
+          <h2>Usuarios</h2>
+          <p>{filteredUsers.length} de {$adminUsersStore.length} usuarios</p>
+        </div>
+        <div class="team-search">
+          <Search size={18} />
+          <input
+            type="search"
+            bind:value={userSearch}
+            placeholder="Buscar usuario"
+            aria-label="Buscar usuario"
+          />
+          {#if userSearch}
+            <button type="button" onclick={() => (userSearch = "")} aria-label="Limpiar búsqueda">
+              <X size={16} />
+            </button>
+          {/if}
+        </div>
+      </div>
+
+      <div class="user-list">
+        {#if $adminUsersStateStore.loading}
+          <article class="empty-card compact">
+            <span class="spin"><RefreshCw size={26} /></span>
+            <p>Cargando usuarios...</p>
+          </article>
+        {:else if $adminUsersStateStore.error}
+          <article class="empty-card compact">
+            <CircleSlash size={28} />
+            <p>{$adminUsersStateStore.error}</p>
+            <button type="button" onclick={reloadUsers}>
+              <RefreshCw size={16} />
+              <span>Reintentar</span>
+            </button>
+          </article>
+        {:else if $adminUsersStore.length === 0}
+          <article class="empty-card compact">
+            <UserRound size={30} />
+            <p>Aún no hay usuarios registrados en la aplicación.</p>
+          </article>
+        {:else if filteredUsers.length === 0}
+          <article class="empty-card compact">
+            <Search size={30} />
+            <p>No hay usuarios que coincidan con la búsqueda.</p>
+          </article>
+        {:else}
+          {#each filteredUsers as user (user.uid)}
+            <article class="user-card">
+              <div class="user-avatar">
+                {#if user.photoURL}
+                  <img src={user.photoURL} alt="" />
+                {:else}
+                  <UserRound size={20} />
+                {/if}
+              </div>
+              <div class="user-title">
+                <h3>
+                  {getUserDisplayName(user)}
+                  {#if user.isSelf}
+                    <span class="user-tag self">tú</span>
+                  {/if}
+                </h3>
+                <p>{user.email || "Sin email"}</p>
+                <div class="user-tags">
+                  <span class="user-tag">{getUserProviderLabel(user)}</span>
+                  {#if user.disabled}
+                    <span class="user-tag disabled">Cuenta deshabilitada</span>
+                  {/if}
+                  {#if user.passwordUpdatedAt}
+                    <span class="user-tag">Cambiada: {formatDate(user.passwordUpdatedAt)}</span>
+                  {/if}
+                </div>
+              </div>
+              <button
+                type="button"
+                class="password-action"
+                onclick={() => openPasswordPanel(user)}
+              >
+                <KeyRound size={16} />
+                <span>Cambiar contraseña</span>
+              </button>
+            </article>
+          {/each}
+        {/if}
+      </div>
+    </section>
   {/if}
+
+  <SliceContainer bind:show={showPasswordPanel}>
+    <div class="password-panel" role="dialog" aria-modal="true" aria-labelledby="password-panel-title">
+      <div class="panel-header">
+        <h2 id="password-panel-title">Cambiar contraseña</h2>
+        <button type="button" class="panel-close" onclick={closePasswordPanel} aria-label="Cerrar">
+          <X size={20} />
+        </button>
+      </div>
+
+      {#if selectedUser}
+        <p class="panel-subject">
+          <strong>{getUserDisplayName(selectedUser)}</strong>
+          <span>{selectedUser.email}</span>
+        </p>
+      {/if}
+
+      <label for="admin-new-password">Nueva contraseña</label>
+      <div class="password-field">
+        <input
+          id="admin-new-password"
+          type="password"
+          bind:value={newPassword}
+          autocomplete="new-password"
+          placeholder="Mínimo 8 caracteres"
+        />
+        <button type="button" onclick={fillGeneratedPassword} aria-label="Generar una contraseña">
+          <KeyRound size={16} />
+        </button>
+      </div>
+
+      {#if newPassword}
+        <p class="strength">Robustez: {passwordStrength.label}</p>
+      {/if}
+
+      <label for="admin-confirm-password">Repite la contraseña</label>
+      <input
+        id="admin-confirm-password"
+        type="password"
+        bind:value={confirmPassword}
+        autocomplete="new-password"
+        placeholder="Repite la contraseña"
+      />
+
+      {#if passwordError}
+        <p class="form-error">{passwordError}</p>
+      {/if}
+
+      <p class="panel-hint">
+        Al guardar, el usuario tendrá que iniciar sesión de nuevo con la contraseña nueva.
+        Comunícale la contraseña por un canal seguro.
+      </p>
+
+      <button
+        type="button"
+        class="save-btn"
+        onclick={savePassword}
+        disabled={isSavingPassword || !newPassword}
+      >
+        {isSavingPassword ? "Guardando..." : "Guardar contraseña"}
+      </button>
+    </div>
+  </SliceContainer>
 </div>
 
 <style>
@@ -230,6 +512,7 @@
   .hero-panel,
   .summary-grid,
   .teams-section,
+  .users-section,
   .state-panel {
     width: min(100%, 980px);
     margin-inline: auto;
@@ -258,6 +541,7 @@
 
   .hero-panel,
   .teams-section,
+  .users-section,
   .state-panel {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
@@ -365,6 +649,253 @@
     margin-top: 14px;
     margin-bottom: 28px;
     padding: 22px;
+  }
+
+  .users-section {
+    margin-top: 14px;
+    margin-bottom: 28px;
+    padding: 22px;
+  }
+
+  .user-list {
+    display: grid;
+    gap: 12px;
+  }
+
+  .user-card {
+    padding: 16px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-page);
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 13px;
+  }
+
+  .user-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 15px;
+    background: var(--accent-color);
+    color: var(--accent-ink);
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+  }
+
+  .user-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .user-title {
+    min-width: 0;
+  }
+
+  .user-title h3 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .user-title p {
+    margin: 3px 0 0;
+    color: var(--text-secondary);
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .user-tags {
+    margin-top: 7px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .user-tag {
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+  }
+
+  .user-tag.self {
+    background: var(--accent-color);
+    color: var(--accent-ink);
+    border-color: transparent;
+  }
+
+  .user-tag.disabled {
+    color: #dc2626;
+  }
+
+  .password-action {
+    min-height: 40px;
+    padding: 0 13px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .password-action:hover {
+    border-color: var(--accent-strong);
+    color: var(--accent-strong);
+  }
+
+  .password-panel {
+    width: min(100%, 520px);
+    margin-inline: auto;
+    padding: 6px 18px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .panel-header h2 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 19px;
+  }
+
+  .panel-close {
+    width: 40px;
+    height: 40px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--bg-page);
+    color: var(--text-primary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+
+  .panel-subject {
+    margin: 0;
+    padding: 12px 14px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-page);
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .panel-subject strong {
+    color: var(--text-primary);
+    font-size: 15px;
+  }
+
+  .panel-subject span {
+    color: var(--text-secondary);
+    font-size: 13px;
+  }
+
+  .password-panel label {
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .password-panel input {
+    min-height: 46px;
+    padding: 0 14px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font: inherit;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .password-panel input:focus {
+    outline: 0;
+    border-color: var(--accent-strong);
+  }
+
+  .password-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .password-field button {
+    flex: 0 0 auto;
+    width: 46px;
+    height: 46px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+
+  .strength {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .form-error {
+    margin: 0;
+    color: #dc2626;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .panel-hint {
+    margin: 2px 0 4px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .save-btn {
+    min-height: 50px;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: var(--accent-strong);
+    color: white;
+    font-weight: 900;
+    cursor: pointer;
+  }
+
+  .save-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
   }
 
   .section-heading {
@@ -585,6 +1116,15 @@
     .team-actions {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
+
+    .user-card {
+      grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .password-action {
+      grid-column: 1 / -1;
+      justify-content: center;
+    }
   }
 
   @media (max-width: 520px) {
@@ -593,7 +1133,8 @@
     }
 
     .hero-panel,
-    .teams-section {
+    .teams-section,
+    .users-section {
       padding: 18px;
     }
 

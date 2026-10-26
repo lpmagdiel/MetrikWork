@@ -268,10 +268,11 @@ export async function sendPrivateMessage(chatId, content, user, recipient, image
     }
 }
 
-export async function createPrivateCall(chatId, teamId, caller, receiver) {
+export async function createPrivateCall(chatId, teamId, caller, receiver, options = {}) {
     if (!chatId || !caller?.uid || !receiver?.id) return null;
+    const { offer = null, videoEnabled = false, audioEnabled = true } = options;
     const now = new Date().toISOString();
-    const callRef = await addDoc(collection(db, 'privateChats', chatId, 'calls'), {
+    const callData = {
         teamId,
         chatId,
         callerId: caller.uid,
@@ -280,9 +281,27 @@ export async function createPrivateCall(chatId, teamId, caller, receiver) {
         receiverName: receiver.name || receiver.email || 'Usuario',
         participants: [caller.uid, receiver.id].sort(),
         status: 'ringing',
+        media: {
+            [caller.uid]: {
+                videoEnabled: Boolean(videoEnabled),
+                audioEnabled: Boolean(audioEnabled)
+            }
+        },
         createdAt: now,
         updatedAt: now
-    });
+    };
+
+    // La oferta SDP se publica junto con la llamada, nunca después. Si se
+    // publicara más tarde, el receptor podría pulsar "Aceptar" cuando todavía
+    // no existe y la llamada terminaría de inmediato para ambos.
+    if (offer?.sdp) {
+        callData.offer = {
+            type: offer.type || 'offer',
+            sdp: offer.sdp
+        };
+    }
+
+    const callRef = await addDoc(collection(db, 'privateChats', chatId, 'calls'), callData);
 
     createNotification(receiver.id, 'Llamada entrante', `${caller.name || caller.email || 'Alguien'} te está llamando`, {
         url: getPrivateChatUrl(teamId, caller.uid, callRef.id),

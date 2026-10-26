@@ -155,6 +155,18 @@ function pushNotificationApiPlugin() {
         apiModuleUrl('ocr.js'),
         'OCR'
       );
+      mountApiHandler(
+        server,
+        '/api/admin-users',
+        apiModuleUrl('admin-users.js'),
+        'Admin users'
+      );
+      mountApiHandler(
+        server,
+        '/api/set-user-password',
+        apiModuleUrl('set-user-password.js'),
+        'Set user password'
+      );
     },
   };
 }

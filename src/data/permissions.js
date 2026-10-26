@@ -1,6 +1,7 @@
 export const TEAM_PERMISSION_MODULES = {
     stats: 'stats',
     payments: 'payments',
+    expenses: 'expenses',
     inventory: 'inventory',
     locations: 'locations',
     tasks: 'tasks',
@@ -19,6 +20,7 @@ export const TEAM_PERMISSION_ACTIONS = {
 export const TEAM_PERMISSION_LABELS = {
     stats: 'Estadísticas',
     payments: 'Pagos',
+    expenses: 'Gastos',
     inventory: 'Inventario',
     locations: 'Ubicaciones',
     tasks: 'Tareas',
@@ -41,10 +43,11 @@ export const TEAM_PERMISSION_ROLE_TEMPLATES = [
     {
         id: 'manager',
         label: 'Manager',
-        description: 'Supervisa operaciones, tareas, reportes y ajustes sin eliminar datos sensibles.',
+        description: 'Supervisa operaciones, tareas, pagos, gastos, reportes y ajustes sin eliminar datos sensibles.',
         permissions: {
             stats: ['view'],
             payments: ['view', 'create', 'edit'],
+            expenses: ['view', 'create', 'edit'],
             inventory: ['view', 'create', 'edit'],
             locations: ['view'],
             tasks: ['view', 'create', 'edit', 'delete'],
@@ -54,10 +57,11 @@ export const TEAM_PERMISSION_ROLE_TEMPLATES = [
     {
         id: 'accountant',
         label: 'Contador',
-        description: 'Gestiona pagos y consulta reportes financieros con acceso operativo limitado.',
+        description: 'Gestiona pagos y gastos, y consulta reportes financieros con acceso operativo limitado.',
         permissions: {
             stats: ['view'],
             payments: ['view', 'create', 'edit', 'delete'],
+            expenses: ['view', 'create', 'edit', 'delete'],
             inventory: ['view'],
             locations: [],
             tasks: ['view'],
@@ -67,7 +71,7 @@ export const TEAM_PERMISSION_ROLE_TEMPLATES = [
     {
         id: 'field_operator',
         label: 'Operario de Campo',
-        description: 'Trabaja con tareas, ubicaciones e inventario sin acceso a pagos ni ajustes.',
+        description: 'Trabaja con tareas, ubicaciones e inventario sin acceso a pagos, gastos ni ajustes.',
         permissions: {
             stats: [],
             payments: [],
@@ -93,7 +97,7 @@ export const TEAM_PERMISSION_ROLE_TEMPLATES = [
     {
         id: 'coordinator',
         label: 'Coordinador',
-        description: 'Organiza tareas y consulta actividad del equipo sin tocar pagos o ajustes.',
+        description: 'Organiza tareas y consulta actividad del equipo sin tocar pagos, gastos o ajustes.',
         permissions: {
             stats: ['view'],
             payments: [],
@@ -110,6 +114,7 @@ export const TEAM_PERMISSION_ROLE_TEMPLATES = [
         permissions: {
             stats: ['view'],
             payments: ['view'],
+            expenses: ['view'],
             inventory: ['view'],
             locations: ['view'],
             tasks: ['view'],
@@ -123,6 +128,7 @@ export const TEAM_PERMISSION_ROLE_TEMPLATES = [
         permissions: {
             stats: ['view'],
             payments: ['view', 'create'],
+            expenses: ['view', 'create'],
             inventory: ['view'],
             locations: ['view'],
             tasks: ['view', 'create', 'edit'],
@@ -244,6 +250,27 @@ export function normalizeTeamPermissions(permissions = {}, enabledFallback = fal
         });
     });
 
+    return applyLegacyExpensesFallback(normalized, permissions);
+}
+
+/**
+ * Compatibilidad con los equipos creados antes de que los gastos tuvieran su
+ * propio módulo de permisos.
+ *
+ * Mientras un miembro no tenga guardado el módulo "expenses" se hereda desde
+ * "pagos", de forma que separar los permisos no revoca los accesos de golpe.
+ * En cuanto se guardan los permisos del miembro, el módulo "expenses" ya existe
+ * y deja de aplicarse esta herencia.
+ */
+function applyLegacyExpensesFallback(normalized = {}, source = {}) {
+    if (!normalized.expenses) return normalized;
+    if (source?.expenses) return normalized;
+    if (!source?.payments) return normalized;
+
+    ACTIONS.forEach((action) => {
+        normalized.expenses[action] = Boolean(source.payments[action]);
+    });
+
     return normalized;
 }
 
@@ -256,5 +283,17 @@ export function getMemberPermissions(team, uid) {
 export function hasTeamPermission(team, uid, module, action = 'view') {
     if (!team || !uid) return false;
     if (team.admin === uid) return true;
-    return Boolean(team.memberPermissions?.[uid]?.[module]?.[action]);
+
+    const memberPermissions = team.memberPermissions?.[uid] || {};
+    const modulePermissions = memberPermissions[module];
+
+    if (modulePermissions) return Boolean(modulePermissions[action]);
+
+    // Los gastos heredan del permiso de pagos mientras el miembro no tenga
+    // guardado su propio módulo (equipos anteriores a la separación).
+    if (module === 'expenses' && !memberPermissions.expenses) {
+        return Boolean(memberPermissions.payments?.[action]);
+    }
+
+    return false;
 }

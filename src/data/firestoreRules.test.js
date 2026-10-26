@@ -54,11 +54,32 @@ describe('firestore expense rules contract', () => {
     expectBalanced(normalized, '(', ')');
   });
 
-  it('limita la colección de gastos a permisos financieros y estadísticas de lectura', () => {
+  it('limita la colección de gastos a su propio módulo de permisos', () => {
     expect(rules).toMatch(/match \/expenses\/\{expenseId\}/);
-    expect(rules).toMatch(/allow read: if hasTeamPermission\(teamId, "payments", "view"\) \|\|\s+hasTeamPermission\(teamId, "stats", "view"\)/);
-    expect(rules).toMatch(/allow create: if hasTeamPermission\(teamId, "payments", "create"\)/);
-    expect(rules).toMatch(/allow delete: if hasTeamPermission\(teamId, "payments", "delete"\)/);
+    expect(rules).toMatch(/function hasExpensesPermission\(teamId, action\)/);
+    expect(rules).toMatch(/allow read: if hasExpensesPermission\(teamId, "view"\) \|\|\s+hasTeamPermission\(teamId, "stats", "view"\)/);
+    expect(rules).toMatch(/allow create: if hasExpensesPermission\(teamId, "create"\)/);
+    expect(rules).toMatch(/allow delete: if hasExpensesPermission\(teamId, "delete"\)/);
+  });
+
+  it('hereda el permiso de pagos mientras el miembro no tenga guardado el módulo de gastos', () => {
+    const body = extractFunctionBody(rules, 'hasExpensesPermission');
+
+    expect(body).toContain('hasModulePermission(teamId, "expenses", action)');
+    expect(body).toContain('!hasPermissionModule(teamId, "expenses")');
+    expect(body).toContain('hasModulePermission(teamId, "payments", action)');
+  });
+
+  it('no presupone que el módulo de permisos exista al leerlo', () => {
+    const body = extractFunctionBody(rules, 'hasPermissionModule');
+
+    expect(body).toContain('teamData(teamId).memberPermissions.keys().hasAll([request.auth.uid])');
+    expect(body).toContain('teamData(teamId).memberPermissions[request.auth.uid].keys().hasAll([module])');
+  });
+
+  it('mantiene el módulo de gastos separado del de pagos en el resto de reglas', () => {
+    const expensesBlock = extractFunctionBody(rules, 'hasExpensesPermission');
+    expect(expensesBlock).not.toContain('"stats"');
   });
 
   it('valida el esquema manual y conserva la autoría durante actualizaciones', () => {

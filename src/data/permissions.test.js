@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   TEAM_PERMISSION_ACTIONS,
+  TEAM_PERMISSION_LABELS,
   TEAM_PERMISSION_MODULES,
   createCustomRoleId,
   createDefaultMemberPermissions,
@@ -22,6 +23,12 @@ describe('permissions', () => {
       Object.values(TEAM_PERMISSION_ACTIONS).forEach((action) => {
         expect(permissions[module][action]).toBe(true);
       });
+    });
+  });
+
+  it('tiene una etiqueta para cada módulo, que es lo que dibuja su recuadro', () => {
+    Object.values(TEAM_PERMISSION_MODULES).forEach((module) => {
+      expect(TEAM_PERMISSION_LABELS[module]).toBeTruthy();
     });
   });
 
@@ -165,5 +172,79 @@ describe('permissions', () => {
     expect(hasTeamPermission(team, 'controller', 'ghosts', 'control')).toBe(true);
     expect(hasTeamPermission(team, 'stranger', 'ghosts', 'create')).toBe(false);
     expect(hasTeamPermission(team, 'stranger', 'ghosts', 'control')).toBe(false);
+  });
+
+  it('incluye el módulo de gastos como una caja separada de la de pagos', () => {
+    const permissions = createTeamPermissions(false);
+
+    expect(TEAM_PERMISSION_MODULES.expenses).toBe('expenses');
+    expect(TEAM_PERMISSION_LABELS.expenses).toBe('Gastos');
+    expect(TEAM_PERMISSION_LABELS.payments).toBe('Pagos');
+    expect(permissions.expenses).toBeDefined();
+    expect(permissions.expenses.view).toBe(false);
+    expect(permissions.expenses.create).toBe(false);
+    expect(permissions.expenses.edit).toBe(false);
+    expect(permissions.expenses.delete).toBe(false);
+  });
+
+  it('hereda los gastos de pagos en equipos creados antes de separarlos', () => {
+    const team = {
+      admin: 'admin-1',
+      memberPermissions: {
+        'member-1': {
+          payments: { view: true, create: true, edit: false, delete: false }
+        }
+      }
+    };
+
+    expect(hasTeamPermission(team, 'member-1', 'expenses', 'view')).toBe(true);
+    expect(hasTeamPermission(team, 'member-1', 'expenses', 'create')).toBe(true);
+    expect(hasTeamPermission(team, 'member-1', 'expenses', 'edit')).toBe(false);
+    expect(hasTeamPermission(team, 'member-1', 'expenses', 'delete')).toBe(false);
+  });
+
+  it('muestra el estado efectivo de gastos heredado al normalizar permisos antiguos', () => {
+    const permissions = normalizeTeamPermissions({
+      payments: { view: true, create: true }
+    });
+
+    expect(permissions.expenses.view).toBe(true);
+    expect(permissions.expenses.create).toBe(true);
+    expect(permissions.expenses.edit).toBe(false);
+    expect(permissions.expenses.delete).toBe(false);
+  });
+
+  it('deja el módulo de gastos explícito mandar sobre el de pagos', () => {
+    const team = {
+      admin: 'admin-1',
+      memberPermissions: {
+        // Miembro con pagos pero sin gastos: el permiso explícito lo desactiva.
+        sinGastos: normalizeTeamPermissions({
+          payments: { view: true, create: true },
+          expenses: { view: false, create: false }
+        }),
+        // Miembro con gastos pero sin pagos.
+        soloGastos: normalizeTeamPermissions({
+          payments: { view: false, create: false },
+          expenses: { view: true, create: true }
+        })
+      }
+    };
+
+    expect(hasTeamPermission(team, 'sinGastos', 'expenses', 'view')).toBe(false);
+    expect(hasTeamPermission(team, 'sinGastos', 'expenses', 'create')).toBe(false);
+    expect(hasTeamPermission(team, 'sinGastos', 'payments', 'view')).toBe(true);
+
+    expect(hasTeamPermission(team, 'soloGastos', 'expenses', 'view')).toBe(true);
+    expect(hasTeamPermission(team, 'soloGastos', 'expenses', 'create')).toBe(true);
+    expect(hasTeamPermission(team, 'soloGastos', 'payments', 'view')).toBe(false);
+  });
+
+  it('incluye los gastos en las plantillas de rol con acceso a pagos', () => {
+    expect(createRoleTemplatePermissions('manager').expenses.view).toBe(true);
+    expect(createRoleTemplatePermissions('manager').expenses.delete).toBe(false);
+    expect(createRoleTemplatePermissions('accountant').expenses.delete).toBe(true);
+    expect(createRoleTemplatePermissions('auditor').expenses.view).toBe(true);
+    expect(createRoleTemplatePermissions('field_operator').expenses.view).toBe(false);
   });
 });

@@ -34,11 +34,42 @@ service cloud.firestore {
              ];
     }
 
+    // Comprueba si el módulo de permisos está guardado para este miembro.
+    // No se presupone que exista: los equipos antiguos no tienen guardados los
+    // módulos añadidos más tarde y acceder a ellos provocaría un error.
+    function hasPermissionModule(teamId, module) {
+      return isTeamMember(teamId) &&
+             teamData(teamId).keys().hasAll(["memberPermissions"]) &&
+             teamData(teamId).memberPermissions is map &&
+             teamData(teamId).memberPermissions.keys().hasAll([request.auth.uid]) &&
+             teamData(teamId).memberPermissions[request.auth.uid] is map &&
+             teamData(teamId).memberPermissions[request.auth.uid].keys().hasAll([module]);
+    }
+
+    // Permiso de una acción dentro de un módulo, sin presuponer que el módulo
+    // ni la acción estén guardados.
+    function hasModulePermission(teamId, module, action) {
+      return hasPermissionModule(teamId, module) &&
+             teamData(teamId).memberPermissions[request.auth.uid][module] is map &&
+             teamData(teamId).memberPermissions[request.auth.uid][module][action] == true;
+    }
+
     function hasTeamPermission(teamId, module, action) {
       return isTeamAdmin(teamId) ||
+             hasModulePermission(teamId, module, action);
+    }
+
+    // Los gastos tienen su propio módulo de permisos. En los equipos creados
+    // antes de separarlo, ese módulo no está guardado y el permiso se hereda
+    // del de pagos, para no revocar los accesos de golpe.
+    function hasExpensesPermission(teamId, action) {
+      return isTeamAdmin(teamId) ||
              (
-               isTeamMember(teamId) &&
-               teamData(teamId).memberPermissions[request.auth.uid][module][action] == true
+               hasModulePermission(teamId, "expenses", action) ||
+               (
+                 !hasPermissionModule(teamId, "expenses") &&
+                 hasModulePermission(teamId, "payments", action)
+               )
              );
     }
 
@@ -897,15 +928,15 @@ service cloud.firestore {
       }
 
       match /expenses/{expenseId} {
-        allow read: if hasTeamPermission(teamId, "payments", "view") ||
+        allow read: if hasExpensesPermission(teamId, "view") ||
                     hasTeamPermission(teamId, "stats", "view");
-        allow create: if hasTeamPermission(teamId, "payments", "create") &&
+        allow create: if hasExpensesPermission(teamId, "create") &&
                       request.resource.data.createdBy == request.auth.uid &&
                       isValidManualExpenseData(request.resource.data);
         allow update: if (
-                        hasTeamPermission(teamId, "payments", "edit") ||
+                        hasExpensesPermission(teamId, "edit") ||
                         (
-                          hasTeamPermission(teamId, "payments", "create") &&
+                          hasExpensesPermission(teamId, "create") &&
                           resource.data.createdBy == request.auth.uid
                         )
                       ) &&
@@ -914,7 +945,7 @@ service cloud.firestore {
                       request.resource.data.createdByName == resource.data.createdByName &&
                       request.resource.data.createdAt == resource.data.createdAt &&
                       isValidManualExpenseData(request.resource.data);
-        allow delete: if hasTeamPermission(teamId, "payments", "delete");
+        allow delete: if hasExpensesPermission(teamId, "delete");
       }
 
       match /chargeTemplates/{templateId} {

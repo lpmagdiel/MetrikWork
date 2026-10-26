@@ -92,7 +92,9 @@
   let canViewPayments = $derived(hasTeamPermission(team, $userStore?.uid, "payments", "view"));
   let canViewMemberPrivate = $derived(isAdmin || canViewPayments);
   let canViewStats = $derived(hasTeamPermission(team, $userStore?.uid, "stats", "view"));
-  let canViewExpenses = $derived(canViewPayments || canViewStats);
+  let canViewExpenses = $derived(
+    hasTeamPermission(team, $userStore?.uid, "expenses", "view") || canViewStats,
+  );
   let canViewSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "view"));
   let canCreateSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "create"));
   let canEditSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "edit"));

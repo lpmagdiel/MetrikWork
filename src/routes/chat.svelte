@@ -104,9 +104,11 @@
   let peerConnection = null;
   let candidateUnsubscribe = null;
   let connectionFailureTimer = null;
+  let connectionTimeoutTimer = null;
   let hasHandledRemoteDescription = false;
   let currentCallId = "";
   let pendingRemoteCandidates = [];
+  let pendingLocalCandidates = [];
   let remoteUserId = $derived(activeCall
     ? (activeCall.callerId === $userStore?.uid ? activeCall.receiverId : activeCall.callerId)
     : selectedMember?.id);
@@ -120,6 +122,8 @@
   let remoteAvatarUrl = $derived(getProfileImage(remoteProfile) || getProfileImage(selectedMember) || "");
   let remoteVideoEnabled = $derived(activeCall?.media?.[remoteUserId]?.videoEnabled !== false);
   let showRemoteAvatar = $derived(!remoteHasVideo || !remoteVideoEnabled);
+  // La oferta SDP tiene que estar publicada antes de poder aceptar la llamada.
+  let hasIncomingOffer = $derived(Boolean(activeCall?.offer?.sdp));
   const pageSize = 20;
   // TURN es opcional para no modificar los despliegues actuales. Sin él, WebRTC
   // solo puede conectar directamente y algunas redes móviles, VPN o NAT simétricos
@@ -133,11 +137,20 @@
   const rtcConfig = {
     iceServers: [
       { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
       ...(turnUrls.length && turnUsername && turnCredential
         ? [{ urls: turnUrls, username: turnUsername, credential: turnCredential }]
         : []),
     ],
   };
+  // Tiempo máximo para que ICE complete la conexión antes de darla por fallida.
+  const CALL_CONNECT_TIMEOUT_MS = 25000;
+
+  if (!turnUrls.length) {
+    console.warn(
+      "WebRTC: no hay servidor TURN configurado (VITE_TURN_URL). En redes móviles, VPN o corporativas con NAT simétrico la llamada no podrá conectar aunque el código sea correcto.",
+    );
+  }
   let appliedRouteParamsKey = $state("");
 
   let routeChatParams = $derived.by(() => {
@@ -194,15 +207,23 @@
   });
 
   $effect(() => {
+    // Se leen el id y el nombre (cadenas) en lugar del objeto del miembro: así
+    // el efecto no se vuelve a ejecutar con cada actualización del store de
+    // equipos, lo que reiniciaba la suscripción de la llamada y la cortaba.
+    const memberId = selectedMember?.id || "";
+    const memberName = selectedMember?.name || "";
+
     hasOlderMessages = true;
     shouldStickToBottom = true;
-    privateChatId = "";
+
+    // Mientras hay una llamada en curso no se cambia de conversación.
+    if (!peerConnection) privateChatId = "";
 
     if (chatMode === "team" && teamId) {
       subscribeToTeamChat(teamId, pageSize);
-    } else if (chatMode === "private" && teamId && $userStore && selectedMember) {
-      subscribeToPrivateChat(teamId, $userStore, selectedMember, pageSize).then((chatId) => {
-        privateChatId = chatId || "";
+    } else if (chatMode === "private" && teamId && $userStore && memberId) {
+      subscribeToPrivateChat(teamId, $userStore, { id: memberId, name: memberName }, pageSize).then((chatId) => {
+        if (!peerConnection) privateChatId = chatId || "";
       });
     } else {
       subscribeToTeamChat(null);
@@ -214,7 +235,11 @@
     if (chatMode === "private" && privateChatId && $userStore?.uid) {
       subscribeToPrivateCalls(privateChatId, $userStore.uid, (call) => {
         activeCall = call;
-        handleCallSnapshot(call);
+        // La negociación es asíncrona: sin capturar el error, un fallo al
+        // aplicar la respuesta dejaría la llamada colgada sin avisar.
+        handleCallSnapshot(call).catch((error) => {
+          console.error("Error procesando el estado de la llamada:", error);
+        });
       });
     } else {
       subscribeToPrivateCalls(null, null);
@@ -545,7 +570,7 @@
   }
 
   async function prepareMedia() {
-    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+    localStream = await requestLocalMedia();
     if (!localStream.getAudioTracks().length) {
       throw new Error("No se ha podido obtener una pista de audio del micrófono.");
     }
@@ -556,6 +581,23 @@
     if (localVideo) localVideo.srcObject = localStream;
     attachRemoteStream();
     await playRemoteAudio();
+  }
+
+  /**
+   * Pide cámara y micrófono. Si la cámara no está disponible (o la está usando
+   * otra aplicación) la llamada continúa en modo solo audio: así un fallo de
+   * cámara no impide hablar.
+   */
+  async function requestLocalMedia() {
+    try {
+      return await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+    } catch (error) {
+      const recoverable = ["NotFoundError", "NotReadableError", "OverconstrainedError", "TypeError"];
+      if (!recoverable.includes(error?.name)) throw error;
+
+      console.warn("No se ha podido abrir la cámara, la llamada seguirá solo con audio:", error);
+      return navigator.mediaDevices.getUserMedia({ audio: true });
+    }
   }
 
   function createPeerConnection(candidateSide) {
@@ -574,11 +616,42 @@
       playRemoteAudio();
     };
     connection.onicecandidate = (event) => {
-      if (event.candidate && privateChatId && currentCallId) {
-        addCallCandidate(privateChatId, currentCallId, candidateSide, event.candidate).catch(console.error);
+      if (!event.candidate) return;
+      console.info("Candidata ICE:", event.candidate.type, event.candidate.protocol || "");
+
+      // La llamada se publica en Firestore después de crear la oferta, así que
+      // las candidatas iniciales se guardan en memoria hasta que exista el id.
+      if (!currentCallId) {
+        pendingLocalCandidates = [...pendingLocalCandidates, event.candidate];
+        return;
       }
+
+      publishLocalCandidate(candidateSide, event.candidate);
+    };
+    connection.onicecandidateerror = (event) => {
+      console.warn("Error al gathering de candidatas ICE:", event.errorCode, event.errorText);
+    };
+    connection.oniceconnectionstatechange = () => {
+      console.info("Estado ICE:", connection.iceConnectionState);
+    };
+    connection.onicegatheringstatechange = () => {
+      console.info("Recogida de candidatas ICE:", connection.iceGatheringState);
     };
     connection.onconnectionstatechange = () => handleConnectionStateChange(connection);
+  }
+
+  function publishLocalCandidate(candidateSide, candidate) {
+    if (!candidate || !privateChatId || !currentCallId) return;
+
+    addCallCandidate(privateChatId, currentCallId, candidateSide, candidate).catch((error) => {
+      console.error("No se pudo enviar la candidata ICE local:", error);
+    });
+  }
+
+  async function flushPendingLocalCandidates(candidateSide) {
+    const candidates = pendingLocalCandidates;
+    pendingLocalCandidates = [];
+    await Promise.all(candidates.map((candidate) => publishLocalCandidate(candidateSide, candidate)));
   }
 
   function attachRemoteStream() {
@@ -622,9 +695,14 @@
   function handleConnectionStateChange(connection) {
     if (connection !== peerConnection) return;
     const state = connection.connectionState;
+    console.info("Estado de la conexión:", state);
+
     if (state === "connected") {
       clearTimeout(connectionFailureTimer);
       connectionFailureTimer = null;
+      clearTimeout(connectionTimeoutTimer);
+      connectionTimeoutTimer = null;
+      if (callStatus === "connecting") callStatus = "active";
       return;
     }
     if (state === "failed") {
@@ -640,12 +718,24 @@
     }
   }
 
+  function startConnectionTimeout() {
+    clearTimeout(connectionTimeoutTimer);
+    connectionTimeoutTimer = setTimeout(() => {
+      connectionTimeoutTimer = null;
+      if (peerConnection && peerConnection.connectionState !== "connected") {
+        handleConnectionFailure();
+      }
+    }, CALL_CONNECT_TIMEOUT_MS);
+  }
+
   function handleConnectionFailure() {
     clearTimeout(connectionFailureTimer);
     connectionFailureTimer = null;
+    clearTimeout(connectionTimeoutTimer);
+    connectionTimeoutTimer = null;
     showErrorAlert(
       "No se pudo establecer la llamada",
-      "La red no ha permitido conectar el audio y el vídeo. Comprueba la conexión e inténtalo de nuevo.",
+      "La red no ha permitido conectar el audio y el vídeo. Puede ser que la red bloquee las conexiones entre dispositivos; prueba con otra red o con los datos móviles.",
     );
     cleanupCall(true);
   }
@@ -660,23 +750,38 @@
     try {
       const chatId = privateChatId || await getOrCreatePrivateChat(teamId, $userStore, selectedMember);
       privateChatId = chatId || "";
-      currentCallId = await createPrivateCall(chatId, teamId, $userStore, selectedMember);
+
+      // La llamada se muestra desde el principio: el navegador puede tardar
+      // varios segundos en pedir el permiso de cámara y micrófono.
       isCallOpen = true;
       callStatus = "calling";
       hasHandledRemoteDescription = false;
+
+      // La cámara y el micrófono se piden ANTES de publicar la llamada. Si se
+      // publicara primero, el receptor podría aceptar durante el permiso del
+      // navegador y la llamada fallaría porque aún no existiría la oferta SDP.
       await prepareMedia();
       createPeerConnection("caller");
+
       const offer = await peerConnection.createOffer();
       await peerConnection.setLocalDescription(offer);
-      await updatePrivateCall(chatId, currentCallId, {
-        offer: { type: offer.type, sdp: offer.sdp },
-        [`media.${$userStore.uid}.videoEnabled`]: true,
-        [`media.${$userStore.uid}.audioEnabled`]: true,
-        status: "ringing",
+      const localDescription = peerConnection.localDescription || offer;
+
+      currentCallId = await createPrivateCall(chatId, teamId, $userStore, selectedMember, {
+        offer: {
+          type: localDescription.type,
+          sdp: localDescription.sdp,
+        },
+        videoEnabled: localStream.getVideoTracks().length > 0,
+        audioEnabled: localStream.getAudioTracks().length > 0,
       });
+
       candidateUnsubscribe = subscribeToCallCandidates(chatId, currentCallId, "receiver", async (candidate) => {
         await addRemoteCandidate(candidate);
       });
+
+      // Las candidatas recogidas antes de publicar la llamada se envían ahora.
+      await flushPendingLocalCandidates("caller");
     } catch (error) {
       console.error("Error starting call", error);
       showErrorAlert("Error", "No se pudo iniciar la llamada.");
@@ -686,6 +791,17 @@
 
   async function acceptCall() {
     if (!activeCall || !privateChatId || !$userStore || callStatus === "active") return;
+
+    // Sin oferta SDP todavía no se puede negociar la conexión: se espera a que
+    // el llamante la publique en lugar de terminar la llamada con un error.
+    if (!activeCall.offer?.sdp) {
+      showErrorAlert(
+        "Llamada no disponible",
+        "Todavía no se ha recibido la oferta de la llamada. Espera unos segundos e inténtalo de nuevo.",
+      );
+      return;
+    }
+
     try {
       currentCallId = activeCall.id;
       isCallOpen = true;
@@ -694,18 +810,21 @@
       await prepareMedia();
       createPeerConnection("receiver");
       await peerConnection.setRemoteDescription(new RTCSessionDescription(activeCall.offer));
+      await flushPendingRemoteCandidates();
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
+      const localDescription = peerConnection.localDescription || answer;
       await updatePrivateCall(privateChatId, activeCall.id, {
-        answer: { type: answer.type, sdp: answer.sdp },
-        [`media.${$userStore.uid}.videoEnabled`]: true,
-        [`media.${$userStore.uid}.audioEnabled`]: true,
+        answer: { type: localDescription.type, sdp: localDescription.sdp },
+        [`media.${$userStore.uid}.videoEnabled`]: localStream.getVideoTracks().length > 0,
+        [`media.${$userStore.uid}.audioEnabled`]: localStream.getAudioTracks().length > 0,
         status: "active",
       });
       candidateUnsubscribe = subscribeToCallCandidates(privateChatId, activeCall.id, "caller", async (candidate) => {
         await addRemoteCandidate(candidate);
       });
-      callStatus = "active";
+      await flushPendingLocalCandidates("receiver");
+      startConnectionTimeout();
     } catch (error) {
       console.error("Error accepting call", error);
       showErrorAlert("Error", "No se pudo aceptar la llamada.");
@@ -715,7 +834,10 @@
 
   async function handleCallSnapshot(call) {
     if (!call) {
-      if (callStatus !== "idle") cleanupCall(false);
+      // Un snapshot vacío significa que la llamada ya no está activa. Mientras
+      // se está preparando o esperando al receptor todavía no hay llamada
+      // publicada, así que no se debe cerrar la interfaz en ese caso.
+      if (currentCallId && callStatus !== "idle") cleanupCall(false);
       return;
     }
 
@@ -732,7 +854,8 @@
       hasHandledRemoteDescription = true;
       await peerConnection.setRemoteDescription(new RTCSessionDescription(call.answer));
       await flushPendingRemoteCandidates();
-      callStatus = "active";
+      if (callStatus !== "active") callStatus = "connecting";
+      startConnectionTimeout();
     }
   }
 
@@ -753,6 +876,8 @@
     candidateUnsubscribe = null;
     clearTimeout(connectionFailureTimer);
     connectionFailureTimer = null;
+    clearTimeout(connectionTimeoutTimer);
+    connectionTimeoutTimer = null;
     peerConnection?.close();
     peerConnection = null;
     localStream?.getTracks().forEach((track) => track.stop());
@@ -763,6 +888,7 @@
     if (remoteAudio) remoteAudio.srcObject = null;
     currentCallId = "";
     pendingRemoteCandidates = [];
+    pendingLocalCandidates = [];
     remoteHasVideo = false;
     hasHandledRemoteDescription = false;
     isCallOpen = false;
@@ -1006,10 +1132,19 @@
           <button class="decline-call" type="button" onclick={hangUp} title="Rechazar">
             <PhoneOff size={22} />
           </button>
-          <button class="accept-call" type="button" onclick={acceptCall} title="Aceptar">
+          <button
+            class="accept-call"
+            type="button"
+            onclick={acceptCall}
+            disabled={!hasIncomingOffer}
+            title={hasIncomingOffer ? "Aceptar" : "Preparando la llamada..."}
+          >
             <Phone size={22} />
           </button>
         </div>
+        {#if !hasIncomingOffer}
+          <p class="incoming-call-hint">Preparando la llamada…</p>
+        {/if}
       {:else}
         <div class="video-grid">
           <div class="remote-avatar-backdrop" class:visible={showRemoteAvatar}>
@@ -1974,7 +2109,22 @@
     background: #1f9d55 !important;
   }
 
+  .accept-call:disabled {
+    background: rgba(255, 255, 255, 0.14) !important;
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   .decline-call {
     background: #e03131 !important;
+  }
+
+  .incoming-call-hint {
+    margin: 0;
+    padding: 0 18px 18px;
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 13px;
+    font-weight: 700;
+    text-align: center;
   }
 </style>
