@@ -9,10 +9,14 @@
     Download,
     DollarSign,
     Eraser,
+    ExternalLink,
     Filter,
+    LoaderCircle,
     MapPin,
     Package,
+    ReceiptText,
     Save,
+    Search,
     Trash2,
     TrendingUp,
     Users,
@@ -27,12 +31,21 @@
   import { downloadExcelReport, openPrintableReport } from "../helpers/reportExport.js";
   import { confirmAlert, showErrorAlert, showSuccessAlert } from "../data/alerts.js";
   import {
+    buildExpenseLedger,
+    expenseInventoryMovementsStore,
+    expensePaymentsStore,
+    filterExpenseLedger,
+    getExpenseCategoryLabel,
     getTeamAdvancedStatsData,
     hasTeamPermission,
     hasGhostControlPermission,
     hasGhostCreatePermission,
+    manualTeamExpensesStore,
     selectedTeam,
     selectedTeamId,
+    subscribeToTeamExpenses,
+    summarizeExpenseLedger,
+    teamExpensesStateStore,
     updateTeamBudget,
     getTeamGhosts,
     removeGhostWorkday,
@@ -73,6 +86,13 @@
   let showToast = $state(false);
   let workLocationAddresses = $state({});
   const resolvingLocationAddressIds = new Set();
+
+  // Filtros y estado del libro de gastos
+  let ledgerSourceFilter = $state("all");
+  let ledgerStatusFilter = $state("all");
+  let ledgerCategoryFilter = $state("all");
+  let ledgerSearch = $state("");
+  let ledgerVisibleCount = $state(15);
 
   const periodLabels = {
     week: "Semana",
@@ -618,6 +638,98 @@
     })),
   );
 
+  // --- LIBRO DE GASTOS ---------------------------------------------------
+  // Libro unificado: gastos manuales + pagos + entradas de inventario.
+  // Reutiliza el mismo "libro de gastos" del módulo de gastos para que las
+  // estadísticas no dupliquen reglas de negocio.
+  let expenseLedger = $derived(
+    buildExpenseLedger({
+      manual: $manualTeamExpensesStore,
+      payments: $expensePaymentsStore,
+      inventoryMovements: $expenseInventoryMovementsStore,
+      members,
+      currency: budgetCurrency,
+    }),
+  );
+
+  let filteredLedger = $derived.by(() =>
+    filterExpenseLedger(expenseLedger, {
+      startDate: range.start,
+      endDate: range.end,
+      source: ledgerSourceFilter,
+      status: ledgerStatusFilter,
+      category: ledgerCategoryFilter,
+      search: ledgerSearch,
+    }).filter((expense) => matchesLedgerScope(expense)),
+  );
+
+  let ledgerSummary = $derived(summarizeExpenseLedger(filteredLedger));
+
+  let visibleLedger = $derived(filteredLedger.slice(0, ledgerVisibleCount));
+  let hasMoreLedger = $derived(filteredLedger.length > ledgerVisibleCount);
+
+  let ledgerCategories = $derived.by(() => {
+    const labels = new Map();
+    expenseLedger.forEach((expense) => {
+      const key = expense.category || "other";
+      if (!labels.has(key)) {
+        labels.set(key, expense.categoryLabel || getExpenseCategoryLabel(key));
+      }
+    });
+    return Array.from(labels.entries())
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, "es"));
+  });
+
+  let ledgerCategoryTotals = $derived.by(() => {
+    const totals = new Map();
+    filteredLedger.forEach((expense) => {
+      const key = expense.category || "other";
+      const previous = totals.get(key) || {
+        key,
+        label: expense.categoryLabel || getExpenseCategoryLabel(key),
+        value: 0,
+        count: 0,
+      };
+      previous.value += Number(expense.amount) || 0;
+      previous.count += 1;
+      totals.set(key, previous);
+    });
+    return Array.from(totals.values()).sort((a, b) => b.value - a.value);
+  });
+
+  let ledgerCategoryDistribution = $derived(
+    ledgerCategoryTotals.map((item, index) => ({
+      label: item.label,
+      value: item.value,
+      color: categoryPiePalette[index % categoryPiePalette.length],
+    })),
+  );
+
+  let maxLedgerCategoryValue = $derived(
+    Math.max(...ledgerCategoryTotals.map((item) => item.value), 1),
+  );
+
+  let ledgerTrend = $derived.by(() => {
+    const buckets = new Map();
+    filteredLedger.forEach((expense) => {
+      const monthKey = (expense.date || "").slice(0, 7);
+      if (!monthKey) return;
+      const bucket = buckets.get(monthKey) || {
+        key: monthKey,
+        label: formatMonthLabel(monthKey),
+        total: 0,
+      };
+      bucket.total += Number(expense.amount) || 0;
+      buckets.set(monthKey, bucket);
+    });
+    return Array.from(buckets.values())
+      .sort((a, b) => a.key.localeCompare(b.key))
+      .slice(-12);
+  });
+
+  let maxLedgerTrendValue = $derived(Math.max(...ledgerTrend.map((item) => item.total), 1));
+
   $effect(() => {
     if (!team) return;
     budgetAmount = Number(team.projectBudget) || 0;
@@ -633,6 +745,17 @@
     const currentRange = range;
     if (!currentRange?.start || !currentRange?.end) return;
     loadStatsData(currentRange);
+  });
+
+  // El libro de gastos se mantiene en tiempo real con la misma fuente que el
+  // módulo de gastos: así las estadísticas no muestran importes desfasados.
+  $effect(() => {
+    const currentTeamId = team?.id;
+    if (!currentTeamId || !canViewStats) {
+      subscribeToTeamExpenses(null);
+      return;
+    }
+    return subscribeToTeamExpenses(currentTeamId, { includeInventory: true });
   });
 
   $effect(() => {
@@ -725,6 +848,42 @@
 
   function matchesRequestLocation(request, locationId) {
     return locationId === "all" || isMemberAssignedToLocation(request.requesterId, locationId);
+  }
+
+  function matchesLedgerScope(expense) {
+    if (selectedMemberId !== "all" && (expense?.memberId || "") !== selectedMemberId) {
+      return false;
+    }
+    if (selectedLocationId !== "all" && (expense?.locationId || "") !== selectedLocationId) {
+      return false;
+    }
+    return true;
+  }
+
+  function formatMonthLabel(monthKey) {
+    const [year, month] = String(monthKey || "").split("-").map(Number);
+    if (!year || !month) return monthKey || "";
+    return new Date(year, month - 1, 1).toLocaleDateString("es-ES", {
+      month: "short",
+      year: "2-digit",
+    });
+  }
+
+  function resetLedgerFilters() {
+    ledgerSourceFilter = "all";
+    ledgerStatusFilter = "all";
+    ledgerCategoryFilter = "all";
+    ledgerSearch = "";
+    ledgerVisibleCount = 15;
+  }
+
+  function hasLedgerFilters() {
+    return (
+      ledgerSourceFilter !== "all" ||
+      ledgerStatusFilter !== "all" ||
+      ledgerCategoryFilter !== "all" ||
+      ledgerSearch.trim().length > 0
+    );
   }
 
   function workBelongsToLocation(work, locationId) {
@@ -1020,6 +1179,9 @@
             ["Días de ausencia aceptados", formatNumber(summary.acceptedAbsenceDays)],
             ["Miembros activos", summary.activeMembers],
             ["Ubicaciones activas", summary.activeLocations],
+            ["Total libro de gastos", formatMoney(ledgerSummary.total)],
+            ["Gastos pendientes", formatMoney(ledgerSummary.pending)],
+            ["Gastos manuales", formatMoney(ledgerSummary.manual)],
           ],
         },
         {
@@ -1065,6 +1227,18 @@
           title: "Categorias de consumibles",
           headers: ["Categoria", "Articulos", "Valor"],
           rows: categoryTotals.map((item) => [item.label, item.count, formatMoney(item.value)]),
+        },
+        {
+          title: "Libro de gastos",
+          headers: ["Fecha", "Concepto", "Categoria", "Origen", "Estado", "Importe"],
+          rows: filteredLedger.map((expense) => [
+            formatDate(expense.date),
+            expense.title,
+            expense.categoryLabel,
+            expense.sourceLabel,
+            expense.status === "paid" ? "Pagado" : "Pendiente",
+            formatMoney(expense.amount),
+          ]),
         },
         ...(ghostSummaries.length
           ? [{
@@ -1325,6 +1499,216 @@
               <span>Ubicaciones activas</span>
               <strong>{summary.activeLocations}</strong>
               <small>{formatMoney(summary.totalLocationBudget)} presupuestado</small>
+            </article>
+          </section>
+
+          <section class="ledger-section">
+            <article class="panel ledger-panel">
+              <div class="panel-heading">
+                <div>
+                  <p>Libro de gastos</p>
+                  <h2>Gastos unificados del equipo</h2>
+                </div>
+                <div class="ledger-heading-actions">
+                  <ReceiptText size={20} />
+                  {#if $teamExpensesStateStore.loading}
+                    <span class="ledger-loading"><LoaderCircle size={14} /> Cargando...</span>
+                  {/if}
+                  <button
+                    type="button"
+                    class="ledger-open-expenses"
+                    onclick={() => navigateTo(`/teams/${team?.id}/expenses`)}
+                  >
+                    <ExternalLink size={15} />
+                    <span>Gestionar gastos</span>
+                  </button>
+                </div>
+              </div>
+
+              <p class="ledger-hint">
+                Reúne en un solo libro los gastos manuales, los pagos registrados y las
+                entradas de inventario. Se aplican el periodo, la ubicación y el miembro
+                seleccionados arriba.
+              </p>
+
+              {#if $teamExpensesStateStore.errors.length}
+                <div class="ledger-warning">
+                  <AlertCircle size={16} />
+                  <span>No se pudo cargar parte del libro de gastos. Revisa la conexión.</span>
+                </div>
+              {/if}
+
+              <div class="ledger-summary">
+                <div class="ledger-summary-card">
+                  <span>Total</span>
+                  <strong>{formatMoney(ledgerSummary.total)}</strong>
+                  <small>{ledgerSummary.count} {ledgerSummary.count === 1 ? "apunte" : "apuntes"}</small>
+                </div>
+                <div class="ledger-summary-card">
+                  <span>Pagado</span>
+                  <strong>{formatMoney(ledgerSummary.paid)}</strong>
+                  <small>Confirmado</small>
+                </div>
+                <div class="ledger-summary-card">
+                  <span>Pendiente</span>
+                  <strong>{formatMoney(ledgerSummary.pending)}</strong>
+                  <small>Sin confirmar</small>
+                </div>
+                <div class="ledger-summary-card">
+                  <span>Manual</span>
+                  <strong>{formatMoney(ledgerSummary.manual)}</strong>
+                  <small>Alta manual</small>
+                </div>
+                <div class="ledger-summary-card">
+                  <span>Automático</span>
+                  <strong>{formatMoney(ledgerSummary.automatic)}</strong>
+                  <small>Pagos e inventario</small>
+                </div>
+              </div>
+
+              <div class="ledger-filters">
+                <label class="compact-field ledger-search-field">
+                  <span>Buscar</span>
+                  <div class="ledger-search-input">
+                    <Search size={15} />
+                    <input
+                      type="search"
+                      placeholder="Concepto, proveedor, factura..."
+                      bind:value={ledgerSearch}
+                    />
+                  </div>
+                </label>
+                <label class="compact-field">
+                  <span>Origen</span>
+                  <select bind:value={ledgerSourceFilter}>
+                    <option value="all">Todos</option>
+                    <option value="manual">Manual</option>
+                    <option value="payment">Pagos</option>
+                    <option value="inventory">Inventario</option>
+                  </select>
+                </label>
+                <label class="compact-field">
+                  <span>Estado</span>
+                  <select bind:value={ledgerStatusFilter}>
+                    <option value="all">Todos</option>
+                    <option value="paid">Pagado</option>
+                    <option value="pending">Pendiente</option>
+                  </select>
+                </label>
+                <label class="compact-field">
+                  <span>Categoría</span>
+                  <select bind:value={ledgerCategoryFilter}>
+                    <option value="all">Todas</option>
+                    {#each ledgerCategories as category (category.value)}
+                      <option value={category.value}>{category.label}</option>
+                    {/each}
+                  </select>
+                </label>
+                {#if hasLedgerFilters()}
+                  <button type="button" class="ledger-reset" onclick={resetLedgerFilters}>
+                    Limpiar filtros
+                  </button>
+                {/if}
+              </div>
+
+              <div class="ledger-body">
+                <div class="ledger-list">
+                  {#if visibleLedger.length}
+                    <div class="ledger-row ledger-head">
+                      <span>Fecha</span>
+                      <span>Concepto</span>
+                      <span>Categoría</span>
+                      <span>Origen</span>
+                      <span>Estado</span>
+                      <span>Importe</span>
+                    </div>
+                    {#each visibleLedger as expense (expense.id)}
+                      <div class="ledger-row">
+                        <span class="ledger-cell" data-label="Fecha">{formatDate(expense.date)}</span>
+                        <span class="ledger-cell ledger-concept" data-label="Concepto">
+                          <strong>{expense.title}</strong>
+                          {#if expense.vendorName || expense.invoiceNumber}
+                            <small>
+                              {expense.vendorName || ""}{expense.vendorName && expense.invoiceNumber ? " · " : ""}{expense.invoiceNumber || ""}
+                            </small>
+                          {/if}
+                        </span>
+                        <span class="ledger-cell" data-label="Categoría">{expense.categoryLabel}</span>
+                        <span class="ledger-cell" data-label="Origen">
+                          <span class="ledger-badge source-{expense.source}">{expense.sourceLabel}</span>
+                        </span>
+                        <span class="ledger-cell" data-label="Estado">
+                          <span class="ledger-badge status-{expense.status}">
+                            {expense.status === "paid" ? "Pagado" : "Pendiente"}
+                          </span>
+                        </span>
+                        <span class="ledger-cell ledger-amount" data-label="Importe">
+                          {formatMoney(expense.amount)}
+                        </span>
+                      </div>
+                    {/each}
+                    {#if hasMoreLedger}
+                      <button
+                        type="button"
+                        class="ledger-more"
+                        onclick={() => (ledgerVisibleCount += 15)}
+                      >
+                        Ver {Math.min(15, filteredLedger.length - ledgerVisibleCount)} más
+                      </button>
+                    {/if}
+                  {:else}
+                    <div class="empty-inline">
+                      {hasLedgerFilters()
+                        ? "Sin gastos que coincidan con los filtros."
+                        : "Sin gastos registrados en este periodo."}
+                    </div>
+                  {/if}
+                </div>
+
+                <aside class="ledger-side">
+                  <div class="ledger-side-block">
+                    <h3>Por categoría</h3>
+                    {#if ledgerCategoryTotals.length}
+                      {#if distributionChartType === "pie"}
+                        <PieChart data={ledgerCategoryDistribution} valueFormatter={formatMoney} />
+                      {:else}
+                        <div class="bar-list">
+                          {#each ledgerCategoryTotals.slice(0, 6) as item}
+                            <div class="bar-row">
+                              <div class="bar-label">
+                                <span>{item.label}</span>
+                                <strong>{formatMoney(item.value)}</strong>
+                              </div>
+                              <div class="bar-track">
+                                <i style={`width: ${(item.value / maxLedgerCategoryValue) * 100}%; background: var(--warning-color);`}></i>
+                              </div>
+                            </div>
+                          {/each}
+                        </div>
+                      {/if}
+                    {:else}
+                      <div class="empty-inline">Sin categorías en este periodo.</div>
+                    {/if}
+                  </div>
+
+                  <div class="ledger-side-block">
+                    <h3>Evolución mensual</h3>
+                    {#if ledgerTrend.length}
+                      <div class="trend-bars">
+                        {#each ledgerTrend as item (item.key)}
+                          <div class="trend-item">
+                            <span>{formatMoney(item.total)}</span>
+                            <i style={`height: ${Math.max((item.total / maxLedgerTrendValue) * 100, 6)}%;`}></i>
+                            <small>{item.label}</small>
+                          </div>
+                        {/each}
+                      </div>
+                    {:else}
+                      <div class="empty-inline">Sin datos en este periodo.</div>
+                    {/if}
+                  </div>
+                </aside>
+              </div>
             </article>
           </section>
 
@@ -2749,6 +3133,288 @@
     border-radius: 12px;
   }
 
+  /* --- Libro de gastos --- */
+
+  .ledger-section {
+    display: grid;
+  }
+
+  .ledger-panel {
+    display: grid;
+    gap: 14px;
+  }
+
+  .ledger-heading-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .ledger-loading {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .ledger-loading :global(svg) {
+    animation: ledger-spin 1s linear infinite;
+  }
+
+  @keyframes ledger-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .ledger-open-expenses {
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .ledger-hint {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+  }
+
+  .ledger-warning {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-warning-subtle);
+    color: var(--warning-color);
+    font-size: 13px;
+  }
+
+  .ledger-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+  }
+
+  .ledger-summary-card {
+    display: grid;
+    gap: 4px;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+  }
+
+  .ledger-summary-card span {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+  }
+
+  .ledger-summary-card strong {
+    font-size: 18px;
+    overflow-wrap: anywhere;
+  }
+
+  .ledger-summary-card small {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .ledger-filters {
+    display: grid;
+    grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(120px, 1fr)) auto;
+    gap: 10px;
+    align-items: end;
+  }
+
+  .ledger-search-input {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-secondary);
+  }
+
+  .ledger-search-input input {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+    border: 0;
+    outline: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 14px;
+  }
+
+  .ledger-reset {
+    min-height: 40px;
+    padding: 0 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .ledger-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+
+  .ledger-list {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .ledger-row {
+    display: grid;
+    grid-template-columns: 84px minmax(0, 1.6fr) minmax(0, 1fr) 104px 96px 108px;
+    gap: 10px;
+    align-items: center;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    font-size: 13px;
+  }
+
+  .ledger-head {
+    padding: 0 12px;
+    border: 0;
+    background: transparent;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+  }
+
+  .ledger-cell {
+    min-width: 0;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+  }
+
+  .ledger-concept {
+    display: grid;
+    gap: 2px;
+  }
+
+  .ledger-concept strong {
+    font-size: 13px;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ledger-concept small {
+    font-size: 11px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ledger-amount {
+    font-weight: 700;
+    text-align: right;
+  }
+
+  .ledger-badge {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+    background: var(--bg-input);
+    color: var(--text-secondary);
+  }
+
+  .ledger-badge.source-manual {
+    background: var(--bg-accent-subtle);
+    color: var(--accent-ink);
+  }
+
+  .ledger-badge.source-payment {
+    background: var(--bg-success-subtle);
+    color: var(--success-color);
+  }
+
+  .ledger-badge.source-inventory {
+    background: var(--bg-info-subtle);
+    color: var(--info-color);
+  }
+
+  .ledger-badge.status-paid {
+    background: var(--bg-success-subtle);
+    color: var(--success-color);
+  }
+
+  .ledger-badge.status-pending {
+    background: var(--bg-warning-subtle);
+    color: var(--warning-color);
+  }
+
+  .ledger-more {
+    min-height: 40px;
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .ledger-side {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .ledger-side-block {
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+  }
+
+  .ledger-side-block h3 {
+    margin: 0;
+    font-size: 14px;
+    color: var(--text-primary);
+  }
+
   button:disabled,
   input:disabled,
   select:disabled {
@@ -2762,9 +3428,19 @@
     }
   }
 
+  @media (max-width: 1080px) {
+    .ledger-body {
+      grid-template-columns: 1fr;
+    }
+  }
+
   @media (max-width: 900px) {
     .insights-grid {
       grid-template-columns: 1fr;
+    }
+
+    .ledger-filters {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 
@@ -2832,6 +3508,45 @@
       justify-self: start;
       max-width: none;
       text-align: left;
+    }
+
+    .ledger-filters {
+      grid-template-columns: 1fr;
+    }
+
+    .ledger-head {
+      display: none;
+    }
+
+    .ledger-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 6px 10px;
+    }
+
+    .ledger-cell {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 8px;
+      align-items: baseline;
+    }
+
+    .ledger-cell::before {
+      content: attr(data-label);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-muted);
+    }
+
+    .ledger-concept {
+      grid-column: 1 / -1;
+      display: block;
+    }
+
+    .ledger-concept strong,
+    .ledger-concept small {
+      display: block;
     }
   }
 

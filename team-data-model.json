@@ -163,10 +163,17 @@
             "priority": "low | medium | high",
             "assigneeIds": ["userId"],
             "dueDate": "YYYY-MM-DD | null",
+            "attachments": [
+              {
+                "url": "https://res.cloudinary.com/.../image/upload/terreno.jpg",
+                "name": "terreno.jpg"
+              }
+            ],
             "createdBy": "userId",
             "createdAt": "ISO-8601 timestamp",
             "updatedAt": "ISO-8601 timestamp"
           },
+          "attachmentNotes": "Maximo 5 imagenes por tarea. Solo se guardan URLs de Cloudinary: los binarios se suben antes de persistir la tarea para que el documento siga siendo serializable en la cola offline.",
           "recommendedIndexes": [
             ["status", "dueDate"],
             ["assigneeIds", "status", "dueDate"]

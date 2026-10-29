@@ -31,8 +31,17 @@ export function subscribeToTeamTemplates(teamId, type = 'all') {
 
     if (!teamId) return () => {};
 
+    let templatesReference;
+    try {
+        templatesReference = collection(db, 'teams', teamId, 'templates');
+    } catch (error) {
+        console.error('Error starting team templates listener:', error);
+        teamTemplatesStore.set([]);
+        return () => {};
+    }
+
     const unsubscribe = onSnapshot(
-        collection(db, 'teams', teamId, 'templates'),
+        templatesReference,
         (snapshot) => {
             const requestedType = type === 'all' ? 'all' : normalizeTemplateType(type);
             const templates = snapshot.docs

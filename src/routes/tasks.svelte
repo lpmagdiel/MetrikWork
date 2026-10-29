@@ -10,11 +10,14 @@
     Circle,
     CheckCircle2,
     Loader,
+    LoaderCircle,
     Save,
     Edit2,
     X,
     Trash2,
     Bookmark,
+    Paperclip,
+    Upload,
   } from "lucide-svelte";
   import {
     selectedTeam,
@@ -35,6 +38,7 @@
     getProfileImage,
     isProfileImage,
     hasTeamPermission,
+    normalizeTaskAttachments,
   } from "../data/stores.js";
   import { navigateTo } from "../router.js";
   import SliceContainer from "../components/SliceContainer.svelte";
@@ -42,7 +46,24 @@
     import AvatarCircle from "../components/AvatarCircle.svelte";
     import CircleAddButton from "../components/CircleAddButton.svelte";
   import TitleHeader from "../components/TitleHeader.svelte";
-  import { optimizeCloudinary } from "../helpers/image.js";
+  import { optimizeCloudinary, stripImageFileExtension } from "../helpers/image.js";
+  import { showErrorAlert, showInfoAlert } from "../data/alerts.js";
+  import {
+    convertHeicToJpeg,
+    destroyer,
+    isHeicFile,
+    resizeImageFile,
+    uploader,
+  } from "../data/fileHelper.js";
+
+  const CLOUDINARY_PRESET_TASKS =
+    import.meta.env.VITE_CLOUDINARY_PRESET_TASKS ||
+    import.meta.env.CLOUDINARY_PRESET_TASKS ||
+    import.meta.env.VITE_CLOUDINARY_PRESET_GALLERY ||
+    import.meta.env.CLOUDINARY_PRESET_GALLERY ||
+    "MetricWork";
+
+  const MAX_ATTACHMENTS = 5;
 
   let team = $derived($selectedTeam);
   let canViewTasks = $derived(hasTeamPermission(team, $userStore?.uid, "tasks", "view"));
@@ -89,6 +110,14 @@
   let taskTemplateName = $state("");
   let isSavingTemplate = $state(false);
   let deletingTemplateId = $state("");
+
+  // Adjuntos (imágenes) de la tarea
+  let taskAttachments = $state([]);
+  let removedAttachments = $state([]);
+  let isUploadingAttachments = $state(false);
+  let attachmentFileInput;
+  let lightboxAttachments = $state(null);
+  let lightboxIndex = $state(0);
 
   $effect(() => {
     if (team?.id && canViewTasks) {
@@ -218,6 +247,8 @@
   function openAddTask() {
     editingTaskId = null;
     taskTemplateName = "";
+    taskAttachments = [];
+    removedAttachments = [];
     taskForm = {
       title: "",
       description: "",
@@ -231,6 +262,10 @@
   function openEditTask(task) {
     editingTaskId = task.id;
     taskTemplateName = "";
+    taskAttachments = normalizeTaskAttachments(task.attachments).map((attachment) => ({
+      ...attachment,
+    }));
+    removedAttachments = [];
     taskForm = {
       title: task.title || "",
       description: task.description || "",
@@ -314,18 +349,24 @@
     if ((editingTaskId && !canEditTasks) || (!editingTaskId && !canCreateTasks)) return;
     isSavingTask = true;
     try {
+      const attachments = normalizeTaskAttachments(taskAttachments);
       const data = {
         ...taskForm,
         dueDate: taskForm.dueDate
           ? new Date(taskForm.dueDate).toISOString()
           : null,
+        attachments,
       };
+      const attachmentsToDelete = [...removedAttachments];
       let result;
       if (editingTaskId) {
         result = await updateTeamTask(team.id, editingTaskId, data);
       } else {
         result = await addTeamTask(team.id, data, $userStore, team.name);
       }
+      await cleanupRemovedAttachments(attachmentsToDelete);
+      taskAttachments = [];
+      removedAttachments = [];
       showAddTask = false;
       if (result?.queued) {
         messageToast = "Guardado sin conexión. Se sincronizará automáticamente.";
@@ -343,7 +384,140 @@
 
   async function handleDeleteTask(taskId) {
     if (!team?.id || !canDeleteTasks) return;
+    const task = $teamTasksStore.find((item) => item.id === taskId);
     await deleteTeamTask(team.id, taskId);
+    await cleanupRemovedAttachments(normalizeTaskAttachments(task?.attachments).map((item) => item.url));
+  }
+
+  function openAttachmentPicker() {
+    if (isUploadingAttachments) return;
+    if (taskAttachments.length >= MAX_ATTACHMENTS) {
+      showInfoAlert(
+        "Límite alcanzado",
+        `Solo puedes adjuntar hasta ${MAX_ATTACHMENTS} imágenes por tarea.`,
+      );
+      return;
+    }
+    attachmentFileInput?.click();
+  }
+
+  async function handleAttachmentsChange(event) {
+    const files = Array.from(event.currentTarget.files || []);
+    event.currentTarget.value = "";
+    const imageFiles = files.filter((file) =>
+      file.type.startsWith("image/") || /\.(heic|heif)$/i.test(file.name || "")
+    );
+    if (!imageFiles.length) {
+      showErrorAlert("Archivos no válidos", "Selecciona una o varias imágenes.");
+      return;
+    }
+
+    const slotsLeft = MAX_ATTACHMENTS - taskAttachments.length;
+    if (slotsLeft <= 0) {
+      showInfoAlert(
+        "Límite alcanzado",
+        `Solo puedes adjuntar hasta ${MAX_ATTACHMENTS} imágenes por tarea.`,
+      );
+      return;
+    }
+
+    const filesToUpload = imageFiles.slice(0, slotsLeft);
+    isUploadingAttachments = true;
+    try {
+      for (const file of filesToUpload) {
+        try {
+          let processableFile = file;
+          if (isHeicFile(file)) {
+            try {
+              const jpegBlob = await convertHeicToJpeg(file);
+              processableFile = new File(
+                [jpegBlob],
+                (file.name || "imagen").replace(/\.(heic|heif)$/i, ".jpg"),
+                { type: "image/jpeg", lastModified: file.lastModified || Date.now() },
+              );
+            } catch (heicError) {
+              console.error("Error converting HEIC:", heicError);
+              showErrorAlert(
+                "Foto HEIC no compatible",
+                "No se pudo convertir la foto HEIC del iPhone. Activa 'Formato más compatible' en Ajustes > Cámara, o sube una imagen JPEG.",
+              );
+              continue;
+            }
+          }
+          const resized = await resizeImageFile(processableFile, 1800, {
+            type: "image/jpeg",
+            quality: 0.85,
+            preprocess: false,
+          });
+          const url = await uploader(resized, CLOUDINARY_PRESET_TASKS);
+          taskAttachments = [
+            ...taskAttachments,
+            { url, name: file.name || "Imagen" },
+          ];
+        } catch (error) {
+          console.error("Error uploading task attachment:", error);
+          showErrorAlert(
+            "No se pudo subir la imagen",
+            error?.message || "Inténtalo de nuevo con otra imagen.",
+          );
+        }
+      }
+    } finally {
+      isUploadingAttachments = false;
+    }
+  }
+
+  function removeAttachment(index) {
+    const target = taskAttachments[index];
+    if (!target) return;
+    // Solo se borra en Cloudinary lo que ya estaba guardado en la tarea.
+    if (editingTaskId) {
+      removedAttachments = [...removedAttachments, target.url];
+    }
+    taskAttachments = taskAttachments.filter((_, itemIndex) => itemIndex !== index);
+  }
+
+  async function cleanupRemovedAttachments(urls) {
+    if (!Array.isArray(urls) || !urls.length) return;
+    await Promise.all(
+      urls.map(async (url) => {
+        if (!url || !url.includes("cloudinary.com")) return;
+        try {
+          await destroyer(url);
+        } catch (error) {
+          console.warn("No se pudo eliminar el adjunto de Cloudinary:", error);
+        }
+      }),
+    );
+  }
+
+  function openAttachmentLightbox(task, index = 0) {
+    const attachments = normalizeTaskAttachments(task?.attachments);
+    if (!attachments.length) return;
+    lightboxAttachments = { id: task.id, attachments };
+    lightboxIndex = Math.min(Math.max(0, index), attachments.length - 1);
+  }
+
+  function closeAttachmentLightbox() {
+    lightboxAttachments = null;
+    lightboxIndex = 0;
+  }
+
+  function handleLightboxBackdrop(event) {
+    if (event.target === event.currentTarget) closeAttachmentLightbox();
+  }
+
+  function handleLightboxKeydown(event) {
+    if (event.key === "Escape") closeAttachmentLightbox();
+    if (event.key === "ArrowRight") nextAttachment(1);
+    if (event.key === "ArrowLeft") nextAttachment(-1);
+  }
+
+  function nextAttachment(delta) {
+    if (!lightboxAttachments) return;
+    const total = lightboxAttachments.attachments.length;
+    if (total <= 1) return;
+    lightboxIndex = (lightboxIndex + delta + total) % total;
   }
 
   function toggleAssignedMember(memberId) {
@@ -493,6 +667,29 @@
                     <p class="task-desc">{task.description}</p>
                   {/if}
 
+                  {#if task.attachments?.length}
+                    <div class="attachment-strip" aria-label="Imágenes adjuntas">
+                      {#each task.attachments.slice(0, 4) as attachment, index (attachment.url)}
+                        <button
+                          type="button"
+                          class="attachment-thumb"
+                          onclick={() => openAttachmentLightbox(task, index)}
+                          aria-label={`Ver imagen ${index + 1} de ${task.attachments.length}`}
+                        >
+                          <img
+                            src={optimizeCloudinary(attachment.url, 120, { height: 120, crop: "fill" })}
+                            alt={attachment.name}
+                            loading="lazy"
+                            decoding="async"
+                          />
+                        </button>
+                      {/each}
+                      {#if task.attachments.length > 4}
+                        <span class="attachment-more">+{task.attachments.length - 4}</span>
+                      {/if}
+                    </div>
+                  {/if}
+
                   {#if task.assignedTo?.length > 0}
                     <div class="assignees-row">
                       <UserCheck size={13} color="var(--text-secondary)" />
@@ -610,6 +807,80 @@
       </div>
     </div>
 
+    <div class="form-group attachment-group">
+      <div class="attachment-heading">
+        <span class="attachment-label">
+          <Paperclip size={15} />
+          Imágenes adjuntas
+        </span>
+        <small>{taskAttachments.length}/{MAX_ATTACHMENTS}</small>
+      </div>
+
+      {#if taskAttachments.length}
+        <ul class="attachment-list" aria-label="Imágenes adjuntas">
+          {#each taskAttachments as attachment, index (attachment.url)}
+            <li class="attachment-chip">
+              <button
+                type="button"
+                class="attachment-preview"
+                onclick={() => openAttachmentLightbox({ id: editingTaskId || "new", attachments: taskAttachments }, index)}
+                aria-label={`Ver ${attachment.name}`}
+              >
+                <img
+                  src={optimizeCloudinary(attachment.url, 120, { height: 120, crop: "fill" })}
+                  alt={attachment.name}
+                  loading="lazy"
+                  decoding="async"
+                />
+              </button>
+              <div class="attachment-meta">
+                <strong>{stripImageFileExtension(attachment.name, "Imagen")}</strong>
+                <small>{attachment.name}</small>
+              </div>
+              <button
+                type="button"
+                class="attachment-remove"
+                onclick={() => removeAttachment(index)}
+                disabled={isSavingTask}
+                aria-label={`Quitar ${attachment.name}`}
+              >
+                <X size={16} />
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+
+      <div class="attachment-actions">
+        <button
+          type="button"
+          class="attachment-add"
+          onclick={openAttachmentPicker}
+          disabled={isUploadingAttachments || isSavingTask || taskAttachments.length >= MAX_ATTACHMENTS}
+        >
+          {#if isUploadingAttachments}
+            <span class="attachment-spinner"><LoaderCircle size={17} /></span>
+            <span>Subiendo...</span>
+          {:else}
+            <Upload size={17} />
+            <span>Adjuntar imagen</span>
+          {/if}
+        </button>
+        <p class="attachment-hint">
+          Añade fotos del terreno, material o el resultado esperado.
+        </p>
+      </div>
+
+      <input
+        bind:this={attachmentFileInput}
+        type="file"
+        accept="image/heic,image/heif,image/jpeg,image/png,image/webp,image/*"
+        multiple
+        onchange={handleAttachmentsChange}
+        style="display:none"
+      />
+    </div>
+
     <div class="form-group">
       <fieldset>
         <legend>Estado</legend>
@@ -699,6 +970,60 @@
     {/if}
   </div>
 </SliceContainer>
+
+{#if lightboxAttachments}
+  <div
+    class="attachment-lightbox"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Imagen adjunta"
+    tabindex="-1"
+    onclick={handleLightboxBackdrop}
+    onkeydown={handleLightboxKeydown}
+  >
+    <button
+      type="button"
+      class="attachment-lightbox-close"
+      aria-label="Cerrar"
+      onclick={closeAttachmentLightbox}
+    >
+      <X size={22} />
+    </button>
+    <div class="attachment-lightbox-content">
+      {#if lightboxAttachments.attachments.length > 1}
+        <button
+          type="button"
+          class="attachment-lightbox-nav prev"
+          aria-label="Anterior"
+          onclick={() => nextAttachment(-1)}
+        >
+          ‹
+        </button>
+      {/if}
+      {#key `${lightboxAttachments.id || 'new'}-${lightboxIndex}`}
+        <img
+          class="attachment-lightbox-image"
+          src={optimizeCloudinary(lightboxAttachments.attachments[lightboxIndex].url, 1600)}
+          alt={lightboxAttachments.attachments[lightboxIndex].name}
+        />
+      {/key}
+      {#if lightboxAttachments.attachments.length > 1}
+        <button
+          type="button"
+          class="attachment-lightbox-nav next"
+          aria-label="Siguiente"
+          onclick={() => nextAttachment(1)}
+        >
+          ›
+        </button>
+      {/if}
+      <div class="attachment-lightbox-meta">
+        <strong>{stripImageFileExtension(lightboxAttachments.attachments[lightboxIndex].name, "Imagen")}</strong>
+        <small>{lightboxIndex + 1} de {lightboxAttachments.attachments.length}</small>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .tasks-page {
@@ -1359,5 +1684,281 @@
   .template-save-row button:disabled {
     opacity: 0.55;
     cursor: not-allowed;
+  }
+
+  /* --- Adjuntos de la tarea --- */
+
+  .attachment-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 10px 0 4px;
+  }
+
+  .attachment-thumb {
+    width: 54px;
+    height: 54px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--bg-input);
+    cursor: pointer;
+    line-height: 0;
+  }
+
+  .attachment-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .attachment-more {
+    width: 54px;
+    height: 54px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .attachment-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .attachment-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .attachment-heading small {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+
+  .attachment-list {
+    list-style: none;
+    margin: 0 0 12px;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+  }
+
+  .attachment-chip {
+    display: grid;
+    grid-template-columns: 46px minmax(0, 1fr) 34px;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+  }
+
+  .attachment-preview {
+    width: 46px;
+    height: 46px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--bg-card);
+    cursor: pointer;
+    line-height: 0;
+  }
+
+  .attachment-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .attachment-meta {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+  }
+
+  .attachment-meta strong {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .attachment-meta small {
+    font-size: 11px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .attachment-remove {
+    width: 34px;
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--danger-color);
+    cursor: pointer;
+  }
+
+  .attachment-remove:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .attachment-actions {
+    display: grid;
+    gap: 6px;
+  }
+
+  .attachment-add {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .attachment-add:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .attachment-spinner {
+    display: inline-flex;
+  }
+
+  .attachment-spinner :global(svg) {
+    animation: spin 1s linear infinite;
+  }
+
+  .attachment-hint {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .attachment-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.85);
+    padding: 20px;
+  }
+
+  .attachment-lightbox-content {
+    position: relative;
+    max-width: 100%;
+    max-height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .attachment-lightbox-image {
+    max-width: 100%;
+    max-height: 78vh;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+  }
+
+  .attachment-lightbox-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 42px;
+    height: 42px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.14);
+    color: #fff;
+    cursor: pointer;
+  }
+
+  .attachment-lightbox-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.14);
+    color: #fff;
+    font-size: 26px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .attachment-lightbox-nav.prev {
+    left: 8px;
+  }
+
+  .attachment-lightbox-nav.next {
+    right: 8px;
+  }
+
+  .attachment-lightbox-meta {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -46px;
+    display: grid;
+    gap: 2px;
+    justify-items: center;
+    color: #fff;
+  }
+
+  .attachment-lightbox-meta strong {
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .attachment-lightbox-meta small {
+    font-size: 11px;
+    opacity: 0.8;
   }
 </style>

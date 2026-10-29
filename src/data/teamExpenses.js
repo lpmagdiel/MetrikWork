@@ -63,8 +63,12 @@ export function subscribeToTeamExpenses(teamId, { includeInventory = false } = {
         });
     }
 
-    function listen(source, reference, store) {
+    function listen(source, getReference, store) {
         try {
+            // La referencia se construye dentro del try: si Firestore no está
+            // disponible, el fallo se degrada a un error por fuente en lugar de
+            // romper la página que lo consume.
+            const reference = getReference();
             const unsubscribe = onSnapshot(
                 reference,
                 (snapshot) => {
@@ -92,18 +96,18 @@ export function subscribeToTeamExpenses(teamId, { includeInventory = false } = {
 
     listen(
         'manual',
-        collection(db, 'teams', teamId, 'expenses'),
+        () => collection(db, 'teams', teamId, 'expenses'),
         manualTeamExpensesStore
     );
     listen(
         'payments',
-        query(collection(db, 'team_payments'), where('teamId', '==', teamId)),
+        () => query(collection(db, 'team_payments'), where('teamId', '==', teamId)),
         expensePaymentsStore
     );
     if (includeInventory) {
         listen(
             'inventory',
-            collection(db, 'teams', teamId, 'inventoryMovements'),
+            () => collection(db, 'teams', teamId, 'inventoryMovements'),
             expenseInventoryMovementsStore
         );
     }

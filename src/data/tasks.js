@@ -24,6 +24,7 @@ import {
 } from './offlineQueue.js';
 
 export const TEAM_TASKS_PAGE_SIZE = 20;
+export const MAX_TASK_ATTACHMENTS = 5;
 const ADD_TEAM_TASK_OPERATION = 'addTeamTask';
 const UPDATE_TEAM_TASK_OPERATION = 'updateTeamTask';
 export const tasksStore = writable([]);
@@ -71,6 +72,23 @@ function createClientTaskId() {
     return `task-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+/**
+ * Normaliza los adjuntos de una tarea a la forma `{ url, name }`.
+ * Solo se guardan URLs (Cloudinary): los binarios se suben antes de
+ * persistir la tarea para que el documento siga siendo serializable
+ * en la cola offline.
+ */
+export function normalizeTaskAttachments(attachments) {
+    if (!Array.isArray(attachments)) return [];
+    return attachments
+        .filter((attachment) => attachment && typeof attachment.url === 'string' && attachment.url)
+        .slice(0, MAX_TASK_ATTACHMENTS)
+        .map((attachment) => ({
+            url: String(attachment.url).slice(0, 600),
+            name: String(attachment.name || 'Imagen').trim().slice(0, 160) || 'Imagen'
+        }));
+}
+
 function buildTeamTaskDoc(taskData, user) {
     return {
         title: taskData.title,
@@ -78,6 +96,7 @@ function buildTeamTaskDoc(taskData, user) {
         status: taskData.status || 'unassigned',
         assignedTo: taskData.assignedTo || [],
         dueDate: taskData.dueDate || null,
+        attachments: normalizeTaskAttachments(taskData.attachments),
         createdAt: taskData.createdAt || new Date().toISOString(),
         createdBy: user.uid,
     };
@@ -168,10 +187,25 @@ export function subscribeToTeamTasks(teamId, options = {}) {
         hasMore: true
     };
 
-    const tasksQuery = query(
-        collection(db, 'teams', teamId, 'tasks'),
-        ...getTeamTasksConstraints(status, pageSize)
-    );
+    let tasksQuery;
+    try {
+        tasksQuery = query(
+            collection(db, 'teams', teamId, 'tasks'),
+            ...getTeamTasksConstraints(status, pageSize)
+        );
+    } catch (error) {
+        console.error('Error starting team tasks listener:', error);
+        teamTasksStore.set([]);
+        teamTasksPaginationStore.set({
+            isLoadingMore: false,
+            hasMore: false,
+            pageSize
+        });
+        return () => {
+            if (teamTasksUnsubscribe === null) teamTasksStore.set([]);
+        };
+    }
+
     const unsubscribe = onSnapshot(tasksQuery, (snapshot) => {
         const firstPageTasks = snapshot.docs.map(normalizeTaskDoc);
         if (teamTasksQueryState.olderTasks.length === 0) {

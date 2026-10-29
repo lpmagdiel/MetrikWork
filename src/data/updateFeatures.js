@@ -7,21 +7,17 @@
  * `localStorage.lastUpdateFeaturesVersion`.
  */
 export const updateData = {
-    version: "1.4.0", // Actualiza este valor en cada release
-    message: "MetricWork 1.4 - Pluses de festivo y fin de semana en los pagos del equipo",
+    version: "1.5.0", // Actualiza este valor en cada release
+    message: "MetricWork 1.5 - Imágenes en las tareas y libro de gastos en Estadísticas avanzadas",
     features: [
-        // Pluses de fin de semana y festivo
-        "Nuevo panel de 'Pluses por jornada especial' en los Ajustes del equipo: activa un plus de fin de semana y/o de festivo y define el importe por unidad de jornada.",
-        "Ambos pluses arrancan DESACTIVADOS y a 0€, asi que el comportamiento de los equipos existentes no cambia hasta que el admin los active de forma explicita.",
-        "El plus se cobra por UNIDAD de jornada: completa = X €, media = X/2 €, variable = horas/8 × X €. Las horas extra del mismo dia siguen pagando la tarifa extra, sin plus encima.",
-        "Lista de 'Festivos del equipo' editable desde Ajustes: añade cada festivo con fecha y nombre (Año Nuevo, Navidad, autonómicos, etc.) y se quitan con un boton. Un festivo que cae en sabado o domingo suma ambos pluses.",
-        "El calculo de pagos en 'team-payments' ahora desglosa pluses pendientes y los muestra como columna en la tabla, fila desplegable en movil y linea separada en el recibo PDF.",
-        "35 tests unitarios nuevos (`workBonuses.test.js`) cubren defaults, redondeo, media jornada, variable, overtime, fines de semana vs festivos y combinaciones de sabado+festivo.",
+        // Imágenes adjuntas en las tareas
+        "Las tareas ya admiten hasta 5 imágenes adjuntas: sube fotos del terreno, del material o del resultado esperado sin salir del formulario.",
+        "Las miniaturas aparecen en la tarjeta del kanban y se pueden ver a pantalla completa con el visor integrado (navegación con flechas y cierre con Escape).",
+        "Compatibilidad con fotos HEIC del iPhone (se convierten a JPEG automáticamente) y limpieza en Cloudinary de las imágenes que se quitan de una tarea o al eliminarla.",
 
-        // OCR en gastos (inteliOCR publico)
-        "El OCR de gastos ahora se sirve contra el endpoint publico de `inteliOCR` (sin API key): al adjuntar un recibo, el servidor reenvia la imagen al servicio y rellena importe, fecha, proveedor, NIF/CIF, numero de factura y categoria.",
-        "Se sustituyo la antigua clave OCR_API_KEY por variables de entorno sin secretos: `OCR_ENDPOINT` (URL base), `OCR_ENGINE` (`basic`, `vision` o `auto`) y `OCR_LANG` (`spa` o `eng`). Puedes cambiar de motor sin redeploy.",
-        "Modo `auto` con fallback automatico a `/basic` cuando el motor de vision falla 5xx del upstream, asi no te quedas sin OCR si la IA se cae.",
-        "El parsing heuristico (`receiptParser.js`, 31 tests unitarios) sigue ejecutandose en el servidor para los motores de texto crudo, manteniendo la misma extraccion de importes, fechas y NIFs.",
+        // Libro de gastos en Estadísticas avanzadas
+        "Nuevo panel 'Libro de gastos' en Estadísticas avanzadas: reúne en una tabla única los gastos manuales, los pagos del equipo y las entradas de inventario.",
+        "El libro incluye filtros por origen, estado, categoría y búsqueda, resumen de total/pagado/pendiente/manual/automático, reparto por categoría y evolución mensual.",
+        "El libro respeta el periodo, la ubicación y el miembro seleccionados en la página, y sus totales se incluyen también en la exportación a PDF y Excel.",
     ]
 };
