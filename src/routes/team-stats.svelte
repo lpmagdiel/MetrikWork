@@ -3450,6 +3450,24 @@
       gap: 12px;
     }
 
+    .chart-type-toggle {
+      align-items: stretch;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .chart-type-tabs {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      width: 100%;
+    }
+
+    .chart-type-tabs button {
+      min-width: 0;
+      justify-content: center;
+      padding-inline: 8px;
+    }
+
     .summary-band strong {
       font-size: 28px;
     }
