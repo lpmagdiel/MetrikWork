@@ -936,6 +936,7 @@ service cloud.firestore {
                           "attachments",
                           "purchased",
                           "purchasedAt",
+                          "items",
                           "updatedAt"
                         ])
                       );

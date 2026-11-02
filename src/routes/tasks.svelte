@@ -43,6 +43,8 @@
     isProfileImage,
     hasTeamPermission,
     normalizeTaskAttachments,
+    normalizeTaskItems,
+    MAX_TASK_ITEMS,
     getTeamGhosts,
     getGhostWorkdayUserId,
     isGhostUserId,
@@ -139,12 +141,59 @@
   );
 
   // Borrado seguro: al mantener pulsada una tarjeta aparece un botón
-  // flotante que pide confirmación antes de eliminar.
+  // flotante que pide confirmación antes de eliminar. También se puede
+  // arrastrar la tarjeta hasta ese botón y soltarla encima para borrarla.
   let pendingDeleteTaskId = $state(null);
   let isDeletingTask = $state(false);
   let longPressTimer = null;
   let longPressTriggered = false;
   let suppressCardClick = false;
+  let deleteFabElement = $state(null);
+  let lastPointerPosition = { x: 0, y: 0 };
+  let isPointerOverDeleteFab = $state(false);
+
+  // El botón flotante se ve mientras se arrastra (destino de la tarjeta) o
+  // cuando una pulsación larga ha marcado una tarea para borrar.
+  let showDeleteFab = $derived(Boolean(pendingDeleteTaskId) || isDraggingTask);
+
+  // Seguir el puntero mientras se arrastra para detectar si la tarjeta se
+  // suelta encima del botón de eliminar.
+  function updateDeleteFabHover() {
+    if (!deleteFabElement || !isDraggingTask) {
+      isPointerOverDeleteFab = false;
+      return;
+    }
+    const rect = deleteFabElement.getBoundingClientRect();
+    const { x, y } = lastPointerPosition;
+    isPointerOverDeleteFab =
+      x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+  }
+
+  function handleDragPointerMove(event) {
+    lastPointerPosition = { x: event.clientX, y: event.clientY };
+    updateDeleteFabHover();
+  }
+
+  function handleDragPointerUp(event) {
+    lastPointerPosition = { x: event.clientX, y: event.clientY };
+    updateDeleteFabHover();
+  }
+
+  $effect(() => {
+    if (!isDraggingTask) {
+      isPointerOverDeleteFab = false;
+      return;
+    }
+    const options = { capture: true, passive: true };
+    window.addEventListener("pointermove", handleDragPointerMove, options);
+    window.addEventListener("pointerup", handleDragPointerUp, options);
+    window.addEventListener("pointercancel", handleDragPointerUp, options);
+    return () => {
+      window.removeEventListener("pointermove", handleDragPointerMove, options);
+      window.removeEventListener("pointerup", handleDragPointerUp, options);
+      window.removeEventListener("pointercancel", handleDragPointerUp, options);
+    };
+  });
 
   // El botón flotante de borrado se oculta solo si no se usa.
   $effect(() => {
@@ -258,8 +307,6 @@
   function handleDndConsider(status, event) {
     if (!canMoveTasks) return;
     isDraggingTask = true;
-    // Al arrastrar se descarta el borrado pendiente: el gesto fue un arrastre.
-    pendingDeleteTaskId = null;
     updateColumnItems(status, event.detail.items);
   }
 
@@ -267,12 +314,26 @@
     if (!canMoveTasks || !team?.id) return;
 
     updateColumnItems(status, event.detail.items);
+    // Se guarda antes de limpiar el arrastre: indica si la tarjeta se ha
+    // soltado encima del botón flotante de eliminar.
+    const droppedOnDeleteFab = isPointerOverDeleteFab;
     isDraggingTask = false;
-    pendingDeleteTaskId = null;
 
     const movedTaskId = event.detail.info?.id;
     const movedTask = event.detail.items.find((task) => task.id === movedTaskId);
     const originalTask = $teamTasksStore.find((task) => task.id === movedTaskId);
+
+    // La tarjeta se ha soltado sobre el botón flotante de eliminar: se pide
+    // la confirmación y se borra la tarea que se estaba arrastrando.
+    if (movedTask && droppedOnDeleteFab) {
+      isPointerOverDeleteFab = false;
+      pendingDeleteTaskId = movedTaskId;
+      boardTasksByStatus = groupTasksByStatus($teamTasksStore);
+      await handleDeleteTask(movedTaskId);
+      return;
+    }
+
+    pendingDeleteTaskId = null;
 
     if (!movedTask || !originalTask || getTaskStatus(originalTask) === status) return;
 
@@ -326,6 +387,7 @@
       status: "pending",
       assignedTo: [],
       dueDate: "",
+      items: [],
     };
     showAddTask = true;
   }
@@ -343,8 +405,56 @@
       status: task.status || "pending",
       assignedTo: task.assignedTo ? [...task.assignedTo] : [],
       dueDate: task.dueDate ? task.dueDate.split("T")[0] : "",
+      items: normalizeTaskItems(task.items),
     };
     showAddTask = true;
+  }
+
+  // --- Lista de la compra ---
+
+  function addFormItem() {
+    if (taskForm.items.length >= MAX_TASK_ITEMS) {
+      showInfoAlert(
+        "Límite alcanzado",
+        `Una compra puede tener hasta ${MAX_TASK_ITEMS} artículos.`,
+      );
+      return;
+    }
+    taskForm.items = [
+      ...taskForm.items,
+      { id: `item-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`, text: "", done: false },
+    ];
+  }
+
+  function updateFormItemText(index, text) {
+    taskForm.items = taskForm.items.map((item, itemIndex) =>
+      itemIndex === index ? { ...item, text } : item
+    );
+  }
+
+  function toggleFormItemDone(index) {
+    taskForm.items = taskForm.items.map((item, itemIndex) =>
+      itemIndex === index ? { ...item, done: !item.done } : item
+    );
+  }
+
+  function removeFormItem(index) {
+    taskForm.items = taskForm.items.filter((_, itemIndex) => itemIndex !== index);
+  }
+
+  async function toggleTaskItem(task, itemId) {
+    if (!team?.id || !canManageTask(task)) return;
+    const items = normalizeTaskItems(task.items).map((item) =>
+      item.id === itemId ? { ...item, done: !item.done } : item
+    );
+    try {
+      await updateTeamTask(team.id, task.id, { items });
+    } catch (error) {
+      console.error("Error updating purchase item:", error);
+      messageToast = "No se pudo actualizar el artículo.";
+      typeToast = "error";
+      showToast = true;
+    }
   }
 
   function applyTaskTemplate(template) {
@@ -427,6 +537,7 @@
           ? new Date(taskForm.dueDate).toISOString()
           : null,
         attachments,
+        items: normalizeTaskItems(taskForm.items),
       };
       const attachmentsToDelete = [...removedAttachments];
       let result;
@@ -848,8 +959,16 @@
                   class:purchased={task.purchased}
                   style="border-left-color:{cfg.color}"
                   aria-label={task.title}
+                  role="button"
+                  tabindex="0"
                   animate:flip={{ duration: flipDurationMs }}
                   onclick={() => handleCardClick(task)}
+                  onkeydown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      handleCardClick(task);
+                    }
+                  }}
                   onpointerdown={() => handleCardPointerDown(task)}
                   onpointerup={handleCardPointerUp}
                   onpointercancel={handleCardPointerCancel}
@@ -921,7 +1040,38 @@
                   </div>
 
                   <h3 class="task-title">{task.title}</h3>
-                  {#if task.description}
+
+                  {#if column.key === TASK_STATUS.purchases}
+                    {#if normalizeTaskItems(task.items).length}
+                      <ul class="purchase-items" aria-label="Artículos a comprar">
+                        {#each normalizeTaskItems(task.items) as item (item.id)}
+                          <li class:done={item.done}>
+                            <button
+                              type="button"
+                              class="purchase-item-check"
+                              onclick={(event) => {
+                                event.stopPropagation();
+                                toggleTaskItem(task, item.id);
+                              }}
+                              aria-pressed={item.done}
+                              aria-label={`Marcar ${item.text} como comprado`}
+                            >
+                              {#if item.done}
+                                <CheckCircle2 size={15} />
+                              {:else}
+                                <Circle size={15} />
+                              {/if}
+                            </button>
+                            <span>{item.text}</span>
+                          </li>
+                        {/each}
+                      </ul>
+                    {:else if task.description}
+                      <p class="task-desc">{task.description}</p>
+                    {:else}
+                      <p class="task-desc muted">Sin artículos en la lista</p>
+                    {/if}
+                  {:else if task.description}
                     <p class="task-desc">{task.description}</p>
                   {/if}
 
@@ -1008,13 +1158,15 @@
   {/if}
 </div>
 
-<!-- Botón flotante de borrado (pulsación larga sobre la tarjeta) -->
-{#if pendingDeleteTaskId}
+<!-- Botón flotante de borrado (pulsación larga o destino al arrastrar) -->
+{#if showDeleteFab}
   <button
     type="button"
     class="delete-fab"
     class:dragging={isDraggingTask}
-    onclick={() => handleDeleteTask(pendingDeleteTaskId)}
+    class:target={isPointerOverDeleteFab}
+    bind:this={deleteFabElement}
+    onclick={() => pendingDeleteTaskId && handleDeleteTask(pendingDeleteTaskId)}
     aria-label="Eliminar la tarea"
     disabled={isDeletingTask}
   >
@@ -1254,6 +1406,47 @@
         </div>
       </fieldset>
     </div>
+
+    {#if taskForm.status === TASK_STATUS.purchases}
+      <div class="form-group">
+        <fieldset>
+          <legend>Artículos a comprar</legend>
+          <div class="items-editor">
+            {#each taskForm.items as item, index (item.id)}
+              <div class="item-row">
+                <input
+                  type="checkbox"
+                  checked={item.done}
+                  onchange={() => toggleFormItemDone(index)}
+                  aria-label={`Marcar ${item.text || 'artículo'}`}
+                />
+                <input
+                  type="text"
+                  value={item.text}
+                  oninput={(event) => updateFormItemText(index, event.currentTarget.value)}
+                  placeholder="Artículo a comprar"
+                />
+                <button
+                  type="button"
+                  class="item-remove"
+                  onclick={() => removeFormItem(index)}
+                  aria-label="Quitar artículo"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            {/each}
+            <button type="button" class="item-add" onclick={addFormItem}>
+              <Plus size={16} />
+              <span>Añadir artículo</span>
+            </button>
+            <small class="form-hint">
+              La compra se mostrará como una lista TODO en el apartado de compras.
+            </small>
+          </div>
+        </fieldset>
+      </div>
+    {/if}
 
     {#if memberList.length > 0}
       <div class="form-group">
@@ -1636,10 +1829,6 @@
   .action-btn:hover {
     background: var(--bg-input);
     color: var(--text-primary);
-  }
-  .action-btn.danger:hover {
-    background: var(--bg-danger-subtle);
-    color: var(--danger-color);
   }
 
   .task-title {
@@ -2379,6 +2568,111 @@
     color: var(--text-muted);
   }
 
+  /* Lista de artículos de la compra (estilo TODO) */
+  .purchase-items {
+    list-style: none;
+    margin: 0 0 10px;
+    padding: 0;
+    display: grid;
+    gap: 6px;
+  }
+
+  .purchase-items li {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 14px;
+    line-height: 1.4;
+    color: var(--text-primary);
+  }
+
+  .purchase-items li.done span {
+    text-decoration: line-through;
+    color: var(--text-muted);
+  }
+
+  .purchase-item-check {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    border: none;
+    background: none;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+
+  .purchase-item-check:hover {
+    color: var(--status-purchases-color);
+  }
+
+  .purchase-items li.done .purchase-item-check {
+    color: var(--status-purchases-color);
+  }
+
+  .task-desc.muted {
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  /* Editor de artículos del formulario */
+  .items-editor {
+    display: grid;
+    gap: 8px;
+  }
+
+  .item-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .item-row input[type="text"] {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .item-remove {
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: 8px;
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+
+  .item-remove:hover {
+    background: var(--bg-danger-subtle);
+    color: var(--danger-color);
+  }
+
+  .item-add {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    justify-self: start;
+    border: 1px dashed var(--border-color);
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .item-add:hover {
+    color: var(--text-primary);
+    border-color: var(--status-purchases-color);
+  }
+
   .purchased-badge {
     display: inline-flex;
     align-items: center;
@@ -2434,13 +2728,22 @@
     cursor: default;
   }
 
-  /* Mientras se arrastra una tarjeta el botón no debe capturar el gesto. */
+  /* Mientras se arrastra una tarjeta el botón no debe capturar el gesto:
+     se usa como destino de la tarjeta que se arrastra. */
   .delete-fab.dragging {
     pointer-events: none;
-    opacity: 0.4;
+    opacity: 0.75;
   }
 
-  .delete-fab-spin {
+  /* La tarjeta está encima del botón: se resalta como destino. */
+  .delete-fab.target {
+    background: var(--danger-color);
+    opacity: 1;
+    transform: translateX(-50%) scale(1.18);
+    box-shadow: 0 12px 30px rgba(220, 38, 38, 0.55);
+  }
+
+  :global(.delete-fab-spin) {
     animation: spin 0.8s linear infinite;
   }
 

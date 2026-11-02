@@ -31,6 +31,7 @@ import {
 
 export const TEAM_TASKS_PAGE_SIZE = 20;
 export const MAX_TASK_ATTACHMENTS = 5;
+export const MAX_TASK_ITEMS = 40;
 const ADD_TEAM_TASK_OPERATION = 'addTeamTask';
 const UPDATE_TEAM_TASK_OPERATION = 'updateTeamTask';
 
@@ -112,6 +113,35 @@ export function normalizeTaskAttachments(attachments) {
 }
 
 /**
+ * Normaliza la lista de artículos de una compra a la forma
+ * `{ id, text, done }`. Las compras se muestran como una lista TODO.
+ */
+export function normalizeTaskItems(items) {
+    if (!Array.isArray(items)) return [];
+
+    const normalized = [];
+    const seenIds = new Set();
+
+    items.forEach((item, index) => {
+        const text = String(item?.text ?? item?.label ?? '').trim().slice(0, 120);
+        if (!text) return;
+        let id = String(item?.id || '').trim();
+        if (!id || seenIds.has(id)) {
+            id = `item-${index}-${text.slice(0, 12)}`;
+        }
+        if (seenIds.has(id)) return;
+        seenIds.add(id);
+        normalized.push({
+            id,
+            text,
+            done: Boolean(item?.done)
+        });
+    });
+
+    return normalized.slice(0, MAX_TASK_ITEMS);
+}
+
+/**
  * Masters de los fantasmas asignados a una tarea.
  *
  * Se guardan como lista de uids en la propia tarea porque las reglas de
@@ -160,6 +190,7 @@ function buildTeamTaskDoc(taskData, user, team = null) {
         ghostMasterIds: getTaskGhostMasterIds(team, assignedTo),
         purchased: Boolean(taskData.purchased),
         purchasedAt: taskData.purchasedAt || null,
+        items: normalizeTaskItems(taskData.items),
     };
 }
 
