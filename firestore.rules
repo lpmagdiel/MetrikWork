@@ -37,26 +37,87 @@ service cloud.firestore {
     // Comprueba si el módulo de permisos está guardado para este miembro.
     // No se presupone que exista: los equipos antiguos no tienen guardados los
     // módulos añadidos más tarde y acceder a ellos provocaría un error.
+    // El documento del equipo se lee UNA sola vez: antes se repetía get()
+    // hasta ocho veces dentro de la misma comprobación y se agotaba el
+    // límite de 10 accesos a documentos por operación de Firestore.
+    function memberPermissionsMap(teamId) {
+      let team = get(/databases/$(database)/documents/teams/$(teamId)).data;
+      let permissions = team.get("memberPermissions", {});
+      return permissions is map ? permissions : {};
+    }
+
     function hasPermissionModule(teamId, module) {
+      let permissions = memberPermissionsMap(teamId);
+      let member = permissions.get(request.auth.uid, {});
       return isTeamMember(teamId) &&
-             teamData(teamId).keys().hasAll(["memberPermissions"]) &&
-             teamData(teamId).memberPermissions is map &&
-             teamData(teamId).memberPermissions.keys().hasAll([request.auth.uid]) &&
-             teamData(teamId).memberPermissions[request.auth.uid] is map &&
-             teamData(teamId).memberPermissions[request.auth.uid].keys().hasAll([module]);
+             member is map &&
+             member.keys().hasAll([module]);
     }
 
     // Permiso de una acción dentro de un módulo, sin presuponer que el módulo
     // ni la acción estén guardados.
     function hasModulePermission(teamId, module, action) {
-      return hasPermissionModule(teamId, module) &&
-             teamData(teamId).memberPermissions[request.auth.uid][module] is map &&
-             teamData(teamId).memberPermissions[request.auth.uid][module][action] == true;
+      let permissions = memberPermissionsMap(teamId);
+      let member = permissions.get(request.auth.uid, {});
+      let modulePermissions = member is map ? member.get(module, {}) : {};
+      return isTeamMember(teamId) &&
+             modulePermissions is map &&
+             modulePermissions.get(action, false) == true;
     }
 
     function hasTeamPermission(teamId, module, action) {
       return isTeamAdmin(teamId) ||
              hasModulePermission(teamId, module, action);
+    }
+
+    // --- PERMISOS DEL EQUIPO RESUELTOS CON UNA SOLA LECTURA ---
+    // Firestore permite como máximo 10 accesos a documentos por operación.
+    // La cadena de actualización del equipo consultaba el documento del
+    // equipo varias veces por cada módulo (y hasTeamPermission lo repetía
+    // hasta ocho veces), agotando ese límite y devolviendo "Missing or
+    // insufficient permissions" aunque el miembro tuviera el permiso.
+    // Estas funciones leen el equipo una única vez y resuelven toda la cadena.
+
+    function modulePermissionEnabled(modules, module, action) {
+      let modulePermissions = modules.get(module, {});
+      return modulePermissions is map &&
+             modulePermissions.get(action, false) == true;
+    }
+
+    function isTeamUpdateAllowedByModule(teamId) {
+      let team = get(/databases/$(database)/documents/teams/$(teamId)).data;
+      let permissions = team.get("memberPermissions", {});
+      let member = permissions is map ? permissions.get(request.auth.uid, {}) : {};
+      let modules = member is map ? member : {};
+      let isMember = request.auth.uid in team.get("members", []);
+      return isMember &&
+             (
+               modulePermissionEnabled(modules, "settings", "create") ||
+               modulePermissionEnabled(modules, "settings", "edit") ||
+               modulePermissionEnabled(modules, "settings", "delete") ||
+               (
+                 modulePermissionEnabled(modules, "stats", "edit") &&
+                 isStatsBudgetUpdate()
+               ) ||
+               (
+                 (
+                   modulePermissionEnabled(modules, "payments", "create") ||
+                   modulePermissionEnabled(modules, "payments", "edit")
+                 ) &&
+                 isStatsBudgetUpdate()
+               ) ||
+               (
+                 (
+                   modulePermissionEnabled(modules, "ghosts", "create") ||
+                   modulePermissionEnabled(modules, "ghosts", "control")
+                 ) &&
+                 isGhostsUpdate()
+               ) ||
+               (
+                 isMasterGhostUpdate(teamId) &&
+                 isGhostsUpdate()
+               )
+             );
     }
 
     // Los gastos tienen su propio módulo de permisos. En los equipos creados
@@ -287,6 +348,12 @@ service cloud.firestore {
     }
 
     function isAcceptingTeamInvitation(teamId) {
+      // La invitación se lee UNA sola vez. Cada llamada a getAfter() cuenta
+      // como un acceso a documento y Firestore permite como máximo 10 accesos
+      // por operación: al encadenar cuatro llamadas (junto con la cadena de
+      // permisos del equipo) se superaba el límite y toda la regla fallaba
+      // con "Missing or insufficient permissions", impidiendo aceptar.
+      let invitation = teamInvitationAfter(teamId);
       return request.auth != null &&
              !(request.auth.uid in resource.data.members) &&
              request.auth.uid in request.resource.data.members &&
@@ -298,10 +365,10 @@ service cloud.firestore {
                "memberPermissions",
                "updatedAt"
              ]) &&
-             teamInvitationAfter(teamId).teamId == teamId &&
-             teamInvitationAfter(teamId).invitedUserId == request.auth.uid &&
-             teamInvitationAfter(teamId).status == "aceptado" &&
-             request.resource.data.memberPermissions[request.auth.uid] == teamInvitationAfter(teamId).permissions &&
+             invitation.teamId == teamId &&
+             invitation.invitedUserId == request.auth.uid &&
+             invitation.status == "aceptado" &&
+             request.resource.data.memberPermissions[request.auth.uid] == invitation.permissions &&
              request.resource.data.membersData.hasAll(resource.data.membersData) &&
              request.resource.data.membersData.size() == resource.data.membersData.size() + 1;
     }
@@ -326,11 +393,11 @@ service cloud.firestore {
              request.resource.data.membersData.size() == resource.data.membersData.size() - 1 &&
              (
                !request.resource.data.keys().hasAny(["memberSettings"]) ||
-               request.resource.data.memberSettings[request.auth.uid] == null
+               request.resource.data.memberSettings.get(request.auth.uid, null) == null
              ) &&
              (
                !request.resource.data.keys().hasAny(["memberPermissions"]) ||
-               request.resource.data.memberPermissions[request.auth.uid] == null
+               request.resource.data.memberPermissions.get(request.auth.uid, null) == null
              ) &&
              (
                !resource.data.keys().hasAny(["memberSettings"]) ||
@@ -811,35 +878,14 @@ service cloud.firestore {
       // pueden agregar/editar configuración del equipo, pero no cambiar el admin.
       // Los miembros con permiso de gestionar fantasmas pueden modificar la lista
       // de fantasmas del equipo.
+      // Los permisos por módulo se resuelven con una sola lectura del equipo
+      // (isTeamUpdateAllowedByModule) para no agotar el límite de accesos a
+      // documentos por operación de Firestore.
       allow update: if request.auth != null &&
                     isAllowedTeamUpdateShape() &&
                     (
                       request.auth.uid == resource.data.admin ||
-                      hasTeamPermission(teamId, "settings", "create") ||
-                      hasTeamPermission(teamId, "settings", "edit") ||
-                      hasTeamPermission(teamId, "settings", "delete") ||
-                      (
-                        hasTeamPermission(teamId, "stats", "edit") &&
-                        isStatsBudgetUpdate()
-                      ) ||
-                      (
-                        (
-                          hasTeamPermission(teamId, "payments", "create") ||
-                          hasTeamPermission(teamId, "payments", "edit")
-                        ) &&
-                        isStatsBudgetUpdate()
-                      ) ||
-                      (
-                        (
-                          hasTeamPermission(teamId, "ghosts", "create") ||
-                          hasTeamPermission(teamId, "ghosts", "control")
-                        ) &&
-                        isGhostsUpdate()
-                      ) ||
-                      (
-                        isMasterGhostUpdate(teamId) &&
-                        isGhostsUpdate()
-                      ) ||
+                      isTeamUpdateAllowedByModule(teamId) ||
                       isAcceptingTeamInvitation(teamId) ||
                       isSelfLeavingTeam()
                     );

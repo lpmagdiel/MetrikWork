@@ -73,8 +73,13 @@ describe('firestore expense rules contract', () => {
   it('no presupone que el módulo de permisos exista al leerlo', () => {
     const body = extractFunctionBody(rules, 'hasPermissionModule');
 
-    expect(body).toContain('teamData(teamId).memberPermissions.keys().hasAll([request.auth.uid])');
-    expect(body).toContain('teamData(teamId).memberPermissions[request.auth.uid].keys().hasAll([module])');
+    // El equipo se lee una sola vez y se usan accesores con valor por
+    // defecto: indexar una clave inexistente provoca un error que deniega
+    // la operación (y releer el equipo agota el límite de accesos).
+    expect(body).toContain('memberPermissionsMap(teamId)');
+    expect(body).toContain('permissions.get(request.auth.uid, {})');
+    expect(body).toContain('member.keys().hasAll([module])');
+    expect(body).not.toContain('teamData(');
   });
 
   it('mantiene el módulo de gastos separado del de pagos en el resto de reglas', () => {
@@ -260,6 +265,53 @@ describe('firestore team active/hidden rules contract', () => {
   });
 });
 
+describe('firestore team invitation rules contract', () => {
+  it('lee la invitación una sola vez al aceptar (límite de accesos por operación)', () => {
+    const body = extractFunctionBody(rules, 'isAcceptingTeamInvitation');
+    const reads = body.match(/teamInvitationAfter\(/g) || [];
+    // Cada getAfter() cuenta como un acceso a documento. Firestore permite 10
+    // por operación: encadenar cuatro lecturas agotaba el límite y toda la
+    // regla fallaba con "Missing or insufficient permissions".
+    expect(reads).toHaveLength(1);
+    expect(body).toMatch(/let invitation = teamInvitationAfter\(teamId\);/);
+  });
+
+  it('compara los permisos del miembro con los de la invitación ya leídos', () => {
+    const body = extractFunctionBody(rules, 'isAcceptingTeamInvitation');
+    expect(body).toContain('invitation.status == "aceptado"');
+    expect(body).toContain('invitation.invitedUserId == request.auth.uid');
+    expect(body).toContain('invitation.teamId == teamId');
+    expect(body).toContain('request.resource.data.memberPermissions[request.auth.uid] == invitation.permissions');
+  });
+
+  it('resuelve los permisos del equipo con una sola lectura del documento', () => {
+    const body = extractFunctionBody(rules, 'isTeamUpdateAllowedByModule');
+    expect(body).toContain('get(/databases/$(database)/documents/teams/$(teamId))');
+    expect(body).not.toContain('hasTeamPermission(');
+  });
+
+  it('no relee el equipo repetidamente en las comprobaciones de permisos', () => {
+    const body = extractFunctionBody(rules, 'hasPermissionModule');
+    // teamData() es un get(): repetirlo dentro de la misma comprobación
+    // consumía el límite de accesos y denegaba a los miembros no administradores.
+    expect(body).not.toContain('teamData(');
+    expect(body).toContain('memberPermissionsMap(');
+
+    const moduleBody = extractFunctionBody(rules, 'hasModulePermission');
+    expect(moduleBody).not.toContain('teamData(');
+    expect(moduleBody).toContain('memberPermissionsMap(');
+  });
+
+  it('usa get() con valor por defecto al comprobar la baja de un miembro', () => {
+    const body = extractFunctionBody(rules, 'isSelfLeavingTeam');
+    // Indexar una clave inexistente provoca un error que deniega la regla.
+    expect(body).toContain('request.resource.data.memberSettings.get(request.auth.uid, null) == null');
+    expect(body).toContain('request.resource.data.memberPermissions.get(request.auth.uid, null) == null');
+    expect(body).not.toMatch(/memberSettings\[request\.auth\.uid\]/);
+    expect(body).not.toMatch(/memberPermissions\[request\.auth\.uid\]/);
+  });
+});
+
 describe('firestore ghosts rules contract', () => {
   it('declara el campo ghosts dentro de isAllowedTeamUpdateShape', () => {
     const body = extractFunctionBody(rules, 'isAllowedTeamUpdateShape');
@@ -287,8 +339,11 @@ describe('firestore ghosts rules contract', () => {
 
   it('permite a masters actualizar el equipo cuando solo cambian ghosts/updatedAt', () => {
     const updateSection = rules.split('match /teams/{teamId}')[1] || '';
-    expect(updateSection).toContain('isMasterGhostUpdate(teamId)');
-    expect(updateSection).toContain('isGhostsUpdate()');
+    expect(updateSection).toContain('isTeamUpdateAllowedByModule(teamId)');
+
+    const helper = extractFunctionBody(rules, 'isTeamUpdateAllowedByModule');
+    expect(helper).toContain('isMasterGhostUpdate(teamId)');
+    expect(helper).toContain('isGhostsUpdate()');
   });
 
   it('permite sincronizar ghostMasterIds junto con la lista de fantasmas', () => {
