@@ -188,8 +188,6 @@ function buildTeamTaskDoc(taskData, user, team = null) {
         createdAt: taskData.createdAt || new Date().toISOString(),
         createdBy: user.uid,
         ghostMasterIds: getTaskGhostMasterIds(team, assignedTo),
-        purchased: Boolean(taskData.purchased),
-        purchasedAt: taskData.purchasedAt || null,
         items: normalizeTaskItems(taskData.items),
     };
 }

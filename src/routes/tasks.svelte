@@ -151,6 +151,9 @@
   let deleteFabElement = $state(null);
   let lastPointerPosition = { x: 0, y: 0 };
   let isPointerOverDeleteFab = $state(false);
+  // Tarjeta que se está arrastrando: se pinta en rojo al soltarla sobre el
+  // botón de eliminar.
+  let draggingTaskId = $state(null);
 
   // El botón flotante se ve mientras se arrastra (destino de la tarjeta) o
   // cuando una pulsación larga ha marcado una tarea para borrar.
@@ -307,6 +310,7 @@
   function handleDndConsider(status, event) {
     if (!canMoveTasks) return;
     isDraggingTask = true;
+    draggingTaskId = event.detail.info?.id || null;
     updateColumnItems(status, event.detail.items);
   }
 
@@ -318,6 +322,7 @@
     // soltado encima del botón flotante de eliminar.
     const droppedOnDeleteFab = isPointerOverDeleteFab;
     isDraggingTask = false;
+    draggingTaskId = null;
 
     const movedTaskId = event.detail.info?.id;
     const movedTask = event.detail.items.find((task) => task.id === movedTaskId);
@@ -685,24 +690,21 @@
     canEditTasks || ghostList.some((ghost) => (ghost.masters || []).includes($userStore?.uid)),
   );
 
-  async function togglePurchase(task) {
-    if (!team?.id || !canManageTask(task)) return;
-    const purchased = !task.purchased;
-    try {
-      await updateTeamTask(team.id, task.id, {
-        purchased,
-        purchasedAt: purchased ? new Date().toISOString() : null,
-      });
-    } catch (error) {
-      console.error("Error updating purchase:", error);
-      messageToast = "No se pudo actualizar la compra.";
-      typeToast = "error";
-      showToast = true;
-    }
+  /**
+   * Progreso de la compra: cuántos artículos quedan por comprar.
+   * La compra está completa cuando todos sus artículos están marcados.
+   */
+  function getPurchaseProgress(task) {
+    const items = normalizeTaskItems(task?.items);
+    const done = items.filter((item) => item.done).length;
+    return {
+      total: items.length,
+      done,
+      complete: items.length > 0 && done === items.length
+    };
   }
 
   // --- Fantasmas ---
-
   function getGhostByAssigneeId(assigneeId) {
     if (!isGhostUserId(assigneeId)) return null;
     const ghostId = assigneeId.replace(/^ghost-/, "");
@@ -953,11 +955,13 @@
               onscroll={handleTaskListScroll}
             >
               {#each columnTasks as task (task.id)}
+                {@const purchase = getPurchaseProgress(task)}
                 <div
                   class="task-card"
                   class:readonly={!canMoveTasks}
-                  class:purchased={task.purchased}
-                  style="border-left-color:{cfg.color}"
+                  class:purchased={purchase.complete}
+                  class:drop-on-delete={draggingTaskId === task.id && isPointerOverDeleteFab}
+                  style="--card-accent:{cfg.color}"
                   aria-label={task.title}
                   role="button"
                   tabindex="0"
@@ -983,28 +987,10 @@
                       >
                         {cfg.label}
                       </span>
-                      {#if column.key === TASK_STATUS.purchases}
-                        <button
-                          type="button"
-                          class="purchase-check"
-                          class:done={task.purchased}
-                          onclick={(event) => {
-                            event.stopPropagation();
-                            togglePurchase(task);
-                          }}
-                          onpointerdown={(event) => event.stopPropagation()}
-                          aria-pressed={task.purchased}
-                          aria-label={task.purchased
-                            ? "Marcar compra como pendiente"
-                            : "Marcar compra como realizada"}
-                        >
-                          {#if task.purchased}
-                            <CheckCircle2 size={15} />
-                          {:else}
-                            <Circle size={15} />
-                          {/if}
-                          <span>{task.purchased ? "Comprada" : "Marcar"}</span>
-                        </button>
+                      {#if column.key === TASK_STATUS.purchases && purchase.total > 0}
+                        <span class="purchase-progress">
+                          {purchase.done}/{purchase.total}
+                        </span>
                       {/if}
                       {#if task.dueDate}
                         <span class="due-date">
@@ -1042,7 +1028,7 @@
                   <h3 class="task-title">{task.title}</h3>
 
                   {#if column.key === TASK_STATUS.purchases}
-                    {#if normalizeTaskItems(task.items).length}
+                    {#if purchase.total > 0}
                       <ul class="purchase-items" aria-label="Artículos a comprar">
                         {#each normalizeTaskItems(task.items) as item (item.id)}
                           <li class:done={item.done}>
@@ -1057,15 +1043,21 @@
                               aria-label={`Marcar ${item.text} como comprado`}
                             >
                               {#if item.done}
-                                <CheckCircle2 size={15} />
+                                <CheckCircle2 size={16} />
                               {:else}
-                                <Circle size={15} />
+                                <Circle size={16} />
                               {/if}
                             </button>
-                            <span>{item.text}</span>
+                            <span class="purchase-item-text">{item.text}</span>
                           </li>
                         {/each}
                       </ul>
+                      {#if purchase.complete}
+                        <p class="purchase-done-note">
+                          <CheckCircle2 size={14} />
+                          Compra completa
+                        </p>
+                      {/if}
                     {:else if task.description}
                       <p class="task-desc">{task.description}</p>
                     {:else}
@@ -1182,15 +1174,16 @@
 <SliceContainer bind:show={showTaskDetail}>
   {#if detailTask}
     {@const detailStatus = statusConfig[getTaskStatus(detailTask)] ?? statusConfig.unassigned}
+    {@const detailPurchase = getPurchaseProgress(detailTask)}
     <div class="task-detail">
       <div class="detail-head">
         <span class="status-badge" style="background:{detailStatus.bg}; color:{detailStatus.color}">
           {detailStatus.label}
         </span>
-        {#if detailTask.purchased}
+        {#if detailPurchase.complete}
           <span class="status-badge purchased-badge">
             <CheckCircle2 size={12} />
-            Comprada
+            Compra completa
           </span>
         {/if}
         <h3>{detailTask.title}</h3>
@@ -1207,6 +1200,12 @@
             <dd>{detailTask.assignedTo.map((uid) => getAssigneeName(uid)).join(", ")}</dd>
           </div>
         {/if}
+        {#if detailPurchase.total > 0}
+          <div>
+            <dt>Artículos</dt>
+            <dd>{detailPurchase.done} de {detailPurchase.total} comprados</dd>
+          </div>
+        {/if}
         {#if detailTask.createdAt}
           <div>
             <dt>Creada</dt>
@@ -1214,6 +1213,26 @@
           </div>
         {/if}
       </dl>
+
+      {#if detailPurchase.total > 0}
+        <div class="detail-block">
+          <h4>Artículos a comprar</h4>
+          <ul class="purchase-items" aria-label="Artículos a comprar">
+            {#each normalizeTaskItems(detailTask.items) as item (item.id)}
+              <li class:done={item.done}>
+                <span class="purchase-item-check-static">
+                  {#if item.done}
+                    <CheckCircle2 size={16} />
+                  {:else}
+                    <Circle size={16} />
+                  {/if}
+                </span>
+                <span class="purchase-item-text">{item.text}</span>
+              </li>
+            {/each}
+          </ul>
+        </div>
+      {/if}
 
       {#if detailTask.description}
         <div class="detail-block">
@@ -1412,6 +1431,11 @@
         <fieldset>
           <legend>Artículos a comprar</legend>
           <div class="items-editor">
+            {#if taskForm.items.length}
+              <div class="items-counter">
+                {taskForm.items.filter((item) => item.done).length} de {taskForm.items.length} marcados
+              </div>
+            {/if}
             {#each taskForm.items as item, index (item.id)}
               <div class="item-row">
                 <input
@@ -1713,7 +1737,7 @@
     background: var(--bg-card);
     border-radius: 8px;
     padding: 16px 16px 14px;
-    border-left: 5px solid var(--border-color);
+    border-left: 5px solid var(--card-accent, var(--border-color));
     border-top: 1px solid var(--border-color);
     border-right: 1px solid var(--border-color);
     border-bottom: 1px solid var(--border-color);
@@ -1721,7 +1745,24 @@
     cursor: grab;
     transition:
       transform 0.15s,
-      box-shadow 0.15s;
+      box-shadow 0.15s,
+      background 0.15s,
+      border-color 0.15s;
+  }
+
+  /* La tarjeta está sobre el botón de eliminar: se avisa en rojo de que al
+     soltarla se borrará. */
+  .task-card.drop-on-delete {
+    --card-accent: var(--danger-color);
+    background: var(--bg-danger-subtle);
+    border-color: var(--danger-color);
+    box-shadow: 0 10px 28px rgba(220, 38, 38, 0.35);
+    transform: scale(1.03);
+  }
+
+  .task-card.drop-on-delete .task-title,
+  .task-card.drop-on-delete .task-desc {
+    color: var(--danger-color);
   }
 
   .task-card:active {
@@ -2537,32 +2578,6 @@
   }
 
   /* Compras: marcado de la lista TODO */
-  .purchase-check {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    border: 1px solid var(--border-color);
-    background: var(--bg-input);
-    color: var(--text-secondary);
-    border-radius: 100px;
-    padding: 3px 10px;
-    font-size: 11px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-  .purchase-check:hover {
-    color: var(--text-primary);
-    border-color: var(--status-purchases-color);
-  }
-
-  .purchase-check.done {
-    background: var(--status-purchases-bg);
-    color: var(--status-purchases-color);
-    border-color: transparent;
-  }
-
   .task-card.purchased .task-title {
     text-decoration: line-through;
     color: var(--text-muted);
@@ -2572,29 +2587,49 @@
   .purchase-items {
     list-style: none;
     margin: 0 0 10px;
-    padding: 0;
+    padding: 6px;
     display: grid;
-    gap: 6px;
+    gap: 2px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-input);
   }
 
   .purchase-items li {
     display: flex;
-    align-items: flex-start;
-    gap: 8px;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 8px;
+    border-radius: 8px;
     font-size: 14px;
     line-height: 1.4;
     color: var(--text-primary);
+    transition: background 0.15s;
   }
 
-  .purchase-items li.done span {
-    text-decoration: line-through;
+  .purchase-items li:hover {
+    background: var(--bg-card);
+  }
+
+  .purchase-items li.done {
     color: var(--text-muted);
+  }
+
+  .purchase-items li.done .purchase-item-text {
+    text-decoration: line-through;
+    opacity: 0.75;
+  }
+
+  .purchase-item-text {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   .purchase-item-check {
     flex-shrink: 0;
-    width: 22px;
-    height: 22px;
+    width: 24px;
+    height: 24px;
     border: none;
     background: none;
     padding: 0;
@@ -2603,13 +2638,49 @@
     justify-content: center;
     color: var(--text-muted);
     cursor: pointer;
+    transition: color 0.15s, transform 0.15s;
   }
 
   .purchase-item-check:hover {
     color: var(--status-purchases-color);
+    transform: scale(1.08);
   }
 
   .purchase-items li.done .purchase-item-check {
+    color: var(--status-purchases-color);
+  }
+
+  .purchase-item-check-static {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+  }
+
+  .purchase-items li.done .purchase-item-check-static {
+    color: var(--status-purchases-color);
+  }
+
+  .purchase-progress {
+    font-size: 11px;
+    font-weight: 800;
+    padding: 3px 8px;
+    border-radius: 100px;
+    background: var(--status-purchases-bg);
+    color: var(--status-purchases-color);
+    letter-spacing: 0.3px;
+  }
+
+  .purchase-done-note {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 8px;
+    font-size: 12px;
+    font-weight: 700;
     color: var(--status-purchases-color);
   }
 
@@ -2627,25 +2698,51 @@
   .item-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-input);
+    transition: border-color 0.15s, background 0.15s;
+  }
+
+  .item-row:focus-within {
+    border-color: var(--status-purchases-color);
+    background: var(--bg-card);
   }
 
   .item-row input[type="text"] {
     flex: 1;
     min-width: 0;
+    border: none;
+    background: none;
+    padding: 4px 0;
+    font-size: 14px;
+  }
+
+  .item-row input[type="text"]:focus {
+    outline: none;
+  }
+
+  .item-row input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--status-purchases-color);
+    cursor: pointer;
   }
 
   .item-remove {
-    width: 32px;
-    height: 32px;
+    width: 30px;
+    height: 30px;
     border: none;
     border-radius: 8px;
-    background: var(--bg-input);
-    color: var(--text-secondary);
+    background: none;
+    color: var(--text-muted);
     display: inline-flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
+    transition: background 0.15s, color 0.15s;
   }
 
   .item-remove:hover {
@@ -2656,21 +2753,30 @@
   .item-add {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    justify-self: start;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
     border: 1px dashed var(--border-color);
     background: transparent;
     color: var(--text-secondary);
     border-radius: 10px;
-    padding: 8px 12px;
+    padding: 11px 12px;
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 700;
     cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
   }
 
   .item-add:hover {
-    color: var(--text-primary);
+    color: var(--status-purchases-color);
     border-color: var(--status-purchases-color);
+    background: var(--status-purchases-bg);
+  }
+
+  .items-counter {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-muted);
   }
 
   .purchased-badge {

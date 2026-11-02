@@ -232,12 +232,34 @@ describe('apartado de compras', () => {
     expect(html.indexOf('Compras')).toBeLessThan(html.indexOf('Sin asignar'));
   });
 
-  it('ofrece la casilla para marcar cada compra', async () => {
+  it('muestra el progreso de la compra y el botón de cada artículo', async () => {
+    teamTasksStore.set([
+      {
+        id: 'task-compra',
+        title: 'Comprar material',
+        status: 'purchases',
+        assignedTo: [],
+        items: [
+          { id: 'i1', text: 'Cemento', done: false },
+          { id: 'i2', text: 'Arena', done: true },
+        ],
+        attachments: [],
+        createdAt: '2026-10-12T10:00:00.000Z',
+        createdBy: 'admin-1',
+      },
+    ]);
+
     const { container } = render(Tasks);
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    expect(container.querySelector('.purchase-check')).toBeTruthy();
-    expect(container.innerHTML).toContain('Marcar compra como realizada');
+    const html = container.innerHTML;
+    // Progreso de la compra (1 de 2 artículos marcados).
+    expect(html).toContain('purchase-progress');
+    expect(html).toContain('1/2');
+    // Cada artículo tiene su propia casilla.
+    expect(container.querySelectorAll('.purchase-item-check')).toHaveLength(2);
+    // Ya no existe el botón de "marcar" la compra entera.
+    expect(container.querySelector('.purchase-check')).toBeNull();
   });
 
   it('muestra los artículos como lista TODO en lugar de la descripción', async () => {

@@ -316,8 +316,9 @@ describe('firestore tasks rules contract', () => {
   it('permite a los masters de un fantasma ver y gestionar sus tareas', () => {
     const tasksBlock = rules.split('match /tasks/{taskId}')[1]?.split('match /inventory')[0] || '';
     expect(tasksBlock).toContain('request.auth.uid in resource.data.get("ghostMasterIds", [])');
-    // Un master no puede cambiar la asignación de la tarea.
-    expect(tasksBlock).toMatch(/affectedKeys\(\)\.hasOnly\(\[[\s\S]*?"purchasedAt"[\s\S]*?\]\)/);
+    // Un master puede cambiar el contenido y la lista de artículos, pero no
+    // la asignación de la tarea.
+    expect(tasksBlock).toMatch(/affectedKeys\(\)\.hasOnly\(\[[\s\S]*?"items"[\s\S]*?\]\)/);
     expect(tasksBlock).not.toMatch(/affectedKeys\(\)\.hasOnly\(\[[\s\S]*?"assignedTo"[\s\S]*?\]\)/);
   });
 
