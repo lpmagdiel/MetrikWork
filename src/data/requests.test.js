@@ -86,4 +86,30 @@ describe('team invitations', () => {
     );
     expect(firestoreMocks.batchCommit).toHaveBeenCalledOnce();
   });
+
+  it('conserva exactamente los permisos de una invitación antigua al aceptarla', async () => {
+    const legacyPermissions = { tasks: { view: true } };
+    firestoreMocks.getDoc.mockResolvedValueOnce({
+      exists: () => true,
+      data: () => ({
+        teamId: 'team-1',
+        teamName: 'Equipo de prueba',
+        invitedUserId: 'invitee-1',
+        invitedUserName: 'Ana',
+        invitedBy: 'admin-1',
+        permissions: legacyPermissions,
+        status: REQUEST_STATUS.pending
+      })
+    });
+
+    await updateTeamInvitationStatus('team-1', REQUEST_STATUS.accepted);
+
+    expect(firestoreMocks.batchUpdate).toHaveBeenNthCalledWith(
+      2,
+      'teams/team-1',
+      expect.objectContaining({
+        'memberPermissions.invitee-1': legacyPermissions
+      })
+    );
+  });
 });

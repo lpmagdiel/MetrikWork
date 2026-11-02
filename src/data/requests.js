@@ -15,7 +15,6 @@ import {
 import { userStore } from './auth.js';
 import { teamsStore } from './teams.js';
 import { createNotification } from './notifications.js';
-import { normalizeTeamPermissions } from './permissions.js';
 
 export const REQUEST_STATUS = {
     pending: 'pendiente',
@@ -195,7 +194,11 @@ export async function updateTeamInvitationStatus(teamId, status) {
                 avatar: memberImage,
                 photoURL: memberImage
             }),
-            [`memberPermissions.${user.uid}`]: normalizeTeamPermissions(invitation.permissions),
+            // Las reglas de Firestore validan que los permisos asignados al
+            // miembro coincidan exactamente con los de la invitación. No los
+            // normalizamos aquí: las invitaciones pendientes antiguas pueden
+            // no incluir módulos añadidos después (por ejemplo, gastos).
+            [`memberPermissions.${user.uid}`]: invitation.permissions,
             updatedAt: now
         });
     }
