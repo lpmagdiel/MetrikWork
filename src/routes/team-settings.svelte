@@ -29,6 +29,7 @@
     addMemberByEmail,
     createNotification,
     updateMemberPermissions,
+    updateMemberTasksVisibility,
     updateTeamProfile,
     updateTeamCustomRoles,
     removeTeamMember,
@@ -114,6 +115,8 @@
   let isTogglingHidden = $state(false);
   let showNewMemberPermissions = $state(false);
   let openPermissionMemberId = $state(null);
+  // Visibilidad de tareas elegida por el administrador (antes de guardarse).
+  let tasksVisibilityDraft = $state({});
   let ghostsList = $derived(getTeamGhosts(team));
   let canManageGhosts = $derived(isAdmin || hasGhostCreatePermission(team, $userStore?.uid));
   let isAddingGhost = $state(false);
@@ -808,6 +811,34 @@
       await showSuccessAlert("Permisos actualizados", "Los permisos del miembro se guardaron correctamente.");
     } catch (error) {
       await showErrorAlert("Error al guardar permisos", "No se pudieron guardar los permisos.");
+    }
+  }
+
+  function getMemberTasksVisibility(memberId) {
+    const draft = tasksVisibilityDraft[memberId];
+    if (draft) return draft;
+    const visibility = team?.memberSettings?.[memberId]?.tasksVisibility;
+    return visibility === "own" ? "own" : "all";
+  }
+
+  async function handleTasksVisibility(memberId, visibility) {
+    if (!team?.id || !canEditSettings || memberId === team.admin) return;
+    if (getMemberTasksVisibility(memberId) === visibility) return;
+    tasksVisibilityDraft = { ...tasksVisibilityDraft, [memberId]: visibility };
+    try {
+      await updateMemberTasksVisibility(team.id, memberId, visibility);
+      await showSuccessAlert(
+        "Visibilidad actualizada",
+        visibility === "own"
+          ? "El miembro solo verá sus tareas y las de los fantasmas que gestiona."
+          : "El miembro volverá a ver todas las tareas del equipo.",
+      );
+    } catch (error) {
+      tasksVisibilityDraft = { ...tasksVisibilityDraft, [memberId]: undefined };
+      await showErrorAlert(
+        "Error al guardar la visibilidad",
+        error?.message || "No se pudo actualizar la visibilidad de tareas.",
+      );
     }
   }
 
@@ -1727,6 +1758,32 @@
                           </div>
                         </div>
                       {/each}
+
+                      <div class="permission-row tasks-visibility-row">
+                        <span>Visibilidad de tareas</span>
+                        <div class="permission-actions">
+                          <label>
+                            <input
+                              type="radio"
+                              name="tasks-visibility-{member.id}"
+                              checked={getMemberTasksVisibility(member.id) !== "own"}
+                              disabled={!canEditSettings}
+                              onchange={() => handleTasksVisibility(member.id, "all")}
+                            />
+                            Todas
+                          </label>
+                          <label>
+                            <input
+                              type="radio"
+                              name="tasks-visibility-{member.id}"
+                              checked={getMemberTasksVisibility(member.id) === "own"}
+                              disabled={!canEditSettings}
+                              onchange={() => handleTasksVisibility(member.id, "own")}
+                            />
+                            Solo las suyas
+                          </label>
+                        </div>
+                      </div>
                     </div>
                   {/if}
                 </div>

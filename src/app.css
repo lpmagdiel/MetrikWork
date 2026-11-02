@@ -34,6 +34,8 @@
   --status-progress-bg: var(--bg-info-subtle);
   --status-completed-color: var(--success-color);
   --status-completed-bg: var(--bg-success-subtle);
+  --status-purchases-color: var(--purple-color);
+  --status-purchases-bg: var(--bg-purple-subtle);
   --nav-bg: rgba(255, 255, 255, 0.3);
   --shadow-button: 0 4px 14px rgba(0, 0, 0, 0.2);
   --shadow-soft: 0 8px 30px rgba(0, 0, 0, 0.04);
@@ -76,6 +78,8 @@
   --status-progress-bg: var(--bg-info-subtle);
   --status-completed-color: var(--success-color);
   --status-completed-bg: var(--bg-success-subtle);
+  --status-purchases-color: var(--purple-color);
+  --status-purchases-bg: var(--bg-purple-subtle);
   --nav-bg: rgba(0, 0, 0, 0.4);
   --shadow-button: 0 4px 14px rgba(255, 255, 255, 0.08);
   --shadow-soft: 0 8px 30px rgba(0, 0, 0, 0.5);

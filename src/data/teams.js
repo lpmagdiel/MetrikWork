@@ -691,15 +691,35 @@ export async function updateMemberSettings(teamId, memberId, dailyRate, extraHou
 
     try {
         const teamRef = doc(db, 'teams', teamId);
+        // Se escriben campos sueltos para no borrar el resto de ajustes del
+        // miembro (por ejemplo, la visibilidad de tareas).
         await updateDoc(teamRef, {
-            [`memberSettings.${memberId}`]: {
-                dailyRate: Number(dailyRate) || 0,
-                extraHourRate: Number(extraHourRate) || 0,
-                updatedAt: new Date().toISOString()
-            }
+            [`memberSettings.${memberId}.dailyRate`]: Number(dailyRate) || 0,
+            [`memberSettings.${memberId}.extraHourRate`]: Number(extraHourRate) || 0,
+            [`memberSettings.${memberId}.updatedAt`]: new Date().toISOString()
         });
     } catch (error) {
         console.error("Error updating member settings:", error);
+        throw error;
+    }
+}
+
+/**
+ * Visibilidad de tareas de un miembro: "all" (todas las del equipo) u
+ * "own" (solo las suyas y las de los fantasmas que gestiona).
+ */
+export async function updateMemberTasksVisibility(teamId, memberId, visibility) {
+    const user = get(userStore);
+    if (!user) return;
+
+    try {
+        const teamRef = doc(db, 'teams', teamId);
+        await updateDoc(teamRef, {
+            [`memberSettings.${memberId}.tasksVisibility`]: visibility === 'own' ? 'own' : 'all',
+            [`memberSettings.${memberId}.updatedAt`]: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error("Error updating member tasks visibility:", error);
         throw error;
     }
 }

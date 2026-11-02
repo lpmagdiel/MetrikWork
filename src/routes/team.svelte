@@ -53,6 +53,7 @@
     createDefaultMemberPermissions,
     normalizeTeamPermissions,
     hasTeamPermission,
+    getVisibleTasksVisibility,
     TEAM_PERMISSION_LABELS,
     TEAM_PERMISSION_ACTION_LABELS,
     createPermissionsFromTeamRole,
@@ -195,7 +196,10 @@
 
   $effect(() => {
     if (team?.id && canViewTasks) {
-      return subscribeToTeamTasks(team.id);
+      return subscribeToTeamTasks(team.id, {
+        visibility: getVisibleTasksVisibility(team, $userStore?.uid),
+        uid: $userStore?.uid
+      });
     }
     return subscribeToTeamTasks(null);
   });

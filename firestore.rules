@@ -70,6 +70,18 @@ service cloud.firestore {
              hasModulePermission(teamId, module, action);
     }
 
+    // Visibilidad de tareas configurada por el administrador del equipo para
+    // cada miembro ("all" para ver todas, "own" para ver solo las suyas).
+    // Se guarda en memberSettings junto al resto de datos por miembro.
+    function memberTasksVisibility(teamId) {
+      let team = get(/databases/$(database)/documents/teams/$(teamId)).data;
+      let settings = team.get("memberSettings", {});
+      let member = settings is map ? settings.get(request.auth.uid, {}) : {};
+      let visibility = member is map ? member.get("tasksVisibility", "all") : "all";
+      // El administrador del equipo siempre ve todas las tareas.
+      return request.auth.uid == team.get("admin", "") ? "all" : visibility;
+    }
+
     // --- PERMISOS DEL EQUIPO RESUELTOS CON UNA SOLA LECTURA ---
     // Firestore permite como máximo 10 accesos a documentos por operación.
     // La cadena de actualización del equipo consultaba el documento del
@@ -896,13 +908,37 @@ service cloud.firestore {
 
       // --- SUBCOLECCIONES DE EQUIPO ---
       match /tasks/{taskId} {
-        allow read: if hasTeamPermission(teamId, "tasks", "view") ||
+        // Lectura: el equipo con permiso "tasks.view" ve todas las tareas
+        // (salvo que el administrador limite la visibilidad de ese miembro),
+        // los miembros ven las suyas y los masters de los fantasmas ven las
+        // tareas de los fantasmas que gestionan.
+        allow read: if hasTeamPermission(teamId, "tasks", "view") &&
+                      memberTasksVisibility(teamId) == "all" ||
                     (
                       isTeamMember(teamId) &&
-                      request.auth.uid in resource.data.assignedTo
+                      (
+                        request.auth.uid in resource.data.assignedTo ||
+                        request.auth.uid in resource.data.get("ghostMasterIds", [])
+                      )
                     );
         allow create: if hasTeamPermission(teamId, "tasks", "create");
-        allow update: if hasTeamPermission(teamId, "tasks", "edit");
+        // Un master de fantasma puede gestionar sus tareas, pero no puede
+        // cambiar la asignación (ni repartirse el control de la tarea).
+        allow update: if hasTeamPermission(teamId, "tasks", "edit") ||
+                      (
+                        isTeamMember(teamId) &&
+                        request.auth.uid in resource.data.get("ghostMasterIds", []) &&
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                          "status",
+                          "title",
+                          "description",
+                          "dueDate",
+                          "attachments",
+                          "purchased",
+                          "purchasedAt",
+                          "updatedAt"
+                        ])
+                      );
         allow delete: if hasTeamPermission(teamId, "tasks", "delete");
       }
 

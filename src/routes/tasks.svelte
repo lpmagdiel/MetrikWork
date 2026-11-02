@@ -18,6 +18,10 @@
     Bookmark,
     Paperclip,
     Upload,
+    ShoppingCart,
+    Ghost,
+    Eye,
+    ListTodo,
   } from "lucide-svelte";
   import {
     selectedTeam,
@@ -39,6 +43,12 @@
     isProfileImage,
     hasTeamPermission,
     normalizeTaskAttachments,
+    getTeamGhosts,
+    getGhostWorkdayUserId,
+    isGhostUserId,
+    TASK_STATUS,
+    TASK_VISIBILITY,
+    getVisibleTasksVisibility,
   } from "../data/stores.js";
   import { navigateTo } from "../router.js";
   import SliceContainer from "../components/SliceContainer.svelte";
@@ -47,7 +57,7 @@
     import CircleAddButton from "../components/CircleAddButton.svelte";
   import TitleHeader from "../components/TitleHeader.svelte";
   import { optimizeCloudinary, stripImageFileExtension } from "../helpers/image.js";
-  import { showErrorAlert, showInfoAlert } from "../data/alerts.js";
+  import { confirmAlert, showErrorAlert, showInfoAlert } from "../data/alerts.js";
   import {
     convertHeicToJpeg,
     destroyer,
@@ -70,9 +80,15 @@
   let canCreateTasks = $derived(hasTeamPermission(team, $userStore?.uid, "tasks", "create"));
   let canEditTasks = $derived(hasTeamPermission(team, $userStore?.uid, "tasks", "edit"));
   let canDeleteTasks = $derived(hasTeamPermission(team, $userStore?.uid, "tasks", "delete"));
+  // Los miembros del equipo siempre pueden entrar en la pantalla: aunque no
+  // tengan el permiso "tasks.view" ven sus tareas y las de sus fantasmas.
+  let isTeamMemberUser = $derived(Boolean(team?.members?.includes($userStore?.uid)));
+  let canAccessTasks = $derived(canViewTasks || isTeamMemberUser);
   const taskPageSize = 20;
   const flipDurationMs = 180;
+  const longPressDelayMs = 520;
   const kanbanStatuses = [
+    { key: "purchases", label: "Compras", helper: "Lista de compras" },
     { key: "unassigned", label: "Sin asignar", helper: "Tareas sin dueño" },
     { key: "pending", label: "Pendiente", helper: "Por hacer" },
     { key: "in-progress", label: "En proceso", helper: "Trabajo activo" },
@@ -81,6 +97,10 @@
 
   // Members list for assignee display
   let memberList = $state([]);
+
+  // Fantasmas del equipo: se pueden asignar tareas a ellos y sus masters
+  // gestionan esas tareas.
+  let ghostList = $derived(getTeamGhosts(team));
 
   $effect(() => {
     let active = true;
@@ -111,6 +131,30 @@
   let isSavingTemplate = $state(false);
   let deletingTemplateId = $state("");
 
+  // Vista de detalle (solo lectura) de una tarea
+  let detailTaskId = $state(null);
+  let showTaskDetail = $state(false);
+  let detailTask = $derived(
+    detailTaskId ? $teamTasksStore.find((task) => task.id === detailTaskId) || null : null
+  );
+
+  // Borrado seguro: al mantener pulsada una tarjeta aparece un botón
+  // flotante que pide confirmación antes de eliminar.
+  let pendingDeleteTaskId = $state(null);
+  let isDeletingTask = $state(false);
+  let longPressTimer = null;
+  let longPressTriggered = false;
+  let suppressCardClick = false;
+
+  // El botón flotante de borrado se oculta solo si no se usa.
+  $effect(() => {
+    if (!pendingDeleteTaskId) return;
+    const timer = setTimeout(() => {
+      pendingDeleteTaskId = null;
+    }, 6000);
+    return () => clearTimeout(timer);
+  });
+
   // Adjuntos (imágenes) de la tarea
   let taskAttachments = $state([]);
   let removedAttachments = $state([]);
@@ -120,14 +164,29 @@
   let lightboxIndex = $state(0);
 
   $effect(() => {
-    if (team?.id && canViewTasks) {
+    if (team?.id && canAccessTasks) {
       return subscribeToTeamTasks(team.id, {
         pageSize: taskPageSize,
         status: "all",
+        visibility: getTasksVisibility(),
+        uid: $userStore?.uid
       });
     }
     return subscribeToTeamTasks(null);
   });
+
+  /**
+   * Visibilidad efectiva de las tareas.
+   *
+   * Sin permiso "tasks.view" solo se cargan las tareas propias y las de los
+   * fantasmas que gestiona el miembro (las reglas deniegan el resto).
+   */
+  function getTasksVisibility() {
+    if (!team) return TASK_VISIBILITY.own;
+    const configured = getVisibleTasksVisibility(team, $userStore?.uid);
+    if (configured === TASK_VISIBILITY.own) return TASK_VISIBILITY.own;
+    return canViewTasks ? TASK_VISIBILITY.all : TASK_VISIBILITY.own;
+  }
 
   $effect(() => {
     if (team?.id && canViewTasks) {
@@ -145,6 +204,7 @@
   });
 
   const statusConfig = {
+    purchases: { label: "Compras", color: "var(--status-purchases-color)", bg: "var(--status-purchases-bg)" },
     unassigned: { label: "Sin Asignar", color: "var(--status-unassigned-color)", bg: "var(--status-unassigned-bg)" },
     pending: { label: "Pendiente", color: "var(--status-pending-color)", bg: "var(--status-pending-bg)" },
     "in-progress": { label: "En Proceso", color: "var(--status-progress-color)", bg: "var(--status-progress-bg)" },
@@ -196,22 +256,33 @@
   }
 
   function handleDndConsider(status, event) {
-    if (!canEditTasks) return;
+    if (!canMoveTasks) return;
     isDraggingTask = true;
+    // Al arrastrar se descarta el borrado pendiente: el gesto fue un arrastre.
+    pendingDeleteTaskId = null;
     updateColumnItems(status, event.detail.items);
   }
 
   async function handleDndFinalize(status, event) {
-    if (!canEditTasks || !team?.id) return;
+    if (!canMoveTasks || !team?.id) return;
 
     updateColumnItems(status, event.detail.items);
     isDraggingTask = false;
+    pendingDeleteTaskId = null;
 
     const movedTaskId = event.detail.info?.id;
     const movedTask = event.detail.items.find((task) => task.id === movedTaskId);
     const originalTask = $teamTasksStore.find((task) => task.id === movedTaskId);
 
     if (!movedTask || !originalTask || getTaskStatus(originalTask) === status) return;
+
+    if (!canManageTask(originalTask)) {
+      boardTasksByStatus = groupTasksByStatus($teamTasksStore);
+      messageToast = "No tienes permiso para mover esta tarea";
+      typeToast = "error";
+      showToast = true;
+      return;
+    }
 
     try {
       const result = await updateTeamTask(team.id, movedTaskId, { status });
@@ -383,10 +454,163 @@
   }
 
   async function handleDeleteTask(taskId) {
-    if (!team?.id || !canDeleteTasks) return;
+    if (!team?.id || !canDeleteTasks || isDeletingTask) return;
     const task = $teamTasksStore.find((item) => item.id === taskId);
-    await deleteTeamTask(team.id, taskId);
-    await cleanupRemovedAttachments(normalizeTaskAttachments(task?.attachments).map((item) => item.url));
+    if (!task) return;
+
+    const confirmed = await confirmAlert({
+      title: "Eliminar tarea",
+      text: `¿Seguro que quieres eliminar "${task.title}"? Esta acción no se puede deshacer.`,
+      confirmButtonText: "Sí, eliminar",
+      cancelButtonText: "Cancelar",
+      danger: true,
+    });
+    if (!confirmed) {
+      pendingDeleteTaskId = null;
+      return;
+    }
+
+    isDeletingTask = true;
+    try {
+      await deleteTeamTask(team.id, taskId);
+      await cleanupRemovedAttachments(
+        normalizeTaskAttachments(task?.attachments).map((item) => item.url),
+      );
+      pendingDeleteTaskId = null;
+      if (detailTaskId === taskId) detailTaskId = null;
+      messageToast = "Tarea eliminada.";
+      typeToast = "success";
+      showToast = true;
+    } catch (error) {
+      console.error("Error deleting task:", error);
+      messageToast = "No se pudo eliminar la tarea.";
+      typeToast = "error";
+      showToast = true;
+    } finally {
+      isDeletingTask = false;
+    }
+  }
+
+  // --- Interacción con la tarjeta ---
+  // Pulsación corta: abrir la vista de detalle (solo lectura).
+  // Pulsación larga: mostrar el botón flotante de eliminar.
+
+  function clearLongPress() {
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  }
+
+  function handleCardPointerDown(task) {
+    longPressTriggered = false;
+    clearLongPress();
+    if (!canDeleteTasks) return;
+    longPressTimer = setTimeout(() => {
+      longPressTriggered = true;
+      suppressCardClick = true;
+      pendingDeleteTaskId = task.id;
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        navigator.vibrate(15);
+      }
+    }, longPressDelayMs);
+  }
+
+  function handleCardPointerUp() {
+    clearLongPress();
+  }
+
+  function handleCardPointerCancel() {
+    clearLongPress();
+    longPressTriggered = false;
+  }
+
+  function handleCardContextMenu(event) {
+    if (!canDeleteTasks) return;
+    event.preventDefault();
+  }
+
+  function handleCardClick(task) {
+    if (suppressCardClick) {
+      suppressCardClick = false;
+      return;
+    }
+    if (longPressTriggered || isDraggingTask) {
+      longPressTriggered = false;
+      return;
+    }
+    openTaskDetail(task);
+  }
+
+  function openTaskDetail(task) {
+    if (!task?.id) return;
+    detailTaskId = task.id;
+    showTaskDetail = true;
+  }
+
+  // Al cerrar el detalle se libera la tarea seleccionada.
+  $effect(() => {
+    if (!showTaskDetail && detailTaskId) detailTaskId = null;
+  });
+
+  function closeTaskDetail() {
+    showTaskDetail = false;
+    detailTaskId = null;
+  }
+
+  // --- Compras ---
+
+  /**
+   * Un miembro puede gestionar una tarea si tiene el permiso de edición o si
+   * es master de alguno de los fantasmas asignados (las reglas de Firestore
+   * le permiten cambiar su estado y marcar sus compras).
+   */
+  function canManageTask(task) {
+    if (canEditTasks) return true;
+    return (task?.ghostMasterIds || []).includes($userStore?.uid);
+  }
+
+  let canMoveTasks = $derived(
+    canEditTasks || ghostList.some((ghost) => (ghost.masters || []).includes($userStore?.uid)),
+  );
+
+  async function togglePurchase(task) {
+    if (!team?.id || !canManageTask(task)) return;
+    const purchased = !task.purchased;
+    try {
+      await updateTeamTask(team.id, task.id, {
+        purchased,
+        purchasedAt: purchased ? new Date().toISOString() : null,
+      });
+    } catch (error) {
+      console.error("Error updating purchase:", error);
+      messageToast = "No se pudo actualizar la compra.";
+      typeToast = "error";
+      showToast = true;
+    }
+  }
+
+  // --- Fantasmas ---
+
+  function getGhostByAssigneeId(assigneeId) {
+    if (!isGhostUserId(assigneeId)) return null;
+    const ghostId = assigneeId.replace(/^ghost-/, "");
+    return ghostList.find((ghost) => ghost.id === ghostId) || null;
+  }
+
+  function getAssigneeName(assigneeId) {
+    const ghost = getGhostByAssigneeId(assigneeId);
+    if (ghost) return ghost.name;
+    return getMemberName(assigneeId);
+  }
+
+  function toggleAssignedGhost(ghostId) {
+    const ghostUserId = getGhostWorkdayUserId(ghostId);
+    if (taskForm.assignedTo.includes(ghostUserId)) {
+      taskForm.assignedTo = taskForm.assignedTo.filter((id) => id !== ghostUserId);
+    } else {
+      taskForm.assignedTo = [...taskForm.assignedTo, ghostUserId];
+    }
   }
 
   function openAttachmentPicker() {
@@ -570,7 +794,7 @@
       <CircleAddButton onClick={openAddTask} floating={true}/>
     {/if}
 
-  {#if !canViewTasks}
+  {#if !canAccessTasks}
     <div class="empty-state">
       <ClipboardList size={56} color="var(--text-muted)" />
       <p>No tienes permiso para ver las tareas de este equipo.</p>
@@ -609,8 +833,8 @@
                 items: columnTasks,
                 flipDurationMs,
                 type: "team-tasks",
-                dragDisabled: !canEditTasks,
-                dropFromOthersDisabled: !canEditTasks,
+                dragDisabled: !canMoveTasks,
+                dropFromOthersDisabled: !canMoveTasks,
                 delayTouchStart: true,
               }}
               onconsider={(event) => handleDndConsider(column.key, event)}
@@ -620,10 +844,17 @@
               {#each columnTasks as task (task.id)}
                 <div
                   class="task-card"
-                  class:readonly={!canEditTasks}
+                  class:readonly={!canMoveTasks}
+                  class:purchased={task.purchased}
                   style="border-left-color:{cfg.color}"
                   aria-label={task.title}
                   animate:flip={{ duration: flipDurationMs }}
+                  onclick={() => handleCardClick(task)}
+                  onpointerdown={() => handleCardPointerDown(task)}
+                  onpointerup={handleCardPointerUp}
+                  onpointercancel={handleCardPointerCancel}
+                  onpointerleave={handleCardPointerCancel}
+                  oncontextmenu={handleCardContextMenu}
                 >
                   <div class="card-top">
                     <div class="card-meta">
@@ -633,6 +864,29 @@
                       >
                         {cfg.label}
                       </span>
+                      {#if column.key === TASK_STATUS.purchases}
+                        <button
+                          type="button"
+                          class="purchase-check"
+                          class:done={task.purchased}
+                          onclick={(event) => {
+                            event.stopPropagation();
+                            togglePurchase(task);
+                          }}
+                          onpointerdown={(event) => event.stopPropagation()}
+                          aria-pressed={task.purchased}
+                          aria-label={task.purchased
+                            ? "Marcar compra como pendiente"
+                            : "Marcar compra como realizada"}
+                        >
+                          {#if task.purchased}
+                            <CheckCircle2 size={15} />
+                          {:else}
+                            <Circle size={15} />
+                          {/if}
+                          <span>{task.purchased ? "Comprada" : "Marcar"}</span>
+                        </button>
+                      {/if}
                       {#if task.dueDate}
                         <span class="due-date">
                           <CalendarDays size={12} />
@@ -644,21 +898,25 @@
                       {#if canEditTasks}
                         <button
                           class="action-btn"
-                          onclick={() => openEditTask(task)}
+                          onclick={(event) => {
+                            event.stopPropagation();
+                            openEditTask(task);
+                          }}
                           aria-label="Editar"
                         >
                           <Edit2 size={15} />
                         </button>
                       {/if}
-                      {#if canDeleteTasks}
-                        <button
-                          class="action-btn danger"
-                          onclick={() => handleDeleteTask(task.id)}
-                          aria-label="Eliminar"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      {/if}
+                      <button
+                        class="action-btn"
+                        onclick={(event) => {
+                          event.stopPropagation();
+                          openTaskDetail(task);
+                        }}
+                        aria-label="Ver detalle"
+                      >
+                        <Eye size={15} />
+                      </button>
                     </div>
                   </div>
 
@@ -673,7 +931,10 @@
                         <button
                           type="button"
                           class="attachment-thumb"
-                          onclick={() => openAttachmentLightbox(task, index)}
+                          onclick={(event) => {
+                            event.stopPropagation();
+                            openAttachmentLightbox(task, index);
+                          }}
                           aria-label={`Ver imagen ${index + 1} de ${task.attachments.length}`}
                         >
                           <img
@@ -695,9 +956,15 @@
                       <UserCheck size={13} color="var(--text-secondary)" />
                       <div class="avatar-stack">
                         {#each task.assignedTo.slice(0, 5) as uid}
-                          <div class="avatar" title={getMemberName(uid)}>
-                            {getMemberInitials(uid)}
-                          </div>
+                          {#if isGhostUserId(uid)}
+                            <div class="avatar ghost-avatar" title={getAssigneeName(uid)}>
+                              <Ghost size={14} />
+                            </div>
+                          {:else}
+                            <div class="avatar" title={getMemberName(uid)}>
+                              {getMemberInitials(uid)}
+                            </div>
+                          {/if}
                         {/each}
                         {#if task.assignedTo.length > 5}
                           <div class="avatar more">+{task.assignedTo.length - 5}</div>
@@ -705,7 +972,7 @@
                       </div>
                       <span class="assignees-label">
                         {task.assignedTo.length === 1
-                          ? getMemberName(task.assignedTo[0])
+                          ? getAssigneeName(task.assignedTo[0])
                           : `${task.assignedTo.length} asignados`}
                       </span>
                     </div>
@@ -740,6 +1007,94 @@
     {/if}
   {/if}
 </div>
+
+<!-- Botón flotante de borrado (pulsación larga sobre la tarjeta) -->
+{#if pendingDeleteTaskId}
+  <button
+    type="button"
+    class="delete-fab"
+    class:dragging={isDraggingTask}
+    onclick={() => handleDeleteTask(pendingDeleteTaskId)}
+    aria-label="Eliminar la tarea"
+    disabled={isDeletingTask}
+  >
+    {#if isDeletingTask}
+      <LoaderCircle size={26} class="delete-fab-spin" />
+    {:else}
+      <Trash2 size={26} />
+    {/if}
+  </button>
+{/if}
+
+<!-- Detalle de la tarea (solo lectura) -->
+<SliceContainer bind:show={showTaskDetail}>
+  {#if detailTask}
+    {@const detailStatus = statusConfig[getTaskStatus(detailTask)] ?? statusConfig.unassigned}
+    <div class="task-detail">
+      <div class="detail-head">
+        <span class="status-badge" style="background:{detailStatus.bg}; color:{detailStatus.color}">
+          {detailStatus.label}
+        </span>
+        {#if detailTask.purchased}
+          <span class="status-badge purchased-badge">
+            <CheckCircle2 size={12} />
+            Comprada
+          </span>
+        {/if}
+        <h3>{detailTask.title}</h3>
+      </div>
+
+      <dl class="detail-list">
+        <div>
+          <dt>Fecha límite</dt>
+          <dd>{detailTask.dueDate ? formatDate(detailTask.dueDate) : "Sin fecha"}</dd>
+        </div>
+        {#if detailTask.assignedTo?.length}
+          <div>
+            <dt>Asignada a</dt>
+            <dd>{detailTask.assignedTo.map((uid) => getAssigneeName(uid)).join(", ")}</dd>
+          </div>
+        {/if}
+        {#if detailTask.createdAt}
+          <div>
+            <dt>Creada</dt>
+            <dd>{formatDate(detailTask.createdAt)}</dd>
+          </div>
+        {/if}
+      </dl>
+
+      {#if detailTask.description}
+        <div class="detail-block">
+          <h4>Descripción</h4>
+          <p>{detailTask.description}</p>
+        </div>
+      {/if}
+
+      {#if normalizeTaskAttachments(detailTask.attachments).length}
+        <div class="detail-block">
+          <h4>Imágenes adjuntas</h4>
+          <div class="detail-attachments">
+            {#each normalizeTaskAttachments(detailTask.attachments) as attachment, index (attachment.url)}
+              <button
+                type="button"
+                class="attachment-thumb"
+                onclick={() => openAttachmentLightbox(detailTask, index)}
+                aria-label={`Ver imagen ${index + 1}`}
+              >
+                <img
+                  src={optimizeCloudinary(attachment.url, 320, { height: 320, crop: "fill" })}
+                  alt={attachment.name}
+                  loading="lazy"
+                  decoding="async"
+                />
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
+    </div>
+  {/if}
+</SliceContainer>
 
 <!-- Add/Edit Task SliceContainer -->
 <SliceContainer bind:show={showAddTask}>
@@ -926,6 +1281,36 @@
             </button>
           {/each}
         </div>
+        </fieldset>
+      </div>
+    {/if}
+
+    {#if ghostList.length > 0}
+      <div class="form-group">
+        <fieldset>
+          <legend>Asignar a fantasmas</legend>
+          <div class="member-list">
+            {#each ghostList as ghost (ghost.id)}
+              {@const ghostAssigneeId = getGhostWorkdayUserId(ghost.id)}
+              <button
+                class="member-item {taskForm.assignedTo.includes(ghostAssigneeId)
+                  ? 'checked'
+                  : ''}"
+                onclick={() => toggleAssignedGhost(ghost.id)}
+              >
+                <div class="m-avatar ghost-avatar"><Ghost size={18} /></div>
+                <span class="m-name">{ghost.name}</span>
+                {#if taskForm.assignedTo.includes(ghostAssigneeId)}
+                  <CheckCircle2 size={18} color="var(--accent-strong)" />
+                {:else}
+                  <Circle size={18} color="var(--text-muted)" />
+                {/if}
+              </button>
+            {/each}
+          </div>
+          <small class="form-hint">
+            Los masters del fantasma podrán ver y gestionar las tareas que se le asignen.
+          </small>
         </fieldset>
       </div>
     {/if}
@@ -1960,5 +2345,187 @@
   .attachment-lightbox-meta small {
     font-size: 11px;
     opacity: 0.8;
+  }
+
+  /* Compras: marcado de la lista TODO */
+  .purchase-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    border-radius: 100px;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .purchase-check:hover {
+    color: var(--text-primary);
+    border-color: var(--status-purchases-color);
+  }
+
+  .purchase-check.done {
+    background: var(--status-purchases-bg);
+    color: var(--status-purchases-color);
+    border-color: transparent;
+  }
+
+  .task-card.purchased .task-title {
+    text-decoration: line-through;
+    color: var(--text-muted);
+  }
+
+  .purchased-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--status-purchases-bg);
+    color: var(--status-purchases-color);
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 100px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+
+  .ghost-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--purple-color);
+  }
+
+  .form-hint {
+    display: block;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
+
+  /* Botón flotante de borrado (pulsación larga) */
+  .delete-fab {
+    position: fixed;
+    left: 50%;
+    bottom: calc(var(--floating-action-bottom) + 16px);
+    transform: translateX(-50%);
+    width: 62px;
+    height: 62px;
+    border-radius: 50%;
+    border: none;
+    background: var(--danger-color);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 130;
+    box-shadow: 0 10px 24px rgba(220, 38, 38, 0.35);
+    animation: fab-pop 0.22s ease-out;
+  }
+
+  .delete-fab:disabled {
+    opacity: 0.7;
+    cursor: default;
+  }
+
+  /* Mientras se arrastra una tarjeta el botón no debe capturar el gesto. */
+  .delete-fab.dragging {
+    pointer-events: none;
+    opacity: 0.4;
+  }
+
+  .delete-fab-spin {
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes fab-pop {
+    from {
+      transform: translateX(-50%) scale(0.6);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(-50%) scale(1);
+      opacity: 1;
+    }
+  }
+
+  /* Detalle de tarea (solo lectura) */
+  .task-detail {
+    width: 100%;
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 8px 18px 32px;
+    display: grid;
+    gap: 18px;
+  }
+
+  .detail-head {
+    display: grid;
+    gap: 10px;
+    justify-items: start;
+  }
+
+  .detail-head h3 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--text-primary);
+    line-height: 1.3;
+  }
+
+  .detail-list {
+    margin: 0;
+    display: grid;
+    gap: 10px;
+  }
+
+  .detail-list > div {
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+  }
+
+  .detail-list dt {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--text-muted);
+    min-width: 110px;
+  }
+
+  .detail-list dd {
+    margin: 0;
+    font-size: 14px;
+    color: var(--text-primary);
+  }
+
+  .detail-block h4 {
+    margin: 0 0 8px;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--text-muted);
+  }
+
+  .detail-block p {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.55;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+  }
+
+  .detail-attachments {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 10px;
   }
 </style>

@@ -22,11 +22,33 @@ import {
     isOfflineError,
     scheduleOfflineSync
 } from './offlineQueue.js';
+import {
+    getGhostById,
+    getGhostIdFromUserId,
+    isGhostUserId,
+    teamsStore
+} from './teams.js';
 
 export const TEAM_TASKS_PAGE_SIZE = 20;
 export const MAX_TASK_ATTACHMENTS = 5;
 const ADD_TEAM_TASK_OPERATION = 'addTeamTask';
 const UPDATE_TEAM_TASK_OPERATION = 'updateTeamTask';
+
+/** Visibilidad de las tareas configurada por el administrador del equipo. */
+export const TASK_VISIBILITY = {
+    all: 'all',
+    own: 'own'
+};
+
+/** Estados del tablero de tareas. */
+export const TASK_STATUS = {
+    purchases: 'purchases',
+    unassigned: 'unassigned',
+    pending: 'pending',
+    'in-progress': 'in-progress',
+    completed: 'completed'
+};
+
 export const tasksStore = writable([]);
 export const teamTasksStore = writable([]);
 export const teamTasksPaginationStore = writable({
@@ -40,10 +62,10 @@ let teamTasksUnsubscribe;
 let teamTasksQueryState = {
     teamId: '',
     status: 'all',
+    visibility: TASK_VISIBILITY.all,
+    uid: '',
     pageSize: TEAM_TASKS_PAGE_SIZE,
-    nextCursor: null,
-    olderTasks: [],
-    hasMore: true
+    sources: []
 };
 
 function normalizeTaskDoc(taskDoc) {
@@ -89,16 +111,55 @@ export function normalizeTaskAttachments(attachments) {
         }));
 }
 
-function buildTeamTaskDoc(taskData, user) {
+/**
+ * Masters de los fantasmas asignados a una tarea.
+ *
+ * Se guardan como lista de uids en la propia tarea porque las reglas de
+ * Firestore no pueden recorrer listas: así el acceso de cada master se
+ * comprueba con una simple pertenencia (`uid in resource.data.ghostMasterIds`).
+ */
+export function getTaskGhostMasterIds(team, assignedTo = []) {
+    const masterIds = [];
+    if (!team || !Array.isArray(assignedTo)) return masterIds;
+
+    assignedTo
+        .filter((assigneeId) => isGhostUserId(assigneeId))
+        .forEach((ghostUserId) => {
+            const ghostId = getGhostIdFromUserId(ghostUserId);
+            const ghost = ghostId ? getGhostById(team, ghostId) : null;
+            (ghost?.masters || []).forEach((masterId) => {
+                if (masterId && !masterIds.includes(masterId)) masterIds.push(masterId);
+            });
+        });
+
+    return masterIds;
+}
+
+/**
+ * Tareas que un usuario puede ver según la visibilidad configurada para él:
+ * "all" (todas las del equipo) u "own" (las suyas y las de sus fantasmas).
+ */
+export function getVisibleTasksVisibility(team, uid) {
+    if (!team || !uid) return TASK_VISIBILITY.all;
+    if (team.admin === uid) return TASK_VISIBILITY.all;
+    const visibility = team.memberSettings?.[uid]?.tasksVisibility;
+    return visibility === TASK_VISIBILITY.own ? TASK_VISIBILITY.own : TASK_VISIBILITY.all;
+}
+
+function buildTeamTaskDoc(taskData, user, team = null) {
+    const assignedTo = Array.isArray(taskData.assignedTo) ? taskData.assignedTo : [];
     return {
         title: taskData.title,
         description: taskData.description || '',
         status: taskData.status || 'unassigned',
-        assignedTo: taskData.assignedTo || [],
+        assignedTo,
         dueDate: taskData.dueDate || null,
         attachments: normalizeTaskAttachments(taskData.attachments),
         createdAt: taskData.createdAt || new Date().toISOString(),
         createdBy: user.uid,
+        ghostMasterIds: getTaskGhostMasterIds(team, assignedTo),
+        purchased: Boolean(taskData.purchased),
+        purchasedAt: taskData.purchasedAt || null,
     };
 }
 
@@ -114,8 +175,8 @@ function updateOptimisticTeamTask(taskId, data) {
     )));
 }
 
-function getTeamTasksConstraints(status = 'all', pageSize = TEAM_TASKS_PAGE_SIZE, cursor = null) {
-    const constraints = [];
+function getTeamTasksConstraints(source, status = 'all', pageSize = TEAM_TASKS_PAGE_SIZE, cursor = null) {
+    const constraints = [...(source?.constraints || [])];
     if (status && status !== 'all') {
         constraints.push(where('status', '==', status));
     }
@@ -127,10 +188,33 @@ function getTeamTasksConstraints(status = 'all', pageSize = TEAM_TASKS_PAGE_SIZE
     return constraints;
 }
 
+/**
+ * Fuentes de datos de la pantalla de tareas.
+ *
+ * Con visibilidad "all" se cargan todas las tareas del equipo. Con
+ * visibilidad "own" el usuario solo accede a las suyas y a las de los
+ * fantasmas que gestiona, por lo que se escuchan dos consultas que se
+ * combinan (Firestore no permite consultas con OR).
+ */
+function buildTaskSources(visibility, uid) {
+    if (visibility === TASK_VISIBILITY.own && uid) {
+        return [
+            {
+                key: 'assigned',
+                constraints: [where('assignedTo', 'array-contains', uid)]
+            },
+            {
+                key: 'ghosts',
+                constraints: [where('ghostMasterIds', 'array-contains', uid)]
+            }
+        ];
+    }
+
+    return [{ key: 'all', constraints: [] }];
+}
+
 function resetTeamTasksPagination(pageSize = TEAM_TASKS_PAGE_SIZE) {
-    teamTasksQueryState.nextCursor = null;
-    teamTasksQueryState.olderTasks = [];
-    teamTasksQueryState.hasMore = true;
+    teamTasksQueryState.sources = [];
     teamTasksPaginationStore.set({
         isLoadingMore: false,
         hasMore: true,
@@ -171,6 +255,8 @@ export function subscribeToTeamTasks(teamId, options = {}) {
     teamTasksUnsubscribe = null;
     const pageSize = options.pageSize || TEAM_TASKS_PAGE_SIZE;
     const status = options.status || 'all';
+    const visibility = options.visibility || TASK_VISIBILITY.all;
+    const uid = options.uid || '';
     resetTeamTasksPagination(pageSize);
 
     if (!teamId) {
@@ -178,59 +264,68 @@ export function subscribeToTeamTasks(teamId, options = {}) {
         return () => {};
     }
 
+    const sources = buildTaskSources(visibility, uid).map((source) => ({
+        ...source,
+        cursor: null,
+        hasMore: true,
+        olderTasks: []
+    }));
+
     teamTasksQueryState = {
         teamId,
         status,
+        visibility,
+        uid,
         pageSize,
-        nextCursor: null,
-        olderTasks: [],
-        hasMore: true
+        sources
     };
 
-    let tasksQuery;
-    try {
-        tasksQuery = query(
-            collection(db, 'teams', teamId, 'tasks'),
-            ...getTeamTasksConstraints(status, pageSize)
-        );
-    } catch (error) {
-        console.error('Error starting team tasks listener:', error);
-        teamTasksStore.set([]);
-        teamTasksPaginationStore.set({
-            isLoadingMore: false,
-            hasMore: false,
-            pageSize
-        });
-        return () => {
-            if (teamTasksUnsubscribe === null) teamTasksStore.set([]);
-        };
-    }
+    const unsubscribers = [];
 
-    const unsubscribe = onSnapshot(tasksQuery, (snapshot) => {
-        const firstPageTasks = snapshot.docs.map(normalizeTaskDoc);
-        if (teamTasksQueryState.olderTasks.length === 0) {
-            teamTasksQueryState.nextCursor = snapshot.docs[snapshot.docs.length - 1] || null;
-            teamTasksQueryState.hasMore = snapshot.docs.length === pageSize;
+    sources.forEach((source) => {
+        let tasksQuery;
+        try {
+            tasksQuery = query(
+                collection(db, 'teams', teamId, 'tasks'),
+                ...getTeamTasksConstraints(source, status, pageSize)
+            );
+        } catch (error) {
+            console.error('Error starting team tasks listener:', error);
+            return;
         }
-        teamTasksStore.set(mergeTeamTasks(firstPageTasks, teamTasksQueryState.olderTasks));
-        teamTasksPaginationStore.set({
-            isLoadingMore: false,
-            hasMore: teamTasksQueryState.hasMore,
-            pageSize
+
+        const unsubscribe = onSnapshot(tasksQuery, (snapshot) => {
+            const firstPageTasks = snapshot.docs.map(normalizeTaskDoc);
+            if (source.olderTasks.length === 0) {
+                source.cursor = snapshot.docs[snapshot.docs.length - 1] || null;
+                source.hasMore = snapshot.docs.length === pageSize;
+            }
+            source.olderTasks = mergeTeamTasks(source.olderTasks, firstPageTasks);
+            teamTasksStore.set(mergeSourcesTasks(sources));
+            teamTasksPaginationStore.set({
+                isLoadingMore: false,
+                hasMore: sources.some((item) => item.hasMore),
+                pageSize
+            });
+        }, (error) => {
+            console.error('Error in team tasks listener:', error);
+            teamTasksPaginationStore.set({
+                isLoadingMore: false,
+                hasMore: false,
+                pageSize
+            });
         });
-    }, (error) => {
-        console.error("Error in team tasks listener:", error);
-        teamTasksPaginationStore.set({
-            isLoadingMore: false,
-            hasMore: false,
-            pageSize
-        });
+        unsubscribers.push(unsubscribe);
     });
-    teamTasksUnsubscribe = unsubscribe;
+
+    const unsubscribeAll = () => {
+        unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+    teamTasksUnsubscribe = unsubscribeAll;
 
     return () => {
-        unsubscribe();
-        if (teamTasksUnsubscribe === unsubscribe) {
+        unsubscribeAll();
+        if (teamTasksUnsubscribe === unsubscribeAll) {
             teamTasksUnsubscribe = null;
             teamTasksStore.set([]);
             resetTeamTasksPagination(pageSize);
@@ -238,13 +333,28 @@ export function subscribeToTeamTasks(teamId, options = {}) {
     };
 }
 
+function mergeSourcesTasks(sources = []) {
+    const tasksById = new Map();
+    sources.forEach((source) => {
+        [...source.olderTasks].reverse().forEach((task) => {
+            if (!tasksById.has(task.id)) tasksById.set(task.id, task);
+        });
+    });
+    return sortTeamTasks(Array.from(tasksById.values()));
+}
+
 export async function loadMoreTeamTasks() {
-    const { teamId, status, pageSize, nextCursor } = teamTasksQueryState;
-    if (!teamId || !nextCursor) return [];
+    const { teamId, status, pageSize, sources } = teamTasksQueryState;
+    if (!teamId) return [];
 
     const paginationState = get(teamTasksPaginationStore);
-
     if (paginationState.isLoadingMore || !paginationState.hasMore) return [];
+
+    const source = sources.find((item) => item.hasMore && item.cursor);
+    if (!source) {
+        teamTasksPaginationStore.set({ ...paginationState, hasMore: false });
+        return [];
+    }
 
     teamTasksPaginationStore.set({
         ...paginationState,
@@ -254,17 +364,17 @@ export async function loadMoreTeamTasks() {
     try {
         const tasksQuery = query(
             collection(db, 'teams', teamId, 'tasks'),
-            ...getTeamTasksConstraints(status, pageSize, nextCursor)
+            ...getTeamTasksConstraints(source, status, pageSize, source.cursor)
         );
         const snapshot = await getDocs(tasksQuery);
         const olderTasks = snapshot.docs.map(normalizeTaskDoc);
-        teamTasksQueryState.nextCursor = snapshot.docs[snapshot.docs.length - 1] || null;
-        teamTasksQueryState.olderTasks = mergeTeamTasks(teamTasksQueryState.olderTasks, olderTasks);
-        teamTasksQueryState.hasMore = snapshot.docs.length === pageSize;
-        teamTasksStore.update((currentTasks) => mergeTeamTasks(currentTasks, olderTasks));
+        source.cursor = snapshot.docs[snapshot.docs.length - 1] || source.cursor;
+        source.olderTasks = mergeTeamTasks(source.olderTasks, olderTasks);
+        source.hasMore = snapshot.docs.length === pageSize;
+        teamTasksStore.set(mergeSourcesTasks(sources));
         teamTasksPaginationStore.set({
             isLoadingMore: false,
-            hasMore: teamTasksQueryState.hasMore,
+            hasMore: sources.some((item) => item.hasMore),
             pageSize
         });
         return olderTasks;
@@ -304,7 +414,8 @@ export async function getAssignedTasksFromTeams(teams = [], uid) {
 
 export async function executeAddTeamTask({ teamId, taskData, user, teamName = 'el equipo', taskId = null }) {
     if (!user || !teamId) return;
-    const newTask = buildTeamTaskDoc(taskData, user);
+    const team = get(teamsStore).find((entry) => entry.id === teamId) || null;
+    const newTask = buildTeamTaskDoc(taskData, user, team);
     let docRef = null;
 
     if (taskId) {
@@ -338,7 +449,11 @@ async function enqueueAddTeamTask(teamId, taskData, user, teamName) {
     };
     const newTask = {
         id: taskId,
-        ...buildTeamTaskDoc(queuedTaskData, user),
+        ...buildTeamTaskDoc(
+            queuedTaskData,
+            user,
+            get(teamsStore).find((entry) => entry.id === teamId) || null
+        ),
         _offlinePending: true
     };
 
@@ -373,12 +488,23 @@ export async function addTeamTask(teamId, taskData, user, teamName = 'el equipo'
 export async function executeUpdateTeamTask({ teamId, taskId, data }) {
     if (!teamId || !taskId) return;
     const taskRef = doc(db, 'teams', teamId, 'tasks', taskId);
-    await updateDoc(taskRef, { ...data, updatedAt: data.updatedAt || new Date().toISOString() });
+    const payload = { ...data };
+    // Los masters de los fantasmas asignados se recalculan siempre que cambia
+    // la asignación para que el acceso de cada master siga siendo coherente.
+    if (Array.isArray(data.assignedTo)) {
+        const team = get(teamsStore).find((entry) => entry.id === teamId) || null;
+        payload.ghostMasterIds = getTaskGhostMasterIds(team, data.assignedTo);
+    }
+    await updateDoc(taskRef, { ...payload, updatedAt: data.updatedAt || new Date().toISOString() });
 }
 
 async function enqueueUpdateTeamTask(teamId, taskId, data) {
     const updatedAt = data.updatedAt || new Date().toISOString();
     const queuedData = { ...data, updatedAt };
+    if (Array.isArray(data.assignedTo)) {
+        const team = get(teamsStore).find((entry) => entry.id === teamId) || null;
+        queuedData.ghostMasterIds = getTaskGhostMasterIds(team, data.assignedTo);
+    }
     await enqueueOfflineOperation(
         UPDATE_TEAM_TASK_OPERATION,
         { teamId, taskId, data: queuedData },

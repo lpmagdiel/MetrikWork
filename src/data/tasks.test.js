@@ -1,5 +1,59 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_TASK_ATTACHMENTS, normalizeTaskAttachments } from './tasks.js';
+import {
+    MAX_TASK_ATTACHMENTS,
+    TASK_VISIBILITY,
+    getTaskGhostMasterIds,
+    getVisibleTasksVisibility,
+    normalizeTaskAttachments
+} from './tasks.js';
+
+describe('asignación de tareas a fantasmas', () => {
+    const team = {
+        id: 'team-1',
+        admin: 'admin-1',
+        members: ['admin-1', 'master-1', 'otro-1'],
+        ghosts: [
+            { id: 'ghost-a', name: 'Fantasma A', masters: ['master-1'] },
+            { id: 'ghost-b', name: 'Fantasma B', masters: ['master-1', 'otro-1'] }
+        ]
+    };
+
+    it('devuelve los masters de los fantasmas asignados', () => {
+        expect(getTaskGhostMasterIds(team, ['ghost-ghost-a'])).toEqual(['master-1']);
+        expect(getTaskGhostMasterIds(team, ['ghost-ghost-b'])).toEqual(['master-1', 'otro-1']);
+    });
+
+    it('no devuelve masters cuando la tarea no está asignada a fantasmas', () => {
+        expect(getTaskGhostMasterIds(team, ['admin-1'])).toEqual([]);
+        expect(getTaskGhostMasterIds(team, [])).toEqual([]);
+        expect(getTaskGhostMasterIds(null, ['ghost-ghost-a'])).toEqual([]);
+    });
+
+    it('ignora fantasmas que no existen en el equipo', () => {
+        expect(getTaskGhostMasterIds(team, ['ghost-ghost-inexistente'])).toEqual([]);
+    });
+
+    it('no repite masters cuando hay varios fantasmas asignados', () => {
+        expect(getTaskGhostMasterIds(team, ['ghost-ghost-a', 'ghost-ghost-b'])).toEqual(['master-1', 'otro-1']);
+    });
+});
+
+describe('visibilidad de tareas por miembro', () => {
+    it('devuelve "all" por defecto y para el administrador', () => {
+        expect(getVisibleTasksVisibility({ id: 'team-1', admin: 'admin-1' }, 'admin-1')).toBe(TASK_VISIBILITY.all);
+        expect(getVisibleTasksVisibility({ id: 'team-1', admin: 'admin-1' }, 'miembro-1')).toBe(TASK_VISIBILITY.all);
+    });
+
+    it('respeta la configuración "own" del miembro', () => {
+        const team = {
+            id: 'team-1',
+            admin: 'admin-1',
+            memberSettings: { 'miembro-1': { tasksVisibility: 'own' } }
+        };
+        expect(getVisibleTasksVisibility(team, 'miembro-1')).toBe(TASK_VISIBILITY.own);
+        expect(getVisibleTasksVisibility(team, 'miembro-2')).toBe(TASK_VISIBILITY.all);
+    });
+});
 
 describe('adjuntos de tareas', () => {
   it('normaliza los adjuntos a url y nombre', () => {
