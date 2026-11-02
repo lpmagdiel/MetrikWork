@@ -150,12 +150,14 @@ describe('interacción con las tarjetas de tarea', () => {
     const { container } = render(Tasks);
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    expect(container.querySelector('.delete-fab')).toBeNull();
+    // El botón flotante se monta en el <body> para quedar por delante de la
+    // tarjeta que se arrastra, así que se busca fuera del contenedor.
+    expect(document.querySelector('.delete-fab')).toBeNull();
 
     await fireEvent.pointerDown(container.querySelector('.task-card'));
     await new Promise((resolve) => setTimeout(resolve, 700));
 
-    expect(container.querySelector('.delete-fab')).toBeTruthy();
+    expect(document.querySelector('.delete-fab')).toBeTruthy();
   });
 
   it('pide confirmación antes de eliminar la tarea', async () => {
@@ -165,7 +167,7 @@ describe('interacción con las tarjetas de tarea', () => {
     await fireEvent.pointerDown(container.querySelector('.task-card'));
     await new Promise((resolve) => setTimeout(resolve, 700));
 
-    await fireEvent.click(container.querySelector('.delete-fab'));
+    await fireEvent.click(document.querySelector('.delete-fab'));
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(confirmAlert).toHaveBeenCalledTimes(1);
@@ -180,7 +182,7 @@ describe('interacción con las tarjetas de tarea', () => {
     await fireEvent.pointerDown(container.querySelector('.task-card'));
     await new Promise((resolve) => setTimeout(resolve, 700));
 
-    await fireEvent.click(container.querySelector('.delete-fab'));
+    await fireEvent.click(document.querySelector('.delete-fab'));
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(deleteTeamTask).toHaveBeenCalledWith('team-1', 'task-1');
@@ -192,6 +194,75 @@ describe('interacción con las tarjetas de tarea', () => {
 
     expect(container.querySelector('.task-card .action-btn.danger')).toBeNull();
     expect(container.innerHTML).toContain('Ver detalle');
+  });
+});
+
+describe('arrastrar una tarea hasta el botón de eliminar', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    userStore.set({ uid: 'admin-1', name: 'Admin', email: 'a@b.c' });
+    teamsStore.set([
+      {
+        id: 'team-1',
+        name: 'Equipo Uno',
+        admin: 'admin-1',
+        members: ['admin-1'],
+        membersData: [{ id: 'admin-1', name: 'Admin', email: 'a@b.c' }],
+      },
+    ]);
+    selectedTeamId.set('team-1');
+    teamTasksStore.set([
+      {
+        id: 'task-1',
+        title: 'Colocar bordillo',
+        description: 'Zona norte',
+        status: 'pending',
+        assignedTo: ['admin-1'],
+        dueDate: '2026-10-20T00:00:00.000Z',
+        attachments: [],
+        createdAt: '2026-10-12T10:00:00.000Z',
+        createdBy: 'admin-1',
+      },
+    ]);
+  });
+
+  it('deja el botón flotante por delante de la tarjeta arrastrada', async () => {
+    const { container } = render(Tasks);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const card = container.querySelector('.task-card');
+    card.dispatchEvent(
+      new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 100, clientY: 100 }),
+    );
+    window.dispatchEvent(
+      new MouseEvent('mousemove', { bubbles: true, button: 0, clientX: 140, clientY: 140 }),
+    );
+    // Se espera a que Svelte monte el botón flotante y registre los
+    // escuchadores de puntero del arrastre.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    window.dispatchEvent(
+      new MouseEvent('pointermove', { bubbles: true, clientX: 140, clientY: 140 }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // La librería de arrastre crea una copia de la tarjeta fuera del
+    // componente: el botón flotante se monta en el <body> y la copia se baja
+    // de capa para que el botón quede siempre delante.
+    const draggedEl = document.getElementById('dnd-action-dragged-el');
+    expect(draggedEl).toBeTruthy();
+    expect(draggedEl.style.zIndex).toBe('150');
+
+    const fab = document.querySelector('.delete-fab');
+    expect(fab).toBeTruthy();
+    expect(fab.parentElement).toBe(document.body);
+
+    // La copia recibe la cercanía con el botón para teñirse de rojo.
+    expect(draggedEl.style.getPropertyValue('--delete-fab-progress')).not.toBe('');
+
+    window.dispatchEvent(
+      new MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 140, clientY: 140 }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
   });
 });
 

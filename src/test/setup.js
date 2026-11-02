@@ -24,3 +24,11 @@ if (typeof Element !== 'undefined' && !Element.prototype.animate) {
         return animation;
     };
 }
+
+// Tampoco implementa getAnimations(), que usa la animación "flip" de Svelte
+// al reordenar las tarjetas del tablero.
+if (typeof Element !== 'undefined' && !Element.prototype.getAnimations) {
+    Element.prototype.getAnimations = function getAnimations() {
+        return [];
+    };
+}

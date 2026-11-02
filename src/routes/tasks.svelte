@@ -1,6 +1,6 @@
 <script>
   import { flip } from "svelte/animate";
-  import { dndzone } from "svelte-dnd-action";
+  import { dndzone, DRAGGED_ELEMENT_ID } from "svelte-dnd-action";
   import {
     ChevronLeft,
     Plus,
@@ -155,22 +155,97 @@
   // Tarjeta que se está arrastrando: se pinta en rojo al soltarla sobre el
   // botón de eliminar.
   let draggingTaskId = $state(null);
+  // Cercanía (de 0 a 1) entre la tarjeta que se arrastra y el centro del
+  // botón de eliminar. Controla el crecimiento del botón y el tinte rojo de
+  // la tarjeta: cuanto más cerca está la tarjeta, más rojo se pone.
+  let deleteFabProgress = $state(0);
 
   // El botón flotante se ve mientras se arrastra (destino de la tarjeta) o
   // cuando una pulsación larga ha marcado una tarea para borrar.
   let showDeleteFab = $derived(Boolean(pendingDeleteTaskId) || isDraggingTask);
 
+  // Distancia (en píxeles) a la que la tarjeta arrastrada ya se considera
+  // encima del botón de eliminar y empieza a teñirse de rojo.
+  const deleteFabProximityRadius = 240;
+
+  // Capas: la copia de la tarjeta que arrastra la librería se crea al final
+  // del <body> con un z-index altísimo (9999). Se baja para que el botón
+  // flotante (montado también en el <body>, con z-index 200) quede siempre
+  // por delante sin tapar los diálogos de la aplicación.
+  const draggedCardLayer = 150;
+
+  // El botón flotante se monta directamente en el <body>: dentro de la vista
+  // quedaría atrapado en el contexto de apilamiento de <main> y la tarjeta
+  // arrastrada siempre se dibujaría por encima.
+  function portalToBody(node) {
+    document.body.appendChild(node);
+    return {
+      destroy() {
+        node.remove();
+      },
+    };
+  }
+
+  // Devuelve la copia de la tarjeta que se está arrastrando (la crea la
+  // librería fuera del componente) y la deja por debajo del botón flotante.
+  function getDraggedCardElement() {
+    const draggedEl = document.getElementById(DRAGGED_ELEMENT_ID);
+    if (!draggedEl) return null;
+    if (draggedEl.style.zIndex !== String(draggedCardLayer)) {
+      draggedEl.style.zIndex = String(draggedCardLayer);
+    }
+    return draggedEl;
+  }
+
+  // Centro de la tarjeta que se arrastra (null si todavía no existe).
+  function getDraggedCardCenter(draggedEl) {
+    if (!draggedEl) return null;
+    const rect = draggedEl.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  }
+
+  // La tarjeta que se arrastra se tiñe de rojo de forma progresiva: el valor
+  // se escribe como variable CSS en la copia de la tarjeta.
+  function setDraggedCardProgress(draggedEl, progress) {
+    if (!draggedEl) return;
+    draggedEl.style.setProperty("--delete-fab-progress", progress.toFixed(3));
+  }
+
   // Seguir el puntero mientras se arrastra para detectar si la tarjeta se
   // suelta encima del botón de eliminar.
   function updateDeleteFabHover() {
+    const draggedEl = getDraggedCardElement();
     if (!deleteFabElement || !isDraggingTask) {
       isPointerOverDeleteFab = false;
+      deleteFabProgress = 0;
+      setDraggedCardProgress(draggedEl, 0);
       return;
     }
     const rect = deleteFabElement.getBoundingClientRect();
     const { x, y } = lastPointerPosition;
-    isPointerOverDeleteFab =
+    const pointerOverFab =
       x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+
+    // Distancia entre el centro de la tarjeta y el centro del botón.
+    const fabCenter = {
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+    };
+    const cardCenter = getDraggedCardCenter(draggedEl) ?? { x, y };
+    const distance = Math.hypot(cardCenter.x - fabCenter.x, cardCenter.y - fabCenter.y);
+
+    // 0 = tarjeta lejos del botón, 1 = tarjeta encima del botón.
+    const progress = Math.min(
+      1,
+      Math.max(0, 1 - distance / deleteFabProximityRadius),
+    );
+    deleteFabProgress = progress;
+    setDraggedCardProgress(draggedEl, progress);
+
+    // El borrado queda armado cuando el puntero está sobre el botón o
+    // cuando la tarjeta ya lo cubre por completo.
+    const hitRadius = rect.width / 2 + 12;
+    isPointerOverDeleteFab = pointerOverFab || distance <= hitRadius;
   }
 
   function handleDragPointerMove(event) {
@@ -186,6 +261,7 @@
   $effect(() => {
     if (!isDraggingTask) {
       isPointerOverDeleteFab = false;
+      deleteFabProgress = 0;
       return;
     }
     const options = { capture: true, passive: true };
@@ -312,6 +388,10 @@
     if (!canMoveTasks) return;
     isDraggingTask = true;
     draggingTaskId = event.detail.info?.id || null;
+    deleteFabProgress = 0;
+    // La copia de la tarjeta nace con un z-index de 9999: se baja para que
+    // el botón de eliminar quede por delante desde el primer movimiento.
+    getDraggedCardElement();
     updateColumnItems(status, event.detail.items);
   }
 
@@ -324,6 +404,7 @@
     const droppedOnDeleteFab = isPointerOverDeleteFab;
     isDraggingTask = false;
     draggingTaskId = null;
+    deleteFabProgress = 0;
 
     const movedTaskId = event.detail.info?.id;
     const movedTask = event.detail.items.find((task) => task.id === movedTaskId);
@@ -1160,6 +1241,8 @@
     class="delete-fab"
     class:dragging={isDraggingTask}
     class:target={isPointerOverDeleteFab}
+    style="--fab-progress:{deleteFabProgress}"
+    use:portalToBody
     bind:this={deleteFabElement}
     onclick={() => pendingDeleteTaskId && handleDeleteTask(pendingDeleteTaskId)}
     aria-label="Eliminar la tarea"
@@ -2813,10 +2896,11 @@
 
   /* Botón flotante de borrado (pulsación larga) */
   .delete-fab {
+    /* 0 = la tarjeta está lejos, 1 = la tarjeta está encima del botón. */
+    --fab-progress: 0;
     position: fixed;
     left: 50%;
     bottom: calc(var(--floating-action-bottom) + 16px);
-    transform: translateX(-50%);
     width: 62px;
     height: 62px;
     border-radius: 50%;
@@ -2827,9 +2911,16 @@
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    z-index: 130;
+    /* Por encima de la tarjeta arrastrada, pero por debajo de los diálogos. */
+    z-index: 200;
     box-shadow: 0 10px 24px rgba(220, 38, 38, 0.35);
     animation: fab-pop 0.22s ease-out;
+    /* El botón crece ligeramente a medida que la tarjeta se acerca. */
+    transform: translateX(-50%) scale(calc(1 + var(--fab-progress) * 0.32));
+    transition:
+      transform 0.18s cubic-bezier(0.34, 1.4, 0.64, 1),
+      box-shadow 0.18s ease,
+      opacity 0.18s ease;
   }
 
   .delete-fab:disabled {
@@ -2846,10 +2937,23 @@
 
   /* La tarjeta está encima del botón: se resalta como destino. */
   .delete-fab.target {
-    background: var(--danger-color);
     opacity: 1;
-    transform: translateX(-50%) scale(1.18);
     box-shadow: 0 12px 30px rgba(220, 38, 38, 0.55);
+  }
+
+  /* Onda de aviso cuando la tarjeta ya está sobre el botón. */
+  .delete-fab::after {
+    content: "";
+    position: absolute;
+    inset: -8px;
+    border-radius: 50%;
+    border: 2px solid var(--danger-color);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .delete-fab.target::after {
+    animation: fab-pulse 1.1s ease-out infinite;
   }
 
   :global(.delete-fab-spin) {
@@ -2865,6 +2969,51 @@
       transform: translateX(-50%) scale(1);
       opacity: 1;
     }
+  }
+
+  @keyframes fab-pulse {
+    0% {
+      transform: scale(0.8);
+      opacity: 0.7;
+    }
+    100% {
+      transform: scale(1.5);
+      opacity: 0;
+    }
+  }
+
+  /* La tarjeta que se arrastra es una copia que la librería de arrastre crea
+     fuera del componente (id "dnd-action-dragged-el"). Se tiñe de rojo de
+     forma progresiva según se acerca al centro del botón de eliminar. */
+  :global(#dnd-action-dragged-el.task-card) {
+    --delete-fab-progress: 0;
+    background: var(--bg-card) !important;
+    background: color-mix(
+      in srgb,
+      var(--bg-card) calc((1 - var(--delete-fab-progress)) * 100%),
+      var(--bg-danger-subtle)
+    ) !important;
+    border-color: color-mix(
+      in srgb,
+      var(--border-color) calc((1 - var(--delete-fab-progress)) * 100%),
+      var(--danger-color)
+    ) !important;
+    border-left-color: color-mix(
+      in srgb,
+      var(--card-accent) calc((1 - var(--delete-fab-progress)) * 100%),
+      var(--danger-color)
+    ) !important;
+    box-shadow: 0 10px 28px
+      rgba(220, 38, 38, calc(0.4 * var(--delete-fab-progress))) !important;
+  }
+
+  :global(#dnd-action-dragged-el.task-card .task-title),
+  :global(#dnd-action-dragged-el.task-card .task-desc) {
+    color: color-mix(
+      in srgb,
+      var(--text-primary) calc((1 - var(--delete-fab-progress)) * 100%),
+      var(--danger-color)
+    );
   }
 
   /* Detalle de tarea (solo lectura) */
