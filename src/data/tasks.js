@@ -297,6 +297,7 @@ export function subscribeToTeamTasks(teamId, options = {}) {
         ...source,
         cursor: null,
         hasMore: true,
+        firstPage: [],
         olderTasks: []
     }));
 
@@ -329,7 +330,18 @@ export function subscribeToTeamTasks(teamId, options = {}) {
                 source.cursor = snapshot.docs[snapshot.docs.length - 1] || null;
                 source.hasMore = snapshot.docs.length === pageSize;
             }
-            source.olderTasks = mergeTeamTasks(source.olderTasks, firstPageTasks);
+            // Las tareas eliminadas (o que dejan de cumplir el filtro) se
+            // quitan de lo ya cargado: si no, su tarjeta volvería a aparecer.
+            const removedIds = new Set(
+                snapshot
+                    .docChanges()
+                    .filter((change) => change.type === 'removed')
+                    .map((change) => change.doc.id)
+            );
+            if (removedIds.size > 0) {
+                source.olderTasks = source.olderTasks.filter((task) => !removedIds.has(task.id));
+            }
+            source.firstPage = firstPageTasks;
             teamTasksStore.set(mergeSourcesTasks(sources));
             teamTasksPaginationStore.set({
                 isLoadingMore: false,
@@ -362,10 +374,17 @@ export function subscribeToTeamTasks(teamId, options = {}) {
     };
 }
 
+/**
+ * Combina las tareas de todas las fuentes (mis tareas y las de mis fantasmas).
+ *
+ * Cada fuente aporta su primera página (la que llega por el listener) y las
+ * tareas ya cargadas con "cargar más". La primera página se mantiene aparte
+ * para que, al borrar una tarea, su tarjeta desaparezca del tablero.
+ */
 function mergeSourcesTasks(sources = []) {
     const tasksById = new Map();
     sources.forEach((source) => {
-        [...source.olderTasks].reverse().forEach((task) => {
+        [...(source.firstPage || []), ...(source.olderTasks || [])].forEach((task) => {
             if (!tasksById.has(task.id)) tasksById.set(task.id, task);
         });
     });
@@ -574,4 +593,13 @@ export async function deleteTeamTask(teamId, taskId) {
         console.error('Error deleting team task:', error);
         throw error;
     }
+}
+
+/**
+ * Quita la tarea del tablero al instante (después de borrarla en Firestore),
+ * para que su tarjeta desaparezca sin esperar al siguiente snapshot.
+ */
+export function removeTeamTaskFromStore(taskId) {
+    if (!taskId) return;
+    teamTasksStore.update((tasks) => tasks.filter((task) => task.id !== taskId));
 }

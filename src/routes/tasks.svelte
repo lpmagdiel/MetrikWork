@@ -34,6 +34,7 @@
     addTeamTask,
     updateTeamTask,
     deleteTeamTask,
+    removeTeamTaskFromStore,
     teamTemplatesStore,
     subscribeToTeamTemplates,
     addTeamTemplate,
@@ -589,6 +590,8 @@
     isDeletingTask = true;
     try {
       await deleteTeamTask(team.id, taskId);
+      // La tarjeta desaparece al instante, sin esperar al siguiente snapshot.
+      removeTeamTaskFromStore(taskId);
       await cleanupRemovedAttachments(
         normalizeTaskAttachments(task?.attachments).map((item) => item.url),
       );
