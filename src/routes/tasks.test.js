@@ -193,7 +193,9 @@ describe('interacción con las tarjetas de tarea', () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(container.querySelector('.task-card .action-btn.danger')).toBeNull();
-    expect(container.innerHTML).toContain('Ver detalle');
+    // El detalle se abre tocando la tarjeta: solo queda el botón de editar.
+    expect(container.querySelectorAll('.task-card .action-btn').length).toBe(1);
+    expect(container.innerHTML).not.toContain('Ver detalle');
   });
 });
 

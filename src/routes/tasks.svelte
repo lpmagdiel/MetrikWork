@@ -20,7 +20,6 @@
     Upload,
     ShoppingCart,
     Ghost,
-    Eye,
     ListTodo,
   } from "lucide-svelte";
   import {
@@ -1086,26 +1085,16 @@
                     <div class="card-actions">
                       {#if canEditTasks}
                         <button
-                          class="action-btn"
+                          class="action-btn edit"
                           onclick={(event) => {
                             event.stopPropagation();
                             openEditTask(task);
                           }}
                           aria-label="Editar"
                         >
-                          <Edit2 size={15} />
+                          <Edit2 size={18} />
                         </button>
                       {/if}
-                      <button
-                        class="action-btn"
-                        onclick={(event) => {
-                          event.stopPropagation();
-                          openTaskDetail(task);
-                        }}
-                        aria-label="Ver detalle"
-                      >
-                        <Eye size={15} />
-                      </button>
                     </div>
                   </div>
 
@@ -1936,6 +1925,7 @@
 
   .card-actions {
     display: flex;
+    align-items: center;
     gap: 4px;
   }
 
@@ -1951,6 +1941,22 @@
     justify-content: center;
     cursor: pointer;
     transition: all 0.15s;
+  }
+
+  /* El botón de editar es la acción principal de la tarjeta: se muestra
+     más grande y destacado para que sea fácil de pulsar en móvil.
+     Se mantiene `var(--text-primary)` para no perder contraste en modo oscuro. */
+  .action-btn.edit,
+  .action-btn.edit:hover {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: var(--bg-accent-subtle);
+    color: var(--text-primary);
+  }
+
+  .action-btn.edit:hover {
+    transform: scale(1.06);
   }
 
   .action-btn:hover {

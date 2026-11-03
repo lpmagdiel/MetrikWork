@@ -52,7 +52,18 @@ function buildTeam() {
   selectedTeamId.set('team-1');
 }
 
+// El libro se filtra por el periodo seleccionado (por defecto, el mes actual),
+// así que los apuntes de ejemplo se sitúan dentro del mes en curso.
+function currentMonthDay(day) {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${String(day).padStart(2, '0')}`;
+}
+
 function buildLedgerStores() {
+  const expenseDate = currentMonthDay(12);
+  const paymentDate = currentMonthDay(15);
+
   manualTeamExpensesStore.set([
     {
       id: 'exp-1',
@@ -65,7 +76,7 @@ function buildLedgerStores() {
       currency: 'EUR',
       status: 'paid',
       method: 'card',
-      date: '2026-10-12',
+      date: expenseDate,
       vendorName: 'Repsol',
       invoiceNumber: 'F-22',
       locationId: '',
@@ -75,8 +86,8 @@ function buildLedgerStores() {
       receipts: [],
       createdBy: 'admin-1',
       createdByName: 'Admin',
-      createdAt: '2026-10-12T10:00:00.000Z',
-      updatedAt: '2026-10-12T10:00:00.000Z',
+      createdAt: `${expenseDate}T10:00:00.000Z`,
+      updatedAt: `${expenseDate}T10:00:00.000Z`,
     },
   ]);
   expensePaymentsStore.set([
@@ -87,8 +98,8 @@ function buildLedgerStores() {
       amount: 300,
       type: 'total',
       method: 'transfer',
-      date: '2026-10-15',
-      createdAt: '2026-10-15T10:00:00.000Z',
+      date: paymentDate,
+      createdAt: `${paymentDate}T10:00:00.000Z`,
       registeredBy: 'admin-1',
       registeredByName: 'Admin',
     },

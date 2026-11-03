@@ -2,11 +2,13 @@
   import {
     AlertCircle,
     Camera,
+    Check,
     CheckCircle2,
     ChevronDown,
     CreditCard,
     Eye,
     EyeOff,
+    Ghost,
     Mail,
     Palette,
     Pencil,
@@ -1820,7 +1822,7 @@
         <details class="section collapsible-section">
           <summary class="section-summary">
             <span>
-              <span class="ghost-emoji" aria-hidden="true">👻</span>
+              <span class="ghost-icon"><Ghost size={18} /></span>
               Fantasmas
             </span>
             <small>{ghostsList.length} {ghostsList.length === 1 ? "fantasma" : "fantasmas"}</small>
@@ -1844,17 +1846,35 @@
                   onkeydown={(event) => event.key === "Enter" && handleAddGhost()}
                 />
                 <div class="ghost-masters">
-                  <small class="ghost-masters-label">Masters (al menos uno)</small>
+                  <div class="ghost-masters-head">
+                    <span class="ghost-masters-title">
+                      <Users size={14} />
+                      Masters
+                    </span>
+                    <span class="ghost-masters-count">
+                      {newGhostMasters.length}/{masterCandidates().length}
+                    </span>
+                  </div>
+                  <p class="ghost-masters-hint">
+                    Al menos uno. Los masters son los que pueden gestionar las jornadas,
+                    las compras y el estado de este fantasma.
+                  </p>
                   <div class="ghost-masters-options">
                     {#each masterCandidates() as candidate (candidate.uid)}
-                      <label class="ghost-master-pill">
+                      <label
+                        class="ghost-master-chip"
+                        class:selected={newGhostMasters.includes(candidate.uid)}
+                      >
                         <input
                           type="checkbox"
                           checked={newGhostMasters.includes(candidate.uid)}
                           disabled={isAddingGhost}
                           onchange={() => (newGhostMasters = toggleMaster(newGhostMasters, candidate.uid))}
                         />
-                        <span>{candidate.name}{candidate.isAdmin ? " (admin)" : ""}</span>
+                        <span class="ghost-master-name">{candidate.name}</span>
+                        {#if candidate.isAdmin}
+                          <span class="ghost-master-role">Admin</span>
+                        {/if}
                       </label>
                     {/each}
                   </div>
@@ -1875,7 +1895,7 @@
               <article class="member-item ghost-item">
                 <div class="member-header">
                   <div class="member-avatar ghost-avatar" aria-hidden="true">
-                    <span>👻</span>
+                    <Ghost size={22} />
                   </div>
                   <div>
                     {#if editingGhostId === ghost.id}
@@ -1891,32 +1911,64 @@
                       <p>{formatGhostSummary(ghost)}</p>
                     {/if}
                   </div>
-                  <span class="ghost-badge">👻 Fantasma</span>
+                  <span class="ghost-badge"><Ghost size={13} /> Fantasma</span>
                 </div>
                 {#if editingGhostId === ghost.id}
                   <div class="ghost-masters">
-                    <small class="ghost-masters-label">Masters (al menos uno)</small>
+                    <div class="ghost-masters-head">
+                      <span class="ghost-masters-title">
+                        <Users size={14} />
+                        Masters
+                      </span>
+                      <span class="ghost-masters-count">
+                        {editingGhostMasters.length}/{masterCandidates().length}
+                      </span>
+                    </div>
+                    <p class="ghost-masters-hint">
+                      Al menos uno. Los masters son los que pueden gestionar las jornadas,
+                      las compras y el estado de este fantasma.
+                    </p>
                     <div class="ghost-masters-options">
                       {#each masterCandidates() as candidate (candidate.uid)}
-                        <label class="ghost-master-pill">
+                        <label
+                          class="ghost-master-chip"
+                          class:selected={editingGhostMasters.includes(candidate.uid)}
+                        >
                           <input
                             type="checkbox"
                             checked={editingGhostMasters.includes(candidate.uid)}
                             onchange={() => (editingGhostMasters = toggleMaster(editingGhostMasters, candidate.uid))}
                           />
-                          <span>{candidate.name}{candidate.isAdmin ? " (admin)" : ""}</span>
+                          <span class="ghost-master-name">{candidate.name}</span>
+                          {#if candidate.isAdmin}
+                            <span class="ghost-master-role">Admin</span>
+                          {/if}
                         </label>
                       {/each}
                     </div>
                   </div>
                 {:else}
-                  <div class="ghost-masters-readonly">
-                    <small class="ghost-masters-label">Masters:</small>
+                  <div class="ghost-masters ghost-masters-readonly">
+                    <div class="ghost-masters-head">
+                      <span class="ghost-masters-title">
+                        <Users size={14} />
+                        Masters
+                      </span>
+                      <span class="ghost-masters-count">
+                        {(ghost.masters || []).length}
+                      </span>
+                    </div>
                     <div class="ghost-masters-options">
                       {#each masterCandidates().filter((c) => (ghost.masters || []).includes(c.uid)) as candidate (candidate.uid)}
-                        <span class="ghost-master-readonly">{candidate.name}</span>
+                        <span class="ghost-master-chip readonly">
+                          <Check size={13} />
+                          <span class="ghost-master-name">{candidate.name}</span>
+                          {#if candidate.isAdmin}
+                            <span class="ghost-master-role">Admin</span>
+                          {/if}
+                        </span>
                       {:else}
-                        <span class="ghost-master-readonly empty">Sin masters asignados</span>
+                        <span class="ghost-master-empty">Sin masters asignados</span>
                       {/each}
                     </div>
                   </div>
@@ -2884,9 +2936,11 @@
     white-space: nowrap;
   }
 
-  .ghost-emoji {
-    font-size: 18px;
-    margin-right: 2px;
+  .ghost-icon {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    color: var(--info-color);
   }
 
   .ghost-help {
@@ -2924,81 +2978,151 @@
     align-self: flex-start;
   }
 
-  .ghost-masters,
-  .ghost-masters-readonly {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 8px 10px;
+  .ghost-masters {
+    display: grid;
+    gap: 8px;
+    padding: 12px;
     border-radius: var(--radius-sm);
     background: var(--bg-input);
     border: 1px solid var(--border-color);
   }
 
-  .ghost-masters-label {
+  .ghost-masters-readonly {
+    background: transparent;
+  }
+
+  .ghost-masters-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .ghost-masters-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .ghost-masters-title :global(svg) {
     color: var(--text-secondary);
+    flex-shrink: 0;
+  }
+
+  .ghost-masters-count {
+    flex-shrink: 0;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: var(--bg-accent-subtle);
+    color: var(--text-primary);
     font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    font-weight: 800;
+  }
+
+  .ghost-masters-hint {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.45;
   }
 
   .ghost-masters-options {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 8px;
   }
 
-  .ghost-master-pill {
+  .ghost-master-chip {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
-    border-radius: 999px;
-    background: var(--bg-surface, var(--bg-input));
-    border: 1px solid var(--border-color);
-    cursor: pointer;
-    font-size: 13px;
+    gap: 8px;
     max-width: 100%;
+    padding: 7px 12px;
+    border-radius: 999px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+      border-color 0.15s ease,
+      background 0.15s ease;
   }
 
-  .ghost-master-pill input {
+  .ghost-master-chip input {
+    width: 16px;
+    height: 16px;
     margin: 0;
+    flex-shrink: 0;
+    accent-color: var(--accent-color);
+  }
+
+  .ghost-master-chip.selected {
+    border-color: var(--accent-color);
+    background: var(--bg-accent-subtle);
+  }
+
+  .ghost-master-chip.readonly {
+    cursor: default;
+    background: var(--bg-card);
+  }
+
+  .ghost-master-chip.readonly :global(svg) {
+    color: var(--success-color);
     flex-shrink: 0;
   }
 
-  .ghost-master-readonly {
-    padding: 4px 10px;
+  .ghost-master-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ghost-master-role {
+    flex-shrink: 0;
+    padding: 1px 7px;
     border-radius: 999px;
-    background: rgba(148, 163, 184, 0.18);
-    color: #475569;
+    background: var(--bg-info-subtle);
+    color: var(--info-color);
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+  .ghost-master-empty {
+    padding: 7px 12px;
+    border-radius: 999px;
+    border: 1px dashed var(--border-color);
+    color: var(--text-secondary);
     font-size: 12px;
     font-weight: 600;
   }
 
-  .ghost-master-readonly.empty {
-    background: transparent;
-    border: 1px dashed var(--border-color);
-    color: var(--text-secondary);
-  }
-
   .ghost-item .ghost-avatar {
-    background: rgba(148, 163, 184, 0.18);
-    color: #475569;
+    background: var(--bg-info-subtle);
+    color: var(--info-color);
     display: grid;
     place-items: center;
     width: 42px;
     height: 42px;
     border-radius: 50%;
-    font-size: 22px;
     line-height: 1;
   }
 
   .ghost-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     padding: 5px 9px;
     border-radius: 999px;
-    background: rgba(148, 163, 184, 0.18);
-    color: #475569;
+    background: var(--bg-info-subtle);
+    color: var(--info-color);
     font-size: 12px;
     font-weight: 800;
     white-space: nowrap;
