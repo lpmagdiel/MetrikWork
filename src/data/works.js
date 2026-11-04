@@ -9,6 +9,7 @@ import {
     scheduleOfflineSync
 } from './offlineQueue.js';
 import { applyWorkdayOvertimeLimit, assertWorkingDay } from './workLimits.js';
+import { normalizeShiftVariationHours } from './workVariations.js';
 import { geocodeAddress, getStoredUserGpsLocation, normalizeCoordinates } from '../helpers/navigation.js';
 import { userStore } from './auth.js';
 import { teamsStore } from './teams.js';
@@ -21,10 +22,12 @@ import {
     isGhostUserId,
     addGhostWorkday,
     removeGhostWorkday,
+    updateGhostWorkday,
     findGhostRegularWorkday
 } from './teams.js';
 
 const REGISTER_WORKDAY_OPERATION = 'registerWorkday';
+const UPDATE_WORKDAY_SHIFT_VARIATION_OPERATION = 'updateWorkdayShiftVariation';
 const DUPLICATE_REGULAR_WORKDAY_MESSAGE = 'Ya existe una jornada completa o media jornada para este día.';
 const WORKDAY_OPTIONAL_FIELDS = [
     'taskTitle',
@@ -144,6 +147,7 @@ function mapGhostWorkdaysAsWorks(teamId) {
                 userName,
                 type: isOvertime ? 'overtime' : (entry.type || 'full-day'),
                 overtimeHours,
+                shiftVariationHours: Number(entry.shiftVariationHours) || 0,
                 hours: Number(entry.hours) || overtimeHours || 0,
                 date: entry.date,
                 taskTitle: entry.taskTitle || '',
@@ -278,6 +282,7 @@ function buildWorkdayDoc(teamId, userId, userName, workDay, teamData = null) {
         userName,
         type: (limitedWorkDay && limitedWorkDay.type) ? limitedWorkDay.type : 'full-day',
         overtimeHours: (limitedWorkDay && limitedWorkDay.overtimeHours) ? Number(limitedWorkDay.overtimeHours) : 0,
+        shiftVariationHours: normalizeShiftVariationHours(limitedWorkDay && limitedWorkDay.shiftVariationHours),
         date: workDate,
         createdAt: new Date().toISOString(),
         paid: false
@@ -430,6 +435,75 @@ export async function registerWorkday(teamId, userId, userName, workDay) {
     }
 }
 
+/**
+ * Aplica una variación de jornada sobre una jornada ya registrada (por
+ * ejemplo, cuando el trabajador se fue antes de tiempo y la jornada completa
+ * ya estaba registrada).
+ */
+export async function executeUpdateWorkdayShiftVariation({ teamId, userId, workDay } = {}) {
+    if (!teamId || !userId || !workDay) throw new Error('Datos de jornada incompletos');
+
+    const workDate = resolveWorkdayDate(workDay);
+    const shiftVariationHours = normalizeShiftVariationHours(workDay.shiftVariationHours);
+    const updatedAt = new Date().toISOString();
+
+    if (isGhostUserId(userId)) {
+        const ghostId = getGhostIdFromUserId(userId);
+        const team = getCurrentTeam(teamId);
+        const entry = findGhostRegularWorkdayEntry(team, ghostId, workDate);
+        if (!entry) {
+            throw new Error('No se encontró la jornada del fantasma para aplicar la variación');
+        }
+        return updateGhostWorkday(teamId, ghostId, entry.id, { shiftVariationHours, updatedAt });
+    }
+
+    const regularDocId = getRegularWorkdayDocId(teamId, userId, workDate);
+    const regularDocRef = doc(db, 'works', regularDocId);
+    const regularDoc = await getDoc(regularDocRef);
+
+    if (regularDoc.exists()) {
+        await updateDoc(regularDocRef, { shiftVariationHours, updatedAt });
+        return regularDocId;
+    }
+
+    // Jornadas registradas antes de usar ids deterministas.
+    const legacyDoc = await findRegularWorkdayForDate(teamId, userId, workDate);
+    if (!legacyDoc) {
+        throw new Error('No se encontró la jornada de hoy para aplicar la variación');
+    }
+    await updateDoc(doc(db, 'works', legacyDoc.id), { shiftVariationHours, updatedAt });
+    return legacyDoc.id;
+}
+
+export async function updateWorkdayShiftVariation(teamId, userId, workDay) {
+    if (!teamId || !userId || !workDay) throw new Error('Datos de jornada incompletos');
+
+    const enqueueUpdate = async () => {
+        const operation = await enqueueOfflineOperation(
+            UPDATE_WORKDAY_SHIFT_VARIATION_OPERATION,
+            { teamId, userId, workDay },
+            { label: 'Variación de jornada' }
+        );
+        scheduleOfflineSync();
+        return { queued: true, id: operation.id };
+    };
+
+    if (isBrowserOffline()) {
+        return enqueueUpdate();
+    }
+
+    try {
+        const id = await executeUpdateWorkdayShiftVariation({ teamId, userId, workDay });
+        return { queued: false, id };
+    } catch (error) {
+        if (isOfflineError(error)) {
+            return enqueueUpdate();
+        }
+        console.error('Error updating shift variation:', error);
+        throw error;
+    }
+}
+
 export async function assignWorkdayToMember(teamId, userId, userName, workDay, assignedBy = null) {
     if (!teamId || !userId || !workDay?.date) throw new Error("Datos de jornada incompletos");
     const teamSnapshot = await getDoc(doc(db, 'teams', teamId));
@@ -457,7 +531,8 @@ export async function assignWorkdayToMember(teamId, userId, userName, workDay, a
                 durationHours: workDay.durationHours || limitedWorkDay.durationHours || 0,
                 variableHours: workDay.variableHours || limitedWorkDay.variableHours || 0,
                 timerMode: workDay.timerMode || limitedWorkDay.timerMode || '',
-                overtimeHours: limitedWorkDay.overtimeHours || 0
+                overtimeHours: limitedWorkDay.overtimeHours || 0,
+                shiftVariationHours: normalizeShiftVariationHours(limitedWorkDay.shiftVariationHours)
             },
             { uid: assignedByUid, name: assignedByName }
         );
@@ -470,6 +545,7 @@ export async function assignWorkdayToMember(teamId, userId, userName, workDay, a
         userName,
         type: limitedWorkDay.type || 'full-day',
         overtimeHours: limitedWorkDay.overtimeHours ? Number(limitedWorkDay.overtimeHours) : 0,
+        shiftVariationHours: normalizeShiftVariationHours(limitedWorkDay.shiftVariationHours),
         date: limitedWorkDay.date,
         note: limitedWorkDay.note?.trim() || '',
         assignedBy: assignedByUid,

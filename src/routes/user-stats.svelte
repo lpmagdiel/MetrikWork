@@ -18,6 +18,11 @@
   import { getOutstandingAmount, getWorkEarnings } from "../data/userStats.js";
   import { navigateTo } from "../router.js";
   import { getUserTeamWorks, selectedTeam, selectedTeamId, userStore } from "../data/stores.js";
+  import {
+    formatShiftVariationHours,
+    getShiftVariationHours,
+    getShiftVariationTone,
+  } from "../data/workVariations.js";
 
   let team = $derived($selectedTeam);
   let works = $state([]);
@@ -77,6 +82,7 @@
     let variableHours = 0;
     let overtimeEntries = 0;
     let overtimeHours = 0;
+    let shiftVariationHours = 0;
     let notesCount = 0;
     const activeDates = new Set();
 
@@ -91,6 +97,7 @@
         overtimeEntries += 1;
         overtimeHours += Number(work.overtimeHours) || 0;
       }
+      shiftVariationHours += getShiftVariationHours(work);
       if (work.note) notesCount += 1;
       const dateKey = getWorkDateKey(work);
       if (dateKey) activeDates.add(dateKey);
@@ -112,6 +119,7 @@
       variableHours,
       overtimeEntries,
       overtimeHours,
+      shiftVariationHours,
       notesCount,
       activeDates: activeDates.size,
       totalEntries: filteredWorks.length,
@@ -519,6 +527,12 @@
               <strong>{stats.notesCount}</strong>
               <span>con nota</span>
             </div>
+            <div>
+              <strong class="variation-value {getShiftVariationTone(stats.shiftVariationHours)}">
+                {formatShiftVariationHours(stats.shiftVariationHours, "H")}
+              </strong>
+              <span>variación de jornada</span>
+            </div>
           </div>
 
           {#if filteredPayments.length > 0}
@@ -543,7 +557,14 @@
               {#each filteredWorks.slice(0, 8) as work (work.id)}
                 <article class="record-item">
                   <div>
-                    <h3>{workTypeLabel(work)}</h3>
+                    <h3>
+                      {workTypeLabel(work)}
+                      {#if getShiftVariationHours(work) !== 0}
+                        <span class="variation-pill {getShiftVariationTone(getShiftVariationHours(work))}">
+                          {formatShiftVariationHours(getShiftVariationHours(work), "H")}
+                        </span>
+                      {/if}
+                    </h3>
                     <p>{formatDate(getWorkDateKey(work))}</p>
                     {#if work.note}
                       <small>{work.note}</small>
@@ -990,6 +1011,41 @@
   .record-item h3 {
     font-size: 14px;
     margin-bottom: 3px;
+  }
+
+  .variation-pill {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 6px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    vertical-align: middle;
+  }
+
+  .variation-pill.positive {
+    background: var(--bg-success-subtle);
+    color: var(--success-color);
+  }
+
+  .variation-pill.negative {
+    background: var(--bg-danger-subtle);
+    color: var(--danger-color);
+  }
+
+  .variation-pill.neutral {
+    background: var(--bg-input);
+    color: var(--text-secondary);
+  }
+
+  .detail-stats strong.variation-value.positive {
+    color: var(--success-color);
+  }
+
+  .detail-stats strong.variation-value.negative {
+    color: var(--danger-color);
   }
 
   .record-item small {

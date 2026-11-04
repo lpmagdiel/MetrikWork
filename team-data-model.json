@@ -105,6 +105,7 @@
             "durationHours": 8,
             "variableHours": 0,
             "overtimeHours": 0,
+            "shiftVariationHours": 0,
             "taskTitle": "Instalación cliente A",
             "note": "Observaciones",
             "assignedBy": "userId | null",

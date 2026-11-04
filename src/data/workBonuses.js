@@ -36,6 +36,10 @@
  */
 
 import { getLocalWeekday } from './workLimits.js';
+import {
+    applyShiftVariationToWorkAmount,
+    getWorkShiftVariationAmount
+} from './workVariations.js';
 
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -250,21 +254,29 @@ export function computeWorkBonusAmounts(work, bonuses, holidaySet = null) {
 }
 
 /**
- * Desglose completo del importe de una jornada (tarifa + extra + pluses).
- * Pensado para `applyPaymentsToWorks` y para mostrar el detalle al
+ * Desglose completo del importe de una jornada (tarifa + variación + extra +
+ * pluses). Pensado para `applyPaymentsToWorks` y para mostrar el detalle al
  * usuario en la UI de pagos.
+ *
+ * La `variación de jornada` descuenta (o repone) dinero según las horas
+ * registradas, sin que pueda contar como horas extra. Se aplica sobre la
+ * parte regular de la jornada y nunca deja el importe en negativo.
  */
 export function computeWorkEntryAmount(work, team, { dailyRate = 0, extraHourRate = 0 } = {}) {
     const rate = Number(dailyRate) || 0;
     const extraRate = Number(extraHourRate) || 0;
     const overtimeHours = Math.max(0, Number(work?.overtimeHours) || 0);
     const units = getBonusUnits(work);
-    const base = roundCurrency(units * rate);
+    const grossBase = roundCurrency(units * rate);
+    const shiftVariation = getWorkShiftVariationAmount(work, rate);
+    const base = applyShiftVariationToWorkAmount(grossBase, shiftVariation, units);
     const overtime = roundCurrency(overtimeHours * extraRate);
     const holidaySet = getHolidayDateSet(team);
     const bonuses = computeWorkBonusAmounts(work, getWorkBonuses(team), holidaySet);
     return {
         base,
+        grossBase,
+        shiftVariation,
         overtime,
         bonusUnits: bonuses.units,
         weekendBonus: bonuses.weekend,

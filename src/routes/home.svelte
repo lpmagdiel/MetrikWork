@@ -41,6 +41,10 @@
   import { collection, getDocs } from "firebase/firestore";
   import { db } from "../data/firebase.js";
   import { navigateTo } from "../router.js";
+  import {
+    applyShiftVariationToWorkAmount,
+    getWorkShiftVariationAmount,
+  } from "../data/workVariations.js";
 
   let hasUnread = $derived($notificationsStore.some((n) => !n.opened));
   let unreadCount = $derived($notificationsStore.filter((n) => !n.opened).length);
@@ -690,12 +694,20 @@
   }
 
   function getBaseWorkEarnings(work, dailyRate) {
-    if (work.type === "full-day") return dailyRate;
-    if (work.type === "half-day") return dailyRate / 2;
-    if (work.type === "variable" && work.timerMode !== "overtime") {
-      return getWorkDayValue(work) * dailyRate;
-    }
-    return 0;
+    const units =
+      work.type === "full-day"
+        ? 1
+        : work.type === "half-day"
+          ? 0.5
+          : work.type === "variable" && work.timerMode !== "overtime"
+            ? getWorkDayValue(work)
+            : 0;
+    // La variación de jornada descuenta (o repone) el salario del día.
+    return applyShiftVariationToWorkAmount(
+      units * dailyRate,
+      getWorkShiftVariationAmount(work, dailyRate),
+      units,
+    );
   }
 
   function getWorkEarnings(work, dailyRate, extraHourRate) {

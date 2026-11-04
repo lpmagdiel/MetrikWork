@@ -13,6 +13,11 @@ import {
     summarizeBonuses,
     WORK_BONUS_TYPES
 } from './workBonuses.js';
+import {
+    applyShiftVariationToWorkAmount,
+    getShiftVariationHours,
+    getWorkShiftVariationAmount
+} from './workVariations.js';
 
 const MONEY_EPSILON = 0.01;
 
@@ -41,7 +46,12 @@ function getVariableHours(work) {
 }
 
 function getWorkAmount(work, dailyRate, extraHourRate) {
-    const base = getWorkUnits(work) * dailyRate;
+    const units = getWorkUnits(work);
+    const base = applyShiftVariationToWorkAmount(
+        units * dailyRate,
+        getWorkShiftVariationAmount(work, dailyRate),
+        units
+    );
     const overtime = (Number(work.overtimeHours) || 0) * extraHourRate;
     return base + overtime;
 }
@@ -76,6 +86,13 @@ function applyPaymentsToWorks(userWorks, totalPaid, dailyRate, extraHourRate, te
         const workUnits = getWorkUnits(work);
         const workAmount = getWorkAmountWithBonuses(work, team, dailyRate, extraHourRate);
         const bonusBreakdown = computeWorkBonusAmounts(work, getWorkBonuses(team), holidaySet);
+        const grossBaseAmount = workUnits * dailyRate;
+        const shiftVariationAmount = getWorkShiftVariationAmount(work, dailyRate);
+        const baseAmount = applyShiftVariationToWorkAmount(
+            grossBaseAmount,
+            shiftVariationAmount,
+            workUnits
+        );
         const paidAmount = Math.min(workAmount, remainingPaid);
         const pendingAmount = Math.max(workAmount - paidAmount, 0);
         const pendingRatio = workAmount > MONEY_EPSILON ? pendingAmount / workAmount : 0;
@@ -91,7 +108,10 @@ function applyPaymentsToWorks(userWorks, totalPaid, dailyRate, extraHourRate, te
             ...work,
             workUnits: roundMetric(workUnits, 4),
             workAmount,
-            baseAmount: Number.isFinite(bonusBreakdown.units) ? workUnits * dailyRate : workUnits * dailyRate,
+            baseAmount,
+            grossBaseAmount,
+            shiftVariationAmount,
+            shiftVariationHours: getShiftVariationHours(work),
             overtimeAmount: (Number(work.overtimeHours) || 0) * extraHourRate,
             weekendBonus: bonusBreakdown.weekend,
             holidayBonus: bonusBreakdown.holiday,
@@ -165,6 +185,8 @@ function normalizeCoveredWorks(coveredWorks = []) {
                 pendingAmountBeforePayment: Math.max(0, Number(work?.pendingAmountBeforePayment ?? work?.pendingAmount) || 0),
                 workUnits: Math.max(0, Number(work?.pendingWorkUnits ?? work?.workUnits) || 0),
                 overtimeHours: Math.max(0, Number(work?.pendingOvertimeHours ?? work?.overtimeHours) || 0),
+                shiftVariationAmount: Number(work?.shiftVariationAmount) || 0,
+                shiftVariationHours: getShiftVariationHours(work),
                 weekendDay: Boolean(work?.weekendDay),
                 holidayDay: Boolean(work?.holidayDay)
             };

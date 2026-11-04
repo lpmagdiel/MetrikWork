@@ -52,6 +52,13 @@
     clearGhostWorkdays,
     userStore,
   } from "../data/stores.js";
+  import {
+    applyShiftVariationToWorkAmount,
+    formatShiftVariationHours,
+    getShiftVariationHours,
+    getShiftVariationTone,
+    getWorkShiftVariationAmount,
+  } from "../data/workVariations.js";
 
   let team = $derived($selectedTeam);
   let canViewStats = $derived(hasTeamPermission(team, $userStore?.uid, "stats", "view"));
@@ -187,6 +194,7 @@
     let halfDays = 0;
     let variableHours = 0;
     let overtimeHours = 0;
+    let shiftVariationHours = 0;
     let laborCost = 0;
     const activeDates = new Set();
     const activeMembers = new Set();
@@ -199,6 +207,7 @@
         variableHours += getVariableHours(work);
       }
       overtimeHours += Number(work.overtimeHours) || 0;
+      shiftVariationHours += getShiftVariationHours(work);
       laborCost += getWorkLaborCost(work);
       if (work.date) activeDates.add(work.date);
       if (work.userId) activeMembers.add(work.userId);
@@ -249,6 +258,7 @@
       halfDays,
       variableHours,
       overtimeHours,
+      shiftVariationHours,
       totalWorkDays,
       laborCost,
       consumableCost,
@@ -301,6 +311,7 @@
         locationId: memberLocationMap.get(member.id) || "",
         workDays: 0,
         overtimeHours: 0,
+        shiftVariationHours: 0,
         earned: 0,
         paid: 0,
         hasActivity: false,
@@ -315,6 +326,7 @@
       const cost = getWorkLaborCost(work);
       bucket.workDays += units;
       bucket.overtimeHours += overtime;
+      bucket.shiftVariationHours += getShiftVariationHours(work);
       bucket.earned += cost;
       bucket.hasActivity = bucket.hasActivity || units > 0 || overtime > 0;
     }
@@ -994,7 +1006,12 @@
     const settings = team?.memberSettings?.[work.userId] || {};
     const dailyRate = Number(settings.dailyRate) || 0;
     const extraHourRate = Number(settings.extraHourRate) || 0;
-    const base = getWorkUnits(work) * dailyRate;
+    const units = getWorkUnits(work);
+    const base = applyShiftVariationToWorkAmount(
+      units * dailyRate,
+      getWorkShiftVariationAmount(work, dailyRate),
+      units,
+    );
     const overtime = (Number(work.overtimeHours) || 0) * extraHourRate;
     return base + overtime;
   }
@@ -1175,6 +1192,7 @@
             ["Consumibles del periodo", formatMoney(summary.consumableCost)],
             ["Jornadas equivalentes", formatNumber(summary.totalWorkDays)],
             ["Horas extra", `${formatNumber(summary.overtimeHours)}h`],
+            ["Variacion de jornada", formatShiftVariationHours(summary.shiftVariationHours, "H")],
             ["Solicitudes aceptadas", summary.acceptedAbsenceRequests],
             ["Días de ausencia aceptados", formatNumber(summary.acceptedAbsenceDays)],
             ["Miembros activos", summary.activeMembers],
@@ -1186,12 +1204,13 @@
         },
         {
           title: "Coste por miembro",
-          headers: ["Miembro", "Ubicacion", "Dias", "Horas extra", "Generado", "Pagado", "Balance"],
+          headers: ["Miembro", "Ubicacion", "Dias", "Horas extra", "Variacion", "Generado", "Pagado", "Balance"],
           rows: memberSummaries.map((member) => [
             getMemberName(member.id),
             member.locationName || "Sin ubicacion",
             formatNumber(member.workDays),
             `${formatNumber(member.overtimeHours)}h`,
+            formatShiftVariationHours(member.shiftVariationHours, "H"),
             formatMoney(member.earned),
             formatMoney(member.paid),
             formatMoney(member.balance),
@@ -1255,7 +1274,7 @@
           : []),
         {
           title: "Detalle de jornadas",
-          headers: ["Fecha", "Miembro", "Ubicacion", "GPS miembro", "Direccion GPS", "Tipo", "Dias", "Horas extra", "Coste"],
+          headers: ["Fecha", "Miembro", "Ubicacion", "GPS miembro", "Direccion GPS", "Tipo", "Dias", "Horas extra", "Variacion", "Coste"],
           rows: filteredWorks.map((work) => [
             formatDate(getDateKey(work.date)),
             getMemberName(work.userId),
@@ -1265,6 +1284,7 @@
             getWorkTypeLabel(work),
             formatNumber(getWorkUnits(work)),
             `${formatNumber(work.overtimeHours || 0)}h`,
+            formatShiftVariationHours(getShiftVariationHours(work), "H"),
             formatMoney(getWorkLaborCost(work)),
           ]),
         },
@@ -1470,7 +1490,14 @@
               <div class="metric-icon labor"><Clock size={20} /></div>
               <span>Jornadas</span>
               <strong>{formatMoney(summary.laborCost)}</strong>
-              <small>{formatNumber(summary.totalWorkDays)} días / {formatNumber(summary.overtimeHours)}h extra</small>
+              <small>
+                {formatNumber(summary.totalWorkDays)} días / {formatNumber(summary.overtimeHours)}h extra
+                {#if summary.shiftVariationHours !== 0}
+                  · <span class="variation-text {getShiftVariationTone(summary.shiftVariationHours)}">
+                    {formatShiftVariationHours(summary.shiftVariationHours, "H")} variación
+                  </span>
+                {/if}
+              </small>
             </article>
 
             <article class="metric-card">
@@ -1830,7 +1857,14 @@
                       <div class="member-avatar">{getMemberInitials(member.id)}</div>
                       <div>
                         <h3>{getMemberName(member.id)}</h3>
-                        <p>{member.locationName || "Sin ubicación"} · {formatNumber(member.workDays)} días</p>
+                        <p>
+                          {member.locationName || "Sin ubicación"} · {formatNumber(member.workDays)} días
+                          {#if member.shiftVariationHours !== 0}
+                            <span class="variation-pill {getShiftVariationTone(member.shiftVariationHours)}">
+                              {formatShiftVariationHours(member.shiftVariationHours, "H")}
+                            </span>
+                          {/if}
+                        </p>
                       </div>
                       <strong>{formatMoney(member.earned)}</strong>
                     </article>
@@ -1859,7 +1893,14 @@
                       <div class="member-avatar">{getMemberInitials(work.userId)}</div>
                       <div>
                         <h3>{getMemberName(work.userId)}</h3>
-                        <p>{formatDate(getDateKey(work.date))} · {getWorkTypeLabel(work)}</p>
+                        <p>
+                          {formatDate(getDateKey(work.date))} · {getWorkTypeLabel(work)}
+                          {#if getShiftVariationHours(work) !== 0}
+                            <span class="variation-pill {getShiftVariationTone(getShiftVariationHours(work))}">
+                              {formatShiftVariationHours(getShiftVariationHours(work), "H")}
+                            </span>
+                          {/if}
+                        </p>
                         {#if getWorkMemberLocationLabel(work)}
                           <a class="work-location-link" href={getWorkMemberLocationUrl(work)} target="_blank" rel="noopener noreferrer">
                             <MapPin size={13} />
@@ -2467,6 +2508,18 @@
     line-height: 1.3;
   }
 
+  .variation-text {
+    font-weight: 700;
+  }
+
+  .variation-text.positive {
+    color: var(--success-color);
+  }
+
+  .variation-text.negative {
+    color: var(--danger-color);
+  }
+
   .metric-icon {
     width: 38px;
     height: 38px;
@@ -3039,6 +3092,33 @@
     color: var(--text-secondary);
     font-size: 12px;
     margin: 0;
+  }
+
+  .variation-pill {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 4px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    vertical-align: middle;
+  }
+
+  .variation-pill.positive {
+    background: var(--bg-success-subtle);
+    color: var(--success-color);
+  }
+
+  .variation-pill.negative {
+    background: var(--bg-danger-subtle);
+    color: var(--danger-color);
+  }
+
+  .variation-pill.neutral {
+    background: var(--bg-input);
+    color: var(--text-secondary);
   }
 
   .work-location-link {

@@ -1,6 +1,6 @@
 import { startOfflineQueueSync } from './offlineQueue.js';
 import { executeAddTeamTask, executeUpdateTeamTask } from './tasks.js';
-import { executeRegisterWorkday } from './works.js';
+import { executeRegisterWorkday, executeUpdateWorkdayShiftVariation } from './works.js';
 
 let started = false;
 
@@ -10,6 +10,7 @@ export function startOfflineActionsSync() {
 
     startOfflineQueueSync({
         registerWorkday: executeRegisterWorkday,
+        updateWorkdayShiftVariation: executeUpdateWorkdayShiftVariation,
         addTeamTask: executeAddTeamTask,
         updateTeamTask: executeUpdateTeamTask
     });

@@ -17,6 +17,7 @@
     Copy,
     DollarSign,
     Save,
+    ArrowLeftRight,
     Mail,
     Plus,
     Minus,
@@ -43,6 +44,7 @@
     getTeamMemberPrivateProfile,
     addMemberByEmail,
     registerWorkday,
+    updateWorkdayShiftVariation,
     hasWorkdayForDate,
     teamTasksStore,
     subscribeToTeamTasks,
@@ -76,6 +78,11 @@
     getGhostWorkdayUserId,
   } from "../data/stores.js";
   import { navigateTo } from "../router.js";
+  import {
+    MAX_SHIFT_VARIATION_HOURS,
+    formatShiftVariationHours,
+    normalizeShiftVariationHours,
+  } from "../data/workVariations.js";
   import SliceContainer from "../components/SliceContainer.svelte";
   import Toast from "../components/Toast.svelte";
   import AvatarCircle from "../components/AvatarCircle.svelte";
@@ -110,6 +117,9 @@
   let todayDate = $derived(getTodayDateString());
   let isTodayNonWorkingDay = $derived(isNonWorkingDay(team, todayDate));
   let todayNonWorkingMessage = $derived(getNonWorkingDayMessage(team, todayDate));
+  let workdayDailyRate = $derived(
+    Number(team?.memberSettings?.[$userStore?.uid]?.dailyRate) || 0,
+  );
   const permissionModules = Object.entries(TEAM_PERMISSION_LABELS);
   const permissionActions = Object.entries(TEAM_PERMISSION_ACTION_LABELS);
   let roleTemplates = $derived(getTeamRoleTemplates(team));
@@ -145,6 +155,7 @@
   let workDay = $state({
     type: "full-day", // "full-day" | "half-day" | "overtime"
     overtimeHours: 0,
+    shiftVariationHours: 0,
   });
   let workdayGhostId = $state("");
   let registerTarget = $state("self");
@@ -167,6 +178,25 @@
     { value: "self", label: "Mi nombre" },
     { value: "other", label: "Alguien más", disabled: !hasGhostOptions }
   ]);
+  // Variación de jornada: horas que se descuentan (o repone) del salario del
+  // día sin contar como horas extra.
+  let shiftVariationHours = $derived(Number(workDay.shiftVariationHours) || 0);
+  let shiftVariationDisabled = $derived(isTodayNonWorkingDay);
+  let hasShiftVariation = $derived(shiftVariationHours !== 0);
+  let hasOvertimeHours = $derived(Number(workDay.overtimeHours) > 0);
+  let shiftVariationPreview = $derived.by(() => {
+    const units =
+      workDay.type === "half-day" ? 0.5 : workDay.type === "full-day" ? 1 : 0;
+    const base = units * workdayDailyRate;
+    const adjustment = shiftVariationHours * (workdayDailyRate / 8);
+    return {
+      units,
+      base,
+      adjustment,
+      final: Math.max(0, base + adjustment),
+      hasRate: workdayDailyRate > 0,
+    };
+  });
   // Tasks state
   let showTasks = $state(false);
   let showAddTask = $state(false);
@@ -219,6 +249,13 @@
   $effect(() => {
     if ((isTodayNonWorkingDay || !overtimeEnabled) && workDay.overtimeHours !== 0) {
       workDay.overtimeHours = 0;
+    }
+  });
+
+  // La variación de jornada no se aplica en días no laborables.
+  $effect(() => {
+    if (isTodayNonWorkingDay && workDay.shiftVariationHours !== 0) {
+      workDay.shiftVariationHours = 0;
     }
   });
 
@@ -472,11 +509,43 @@
     workDay = {
       type: "full-day",
       overtimeHours: 0,
+      shiftVariationHours: 0,
     };
     workdayGhostId = "";
     registerTarget = "self";
     showWorkdayForm = true;
     await checkTodayWorkday();
+  }
+
+  function formatWorkdayMoney(amount) {
+    return new Intl.NumberFormat("es-ES", {
+      style: "currency",
+      currency: team?.projectBudgetCurrency || "EUR",
+    }).format(Number(amount) || 0);
+  }
+
+  function adjustShiftVariation(delta) {
+    if (shiftVariationDisabled) return;
+    const next = normalizeShiftVariationHours(shiftVariationHours + delta);
+    workDay.shiftVariationHours = next;
+  }
+
+  function getShiftVariationDescription() {
+    if (isTodayNonWorkingDay) {
+      return "Hoy es día no laborable, no se puede registrar la variación.";
+    }
+    if (hasWorkdayToday) {
+      return "Aplica la variación sobre la jornada que ya tienes registrada hoy.";
+    }
+    const preview = shiftVariationPreview;
+    if (!preview.hasRate || !preview.units) {
+      return "Horas que se descuentan del salario del día (no cuentan como horas extra).";
+    }
+    if (!shiftVariationHours) {
+      return `La jornada se cobra completa: ${formatWorkdayMoney(preview.base)}.`;
+    }
+    const sign = preview.adjustment < 0 ? "-" : "+";
+    return `${formatWorkdayMoney(preview.base)} → ${formatWorkdayMoney(preview.final)} (${sign}${formatWorkdayMoney(Math.abs(preview.adjustment))})`;
   }
 
   async function handleRegisterTargetChange(event) {
@@ -510,15 +579,20 @@
       }
 
       const alreadyHasWorkday = await checkTodayWorkday();
+      const registeredType = alreadyHasWorkday ? "overtime" : workDay.type;
+      const shiftVariation = normalizeShiftVariationHours(workDay.shiftVariationHours);
       const workDayToRegister = {
         ...workDay,
-        type: alreadyHasWorkday ? "overtime" : workDay.type,
+        type: registeredType,
+        // Cuando la jornada ya existe, la variación se aplica sobre ella (ver
+        // más abajo). En una jornada nueva viaja dentro del propio registro.
+        shiftVariationHours: alreadyHasWorkday ? 0 : shiftVariation,
       };
 
-      if (
-        !overtimeEnabled &&
-        (workDayToRegister.type === "overtime" || Number(workDayToRegister.overtimeHours) > 0)
-      ) {
+      const registersOvertime = Number(workDayToRegister.overtimeHours) > 0;
+      const updatesVariation = alreadyHasWorkday && shiftVariation !== 0;
+
+      if (!overtimeEnabled && registersOvertime) {
         await showErrorAlert("Horas extra desactivadas", getOvertimeLimitMessage(team));
         return;
       }
@@ -528,13 +602,13 @@
         return;
       }
 
-      if (alreadyHasWorkday && workDayToRegister.overtimeHours <= 0) {
+      if (alreadyHasWorkday && !registersOvertime && !updatesVariation) {
         const subjectName = activeWorkdayGhost ? `el fantasma ${activeWorkdayGhost.name}` : "tú";
         await showErrorAlert(
           activeWorkdayGhost ? "Fantasma con jornada" : "Jornada ya registrada",
           activeWorkdayGhost
-            ? `${subjectName} ya tiene una jornada hoy. Añade horas extra si quieres registrar más tiempo.`
-            : "Hoy ya ingresaste una jornada. Añade horas extra para registrar otra entrada.",
+            ? `${subjectName} ya tiene una jornada hoy. Añade horas extra o una variación de jornada si quieres ajustar el día.`
+            : "Hoy ya ingresaste una jornada. Añade horas extra o una variación de jornada para ajustar el día.",
         );
         return;
       }
@@ -557,31 +631,56 @@
         return;
       }
 
-      const limitedWorkDay = applyWorkdayOvertimeLimit(workDayToRegister, team);
       workdayLoadingPhase = "registering";
       workdayLoadingLabel = "Registrando jornada";
-      const result = await registerWorkday(
-        team.id,
-        workdayTargetUserId,
-        workdayTargetUserName,
-        limitedWorkDay,
-      );
+
+      // Si la jornada ya estaba registrada, la variación se aplica sobre ella.
+      let variationResult = null;
+      if (updatesVariation) {
+        variationResult = await updateWorkdayShiftVariation(team.id, workdayTargetUserId, {
+          date: todayDate,
+          shiftVariationHours: shiftVariation,
+        });
+      }
+
+      let result = null;
+      let limitedWorkDay = workDayToRegister;
+      if (registersOvertime || !alreadyHasWorkday) {
+        limitedWorkDay = applyWorkdayOvertimeLimit(workDayToRegister, team);
+        result = await registerWorkday(
+          team.id,
+          workdayTargetUserId,
+          workdayTargetUserName,
+          limitedWorkDay,
+        );
+      }
+
       showWorkdayForm = false;
       workdayGhostId = "";
       registerTarget = "self";
       hasWorkdayToday = activeWorkdayGhost ? hasWorkdayToday : true;
-      const successTitle = activeWorkdayGhost
-        ? (limitedWorkDay.type === "overtime" ? "Horas extra del fantasma" : "Jornada del fantasma")
-        : (limitedWorkDay.type === "overtime" ? "Horas extra registradas" : "Jornada registrada");
+      const registeredVariation = updatesVariation
+        ? shiftVariation
+        : Number(limitedWorkDay.shiftVariationHours) || 0;
+      const variationMessage = registeredVariation
+        ? ` La variación de jornada (${formatShiftVariationHours(registeredVariation)}) se aplicó al salario del día.`
+        : "";
+      const isQueued = Boolean(result?.queued || variationResult?.queued);
+      const onlyVariation = updatesVariation && !registersOvertime && alreadyHasWorkday;
+      const successTitle = onlyVariation
+        ? "Variación registrada"
+        : activeWorkdayGhost
+          ? (limitedWorkDay.type === "overtime" ? "Horas extra del fantasma" : "Jornada del fantasma")
+          : (limitedWorkDay.type === "overtime" ? "Horas extra registradas" : "Jornada registrada");
       await showSuccessAlert(
-        result?.queued
-          ? "Guardado sin conexión"
-          : successTitle,
-        result?.queued
+        isQueued ? "Guardado sin conexión" : successTitle,
+        isQueued
           ? "La jornada quedó en el dispositivo y se sincronizará al volver la conexión."
+          : onlyVariation
+          ? `La variación de jornada (${formatShiftVariationHours(registeredVariation)}) se aplicó al salario del día.`
           : limitedWorkDay.type === "overtime"
           ? "Las horas extra se guardaron correctamente."
-          : "La jornada se guardó correctamente.",
+          : `La jornada se guardó correctamente.${variationMessage}`,
       );
     } catch (error) {
       await showErrorAlert(
@@ -1152,9 +1251,9 @@
           {isTodayNonWorkingDay
             ? todayNonWorkingMessage
             : hasWorkdayToday && !overtimeEnabled
-              ? "Ya ingresaste una jornada hoy y las horas extra están desactivadas."
+              ? "Ya ingresaste una jornada hoy. Solo puedes registrar una variación de jornada."
             : hasWorkdayToday
-              ? "Ya ingresaste una jornada hoy. Solo puedes añadir horas extra."
+              ? "Ya ingresaste una jornada hoy. Solo puedes añadir horas extra o una variación de jornada."
               : "Selecciona el tipo de jornada que deseas registrar para hoy."}
           {#if overtimeEnabled}
             Límite de horas extra: {overtimeLimitHours}h.
@@ -1270,15 +1369,56 @@
               </div>
             </div>
           </div>
+
+          <div class="workday-option variation" class:work-option-disabled={shiftVariationDisabled}>
+            <div class="option-icon variation-icon">
+              <ArrowLeftRight size={24} />
+            </div>
+            <div class="option-text">
+              <span class="option-title">Variación de Jornada</span>
+              <p class="option-desc">{getShiftVariationDescription()}</p>
+              <div class="overtime-counter variation-counter">
+                <button
+                  class="counter-btn"
+                  onclick={() => adjustShiftVariation(-1)}
+                  disabled={shiftVariationDisabled || shiftVariationHours <= -MAX_SHIFT_VARIATION_HOURS}
+                  aria-label="Restar una hora de variación"
+                >
+                  <Minus size={18} />
+                </button>
+                <span class="counter-value" class:counter-negative={shiftVariationHours < 0}>
+                  {formatShiftVariationHours(shiftVariationHours)}
+                </span>
+                <button
+                  class="counter-btn"
+                  onclick={() => adjustShiftVariation(1)}
+                  disabled={shiftVariationDisabled || shiftVariationHours >= MAX_SHIFT_VARIATION_HOURS}
+                  aria-label="Sumar una hora de variación"
+                >
+                  <Plus size={18} />
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <button
           class="register-workday-btn"
           onclick={handleRegisterWorkday}
-          disabled={isCheckingWorkday || isTodayNonWorkingDay || (hasWorkdayToday && (!overtimeEnabled || workDay.overtimeHours <= 0))}
+          disabled={isCheckingWorkday
+            || isTodayNonWorkingDay
+            || (hasWorkdayToday
+              && !hasShiftVariation
+              && (!overtimeEnabled || !hasOvertimeHours))}
         >
           <Save size={20} />
-          <span>{hasWorkdayToday ? "Registrar Horas Extra" : "Registrar Jornada"}</span>
+          <span>
+            {hasWorkdayToday
+              ? hasShiftVariation && !hasOvertimeHours
+                ? "Registrar Variación"
+                : "Registrar Horas Extra"
+              : "Registrar Jornada"}
+          </span>
         </button>
       </div>
     </SliceContainer>
@@ -2001,7 +2141,7 @@
     overflow: hidden;
   }
 
-  .workday-option:hover:not(.overtime) {
+  .workday-option:hover:not(.overtime):not(.variation) {
     transform: translateY(-3px);
     border-color: var(--accent-color);
     box-shadow: var(--shadow-card);
@@ -2019,7 +2159,7 @@
     border-color: var(--border-color);
   }
 
-  .workday-option:active:not(.overtime) {
+  .workday-option:active:not(.overtime):not(.variation) {
     transform: scale(0.98);
   }
 
@@ -2057,6 +2197,11 @@
   .option-icon.overtime-icon {
     background: var(--bg-purple-subtle);
     color: var(--purple-color);
+  }
+
+  .option-icon.variation-icon {
+    background: var(--bg-info-subtle);
+    color: var(--info-color);
   }
 
   .option-text {
@@ -2126,6 +2271,10 @@
     color: var(--text-primary);
     min-width: 40px;
     text-align: center;
+  }
+
+  .counter-value.counter-negative {
+    color: var(--danger-color);
   }
 
   .register-workday-btn {

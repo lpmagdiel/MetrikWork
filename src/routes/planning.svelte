@@ -37,6 +37,11 @@
   import { formatGpsCoordinates, geocodeAddress, normalizeCoordinates } from "../helpers/navigation.js";
   import { captureLocationOrAbort } from "../data/geolocation.js";
   import { confirmAlert, showErrorAlert } from "../data/alerts.js";
+  import {
+    MAX_SHIFT_VARIATION_HOURS,
+    formatShiftVariationHours,
+    normalizeShiftVariationHours,
+  } from "../data/workVariations.js";
 
   let messageToast = $state("");
   let typeToast = $state("success");
@@ -55,6 +60,7 @@
     date: toDateInputValue(new Date()),
     type: "full-day",
     overtimeHours: 0,
+    shiftVariationHours: 0,
     note: "",
   });
   let isSavingAssignment = $state(false);
@@ -360,6 +366,7 @@
       date,
       type: "full-day",
       overtimeHours: 0,
+      shiftVariationHours: 0,
       note: "",
     };
     openAddEvent = true;
@@ -406,7 +413,16 @@
 
     isSavingAssignment = true;
     try {
-      const limitedAssignment = applyWorkdayOvertimeLimit(assignmentForm, team);
+      const limitedAssignment = applyWorkdayOvertimeLimit(
+        {
+          ...assignmentForm,
+          shiftVariationHours:
+            assignmentForm.type === "overtime"
+              ? 0
+              : normalizeShiftVariationHours(assignmentForm.shiftVariationHours),
+        },
+        team,
+      );
       const isGhostAssignment = typeof limitedAssignment.userId === "string" && limitedAssignment.userId.startsWith("ghost-");
       await assignWorkdayToMember(
         team.id,
@@ -636,6 +652,11 @@
                 <div class="record-meta">
                   <Clock size={16} />
                   <span>{work.overtimeHours || 0}h extra</span>
+                  {#if Number(work.shiftVariationHours) !== 0}
+                    <span class="record-variation">
+                      {formatShiftVariationHours(work.shiftVariationHours)} variación
+                    </span>
+                  {/if}
                 </div>
               </article>
             {/each}
@@ -705,6 +726,21 @@
           bind:value={assignmentForm.overtimeHours}
           disabled={isAssignmentNonWorkingDay || !overtimeEnabled}
         />
+      </label>
+
+      <label>
+        <span>Variación de jornada (h)</span>
+        <input
+          type="number"
+          min={-MAX_SHIFT_VARIATION_HOURS}
+          max={MAX_SHIFT_VARIATION_HOURS}
+          step="0.5"
+          bind:value={assignmentForm.shiftVariationHours}
+          disabled={isAssignmentNonWorkingDay || assignmentForm.type === "overtime"}
+        />
+        <small class="form-hint">
+          Horas que se descuentan del salario del día (no cuentan como horas extra).
+        </small>
       </label>
 
       <label>
@@ -1131,6 +1167,10 @@
     white-space: nowrap;
   }
 
+  .record-meta .record-variation {
+    color: var(--info-color);
+  }
+
   .record-main {
     flex: 1;
     min-width: 0;
@@ -1180,6 +1220,12 @@
     border-radius: var(--radius-sm);
     padding: 10px 12px;
     margin-top: -4px;
+  }
+
+  .form-hint {
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.4;
   }
 
   .save-btn {

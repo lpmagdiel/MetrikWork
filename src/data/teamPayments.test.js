@@ -178,3 +178,74 @@ describe('team payments with ghost members', () => {
     expect(member.totalEarned).toBe(100);
   });
 });
+
+describe('team payments with shift variation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    firestoreMocks.getDocs.mockImplementation(() => ({ forEach: () => {} }));
+  });
+
+  it('descuenta la variación de jornada del saldo pendiente', async () => {
+    getWorksByTeamId.mockResolvedValue({
+      'member-1': [
+        {
+          id: 'w-1',
+          userId: 'member-1',
+          type: 'full-day',
+          date: '2026-01-05',
+          overtimeHours: 0,
+          shiftVariationHours: -2
+        }
+      ]
+    });
+
+    firestoreMocks.getDoc.mockResolvedValue({
+      exists: () => true,
+      data: () => ({
+        membersData: [{ id: 'member-1', name: 'Miembro Uno' }],
+        memberSettings: { 'member-1': { dailyRate: 80, extraHourRate: 20 } },
+        ghosts: []
+      })
+    });
+
+    const balances = await getTeamPaymentsData('team-1');
+    const member = balances.find((b) => b.id === 'member-1');
+
+    // Jornada completa de 80€ con -2h de variación => 60€.
+    expect(member.totalEarned).toBe(60);
+    expect(member.balance).toBe(60);
+    expect(member.works[0].shiftVariationHours).toBe(-2);
+    expect(member.works[0].shiftVariationAmount).toBe(-20);
+    expect(member.works[0].workAmount).toBe(60);
+  });
+
+  it('aplica la variación a las medias jornadas', async () => {
+    getWorksByTeamId.mockResolvedValue({
+      'member-1': [
+        {
+          id: 'w-2',
+          userId: 'member-1',
+          type: 'half-day',
+          date: '2026-01-06',
+          overtimeHours: 0,
+          shiftVariationHours: -2
+        }
+      ]
+    });
+
+    firestoreMocks.getDoc.mockResolvedValue({
+      exists: () => true,
+      data: () => ({
+        membersData: [{ id: 'member-1', name: 'Miembro Uno' }],
+        memberSettings: { 'member-1': { dailyRate: 80, extraHourRate: 20 } },
+        ghosts: []
+      })
+    });
+
+    const balances = await getTeamPaymentsData('team-1');
+    const member = balances.find((b) => b.id === 'member-1');
+
+    // Media jornada de 40€ con -2h de variación => 20€.
+    expect(member.totalEarned).toBe(20);
+  });
+});

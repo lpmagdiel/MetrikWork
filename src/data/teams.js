@@ -5,6 +5,7 @@ import { userStore, getProfileImage } from './auth.js';
 import { createNotification } from './notifications.js';
 import { createTeamPermissions, normalizeCustomTeamRoles, normalizeTeamPermissions } from './permissions.js';
 import { normalizeNonWorkingDays } from './workLimits.js';
+import { normalizeShiftVariationHours } from './workVariations.js';
 import { isConfiguredSystemAdmin } from './systemAdminConfig.js';
 import {
     normalizeWorkBonuses,
@@ -80,6 +81,7 @@ function normalizeGhostWorkday(work = {}) {
         taskTitle: String(work.taskTitle || '').trim(),
         note: String(work.note || '').trim(),
         overtimeHours: Number(work.overtimeHours) || 0,
+        shiftVariationHours: Number(work.shiftVariationHours) || 0,
         hours: Number(work.hours) || 0,
         startedAt: String(work.startedAt || '').trim(),
         endedAt: String(work.endedAt || '').trim(),
@@ -372,6 +374,7 @@ export async function addGhostWorkday(teamId, ghostId, workDay, assignedBy = nul
         taskTitle: String(workDay.taskTitle || '').trim(),
         note: String(workDay.note || '').trim(),
         overtimeHours: isOvertime ? (Number(workDay.overtimeHours ?? workDay.hours) || 0) : 0,
+        shiftVariationHours: normalizeShiftVariationHours(workDay.shiftVariationHours),
         hours: isOvertime ? (Number(workDay.hours ?? workDay.overtimeHours) || 0) : 0,
         startedAt: String(workDay.startedAt || '').trim(),
         endedAt: String(workDay.endedAt || '').trim(),
@@ -407,6 +410,51 @@ export async function addGhostWorkday(teamId, ghostId, workDay, assignedBy = nul
         updatedAt: now
     });
     return entry;
+}
+
+/**
+ * Actualiza una jornada ya registrada de un fantasma. Se usa, por ejemplo,
+ * para aplicar una variación de jornada sobre una jornada existente.
+ */
+export async function updateGhostWorkday(teamId, ghostId, workdayId, updates = {}) {
+    const user = get(userStore);
+    const team = get(teamsStore).find((t) => t.id === teamId);
+    if (!team) throw new Error('Equipo no encontrado');
+    const ghost = getGhostById(team, ghostId);
+    if (!ghost) throw new Error('Fantasma no encontrado');
+    assertCanAssignGhostWorkday(team, ghostId, user);
+
+    if (!workdayId) throw new Error('Falta el identificador de la jornada');
+
+    const now = new Date().toISOString();
+    const applyUpdates = (entry) => (
+        entry?.id === workdayId
+            ? { ...entry, ...updates, updatedAt: now }
+            : entry
+    );
+
+    const updatedGhosts = getTeamGhosts(team).map((g) => {
+        if (g.id !== ghostId) return g;
+        return {
+            ...g,
+            worksdays: (g.worksdays || []).map(applyUpdates),
+            overtime: (g.overtime || []).map(applyUpdates),
+            updatedAt: now
+        };
+    });
+
+    const updatedGhostMasterIds = getGhostMasterIds(updatedGhosts);
+    await updateDoc(doc(db, 'teams', teamId), {
+        ghosts: updatedGhosts,
+        ghostMasterIds: updatedGhostMasterIds,
+        updatedAt: now
+    });
+    applyTeamPatch(teamId, {
+        ghosts: updatedGhosts,
+        ghostMasterIds: updatedGhostMasterIds,
+        updatedAt: now
+    });
+    return workdayId;
 }
 
 export async function removeGhostWorkday(teamId, ghostId, workdayId) {

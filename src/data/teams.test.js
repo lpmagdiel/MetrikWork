@@ -74,6 +74,7 @@ import {
     removeTeamGhost,
     addGhostWorkday,
     removeGhostWorkday,
+    updateGhostWorkday,
     clearGhostWorkdays,
     getGhostWorkdays,
     findGhostRegularWorkday,
@@ -505,6 +506,44 @@ describe('team ghost mutators', () => {
             type: 'full-day'
         });
         expect(entry.assignedBy).toBe('master-1');
+    });
+
+    it('updateGhostWorkday aplica la variación de jornada sobre la obra existente', async () => {
+        setUser({ uid: 'admin-1', name: 'Admin' });
+        setTeamsStore([{
+            id: 'team-1',
+            admin: 'admin-1',
+            members: ['admin-1'],
+            ghosts: [{
+                id: 'g1',
+                name: 'Fantasma',
+                masters: ['admin-1'],
+                worksdays: [{ id: 'w1', date: '2026-01-15', type: 'full-day', assignedBy: 'admin-1' }],
+                overtime: []
+            }]
+        }]);
+
+        await updateGhostWorkday('team-1', 'g1', 'w1', { shiftVariationHours: -2 });
+
+        const payload = firestoreMocks.updateDoc.mock.calls[0][1];
+        const workday = payload.ghosts[0].worksdays[0];
+        expect(workday.id).toBe('w1');
+        expect(workday.shiftVariationHours).toBe(-2);
+        expect(payload.ghosts[0].overtime).toHaveLength(0);
+    });
+
+    it('updateGhostWorkday rechaza a un usuario no autorizado', async () => {
+        setUser({ uid: 'stranger' });
+        setTeamsStore([{
+            id: 'team-1',
+            admin: 'admin-1',
+            members: ['admin-1', 'stranger'],
+            ghosts: [{ id: 'g1', name: 'Fantasma', masters: ['admin-1'], worksdays: [], overtime: [] }]
+        }]);
+
+        await expect(updateGhostWorkday('team-1', 'g1', 'w1', { shiftVariationHours: -2 }))
+            .rejects.toThrow(/permisos/i);
+        expect(firestoreMocks.updateDoc).not.toHaveBeenCalled();
     });
 
     it('addGhostWorkday rechaza a un usuario no autorizado', async () => {

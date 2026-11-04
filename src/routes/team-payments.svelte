@@ -10,6 +10,12 @@
   import TitleHeader from "../components/TitleHeader.svelte";
     import { downloadExcelReport, openPrintableReport } from "../helpers/reportExport.js";
     import { formatGpsCoordinates, geocodeAddress, normalizeCoordinates } from "../helpers/navigation.js";
+    import {
+      applyShiftVariationToWorkAmount,
+      formatShiftVariationHours,
+      getShiftVariationHours,
+      getWorkShiftVariationAmount,
+    } from "../data/workVariations.js";
 
     let team = $derived($selectedTeam);
     let teamId = $derived(team?.id || $selectedTeamId);
@@ -311,7 +317,12 @@
         if (Number.isFinite(Number(work?.paymentAppliedAmount))) return Number(work.paymentAppliedAmount);
         if (mode === "pending" && Number.isFinite(Number(work?.pendingAmount))) return Number(work.pendingAmount);
         if (Number.isFinite(Number(work?.workAmount))) return Number(work.workAmount);
-        const base = getWorkUnits(work) * (Number(member?.dailyRate) || 0);
+        const units = getWorkUnits(work);
+        const base = applyShiftVariationToWorkAmount(
+            units * (Number(member?.dailyRate) || 0),
+            getWorkShiftVariationAmount(work, member?.dailyRate),
+            units,
+        );
         const extra = (Number(work.overtimeHours) || 0) * (Number(member?.extraHourRate) || 0);
         return base + extra;
     }
@@ -789,7 +800,7 @@
                 },
                 {
                     title: "Detalle de jornadas pendientes",
-                    headers: ["Integrante", "Fecha", "Tipo", "Dias", "Horas extra", "Nota / tarea", "Ubicación GPS", "Importe"],
+                    headers: ["Integrante", "Fecha", "Tipo", "Dias", "Horas extra", "Variacion", "Nota / tarea", "Ubicación GPS", "Importe"],
                     rows: filteredMembers.flatMap((member) =>
                         (member.pendingWorks || []).map((work) => [
                             memberLabel(member),
@@ -797,6 +808,7 @@
                             getWorkTypeLabel(work),
                             formatMetric(getPendingWorkUnits(work)),
                             `${formatMetric(getPendingOvertimeHours(work))}h`,
+                            formatShiftVariationHours(getShiftVariationHours(work)),
                             work.taskTitle || work.note || "",
                             getWorkMemberLocationLabel(work) || "Sin GPS",
                             member.isGhost ? formatMoney(0) : formatMoney(getWorkAmount(work, member, "pending")),
@@ -1326,6 +1338,11 @@
                                     <div class="item-values">
                                         {#if getPendingOvertimeHours(work) > 0}
                                             <span class="item-extra">+{formatMetric(getPendingOvertimeHours(work))}h extras</span>
+                                        {/if}
+                                        {#if getShiftVariationHours(work) !== 0}
+                                            <span class="item-extra variation-extra" title="Variación de jornada aplicada al salario del día">
+                                                {formatShiftVariationHours(getShiftVariationHours(work))} variación
+                                            </span>
                                         {/if}
                                         {#if Number(work.pendingAmount) > 0}
                                             <span class="item-price">{formatMoney(work.pendingAmount)}</span>
@@ -2175,6 +2192,11 @@
         border-radius: 4px;
         font-size: 12px;
         font-weight: 600;
+    }
+
+    .item-extra.variation-extra {
+        background: var(--bg-info-subtle);
+        color: var(--info-color);
     }
 
     .item-price {

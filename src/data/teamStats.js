@@ -32,6 +32,7 @@ function buildGhostWorks(teamId, teamData, { startDate, endDate } = {}) {
                 userName,
                 type: isOvertime ? 'overtime' : (entry.type || 'full-day'),
                 overtimeHours,
+                shiftVariationHours: Number(entry.shiftVariationHours) || 0,
                 hours: Number(entry.hours) || overtimeHours || 0,
                 date: entry.date,
                 taskTitle: entry.taskTitle || '',
