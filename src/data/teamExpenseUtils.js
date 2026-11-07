@@ -305,6 +305,28 @@ export function filterExpenseLedger(expenses = [], filters = {}) {
     });
 }
 
+/**
+ * Un gasto es "propio" cuando lo ha registrado el propio miembro.
+ * Los pagos automáticos se atribuyen al miembro que los recibe y las
+ * entradas de inventario a quien las ha creado.
+ */
+export function isOwnTeamExpense(expense = {}, uid = '') {
+    if (!uid) return false;
+    if (expense.source === 'payment') return expense.memberId === uid;
+    return expense.createdBy === uid;
+}
+
+/**
+ * Deja solo los gastos propios del miembro. Se usa con el permiso
+ * "Ver gastos propios" para que nunca se cuele un registro de otro.
+ */
+export function filterTeamExpensesByOwner(expenses = [], uid = '') {
+    if (!uid) return [];
+    return (Array.isArray(expenses) ? expenses : []).filter((expense) =>
+        isOwnTeamExpense(expense, uid)
+    );
+}
+
 export function summarizeExpenseLedger(expenses = []) {
     return (Array.isArray(expenses) ? expenses : []).reduce((summary, expense) => {
         const amount = roundExpenseAmount(expense.amount);

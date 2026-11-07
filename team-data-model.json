@@ -65,6 +65,7 @@
             "permissions": {
               "tasks": ["view", "create", "edit"],
               "payments": ["view"],
+              "expenses": ["viewAll", "viewOwn", "create"],
               "stats": ["view"],
               "settings": []
             },

@@ -46,8 +46,9 @@
     normalizeCustomTeamRoles,
     normalizeTeamPermissions,
     hasTeamPermission,
+    toggleTeamPermission,
+    getTeamPermissionModuleActions,
     TEAM_PERMISSION_LABELS,
-    TEAM_PERMISSION_ACTION_LABELS,
     WEEKDAY_OPTIONS,
     normalizeNonWorkingDays,
     getTeamGhosts,
@@ -64,6 +65,7 @@
   import { resizeImageFile, uploader } from "../data/fileHelper.js";
   import { confirmAlert, promptAlert, showErrorAlert, showSuccessAlert } from "../data/alerts.js";
   import TitleHeader from "../components/TitleHeader.svelte";
+  import TeamPermissionMatrix from "../components/TeamPermissionMatrix.svelte";
   import { optimizeCloudinary } from "../helpers/image.js";
 
   let team = $derived($selectedTeam);
@@ -78,7 +80,6 @@
   let teamId = $derived(team?.id || $selectedTeamId);
 
   const permissionModules = Object.entries(TEAM_PERMISSION_LABELS);
-  const permissionActions = Object.entries(TEAM_PERMISSION_ACTION_LABELS);
 
   let memberList = $state([]);
   let customRoles = $state([]);
@@ -226,6 +227,9 @@
       }
       editingPermissions = nextEditingPermissions;
       selectedMemberRoles = nextSelectedMemberRoles;
+      // La visibilidad de tareas se edita junto con los permisos: al recargar
+      // el equipo vuelve al valor guardado.
+      tasksVisibilityDraft = {};
     }
   });
 
@@ -277,12 +281,15 @@
   }
 
   function togglePermission(memberId, module, action) {
-    editingPermissions[memberId][module][action] = !editingPermissions[memberId][module][action];
+    editingPermissions = {
+      ...editingPermissions,
+      [memberId]: toggleTeamPermission(editingPermissions[memberId], module, action),
+    };
     selectedMemberRoles = { ...selectedMemberRoles, [memberId]: "" };
   }
 
   function toggleNewMemberPermission(module, action) {
-    newMemberPermissions[module][action] = !newMemberPermissions[module][action];
+    newMemberPermissions = toggleTeamPermission(newMemberPermissions, module, action);
     selectedNewMemberRole = "";
   }
 
@@ -325,20 +332,15 @@
   }
 
   function toggleCustomRolePermission(module, action) {
-    const modulePermissions = customRolePermissions[module] || {};
-    customRolePermissions = {
-      ...customRolePermissions,
-      [module]: {
-        ...modulePermissions,
-        [action]: !modulePermissions[action],
-      },
-    };
+    customRolePermissions = toggleTeamPermission(customRolePermissions, module, action);
   }
 
   function getRolePermissionSummary(permissions) {
     const normalized = normalizeTeamPermissions(permissions);
     const enabledModules = permissionModules
-      .filter(([module]) => permissionActions.some(([action]) => normalized[module]?.[action]))
+      .filter(([module]) =>
+        getTeamPermissionModuleActions(module).some((action) => normalized[module]?.[action]),
+      )
       .map(([, moduleLabel]) => moduleLabel);
     return enabledModules.length > 0 ? enabledModules : ["Sin permisos"];
   }
@@ -807,9 +809,21 @@
   }
 
   async function handleSavePermissions(memberId) {
-    if (!team?.id || !canEditSettings || memberId === team.admin) return;
+    if (!team?.id || !canEditSettings) return;
+    if (memberId === team.admin || memberId === $userStore?.uid) return;
     try {
       await updateMemberPermissions(team.id, memberId, editingPermissions[memberId]);
+
+      // La visibilidad de tareas forma parte del mismo menú de permisos, así
+      // que se guarda junto con el resto de casillas.
+      const visibility = getMemberTasksVisibility(memberId);
+      const savedVisibility =
+        team?.memberSettings?.[memberId]?.tasksVisibility === "own" ? "own" : "all";
+      if (visibility !== savedVisibility) {
+        await updateMemberTasksVisibility(team.id, memberId, visibility);
+      }
+      tasksVisibilityDraft = { ...tasksVisibilityDraft, [memberId]: undefined };
+
       await showSuccessAlert("Permisos actualizados", "Los permisos del miembro se guardaron correctamente.");
     } catch (error) {
       await showErrorAlert("Error al guardar permisos", "No se pudieron guardar los permisos.");
@@ -823,25 +837,11 @@
     return visibility === "own" ? "own" : "all";
   }
 
-  async function handleTasksVisibility(memberId, visibility) {
-    if (!team?.id || !canEditSettings || memberId === team.admin) return;
+  function handleTasksVisibility(memberId, visibility) {
+    if (!team?.id || !canEditSettings) return;
+    if (memberId === team.admin || memberId === $userStore?.uid) return;
     if (getMemberTasksVisibility(memberId) === visibility) return;
     tasksVisibilityDraft = { ...tasksVisibilityDraft, [memberId]: visibility };
-    try {
-      await updateMemberTasksVisibility(team.id, memberId, visibility);
-      await showSuccessAlert(
-        "Visibilidad actualizada",
-        visibility === "own"
-          ? "El miembro solo verá sus tareas y las de los fantasmas que gestiona."
-          : "El miembro volverá a ver todas las tareas del equipo.",
-      );
-    } catch (error) {
-      tasksVisibilityDraft = { ...tasksVisibilityDraft, [memberId]: undefined };
-      await showErrorAlert(
-        "Error al guardar la visibilidad",
-        error?.message || "No se pudo actualizar la visibilidad de tareas.",
-      );
-    }
   }
 
   async function handleAddGhost() {
@@ -1557,25 +1557,10 @@
                 <input id="customRoleDescription" bind:value={customRoleDescription} placeholder="Cuándo utilizar esta plantilla" />
               </div>
 
-              <div class="permissions-editor">
-                {#each permissionModules as [module, moduleLabel]}
-                  <div class="permission-row">
-                    <span>{moduleLabel}</span>
-                    <div class="permission-actions">
-                      {#each permissionActions as [action, actionLabel]}
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={customRolePermissions[module]?.[action]}
-                            onchange={() => toggleCustomRolePermission(module, action)}
-                          />
-                          {actionLabel}
-                        </label>
-                      {/each}
-                    </div>
-                  </div>
-                {/each}
-              </div>
+              <TeamPermissionMatrix
+                permissions={customRolePermissions}
+                onToggle={toggleCustomRolePermission}
+              />
 
               <div class="custom-role-form-actions">
                 <button type="button" class="secondary-btn" onclick={closeCustomRoleForm}>
@@ -1623,7 +1608,7 @@
                 <ChevronDown size={18} />
               </button>
               {#if showNewMemberPermissions}
-                <div class="permissions-editor accordion-panel">
+                <div class="accordion-panel">
                   <div class="role-template-section">
                     <div class="role-template-heading">
                       <h4>Plantillas de permisos</h4>
@@ -1645,23 +1630,10 @@
                     </div>
                   </div>
 
-                  {#each permissionModules as [module, moduleLabel]}
-                    <div class="permission-row">
-                      <span>{moduleLabel}</span>
-                      <div class="permission-actions">
-                        {#each permissionActions as [action, actionLabel]}
-                          <label>
-                            <input
-                              type="checkbox"
-                              checked={newMemberPermissions[module][action]}
-                              onchange={() => toggleNewMemberPermission(module, action)}
-                            />
-                            {actionLabel}
-                          </label>
-                        {/each}
-                      </div>
-                    </div>
-                  {/each}
+                  <TeamPermissionMatrix
+                    permissions={newMemberPermissions}
+                    onToggle={toggleNewMemberPermission}
+                  />
                 </div>
               {/if}
             </div>
@@ -1705,7 +1677,7 @@
                   {/if}
                 </div>
 
-              {#if member.id !== team.admin}
+              {#if member.id !== team.admin && member.id !== $userStore?.uid}
                 <div class="accordion member-permissions">
                   <button
                     type="button"
@@ -1718,7 +1690,7 @@
                     <ChevronDown size={18} />
                   </button>
                   {#if openPermissionMemberId === member.id}
-                    <div class="permissions-editor compact accordion-panel">
+                    <div class="accordion-panel">
                       {#if canEditSettings}
                         <div class="role-template-section">
                           <div class="role-template-heading">
@@ -1742,50 +1714,22 @@
                         </div>
                       {/if}
 
-                      {#each permissionModules as [module, moduleLabel]}
-                        <div class="permission-row">
-                          <span>{moduleLabel}</span>
-                          <div class="permission-actions">
-                            {#each permissionActions as [action, actionLabel]}
-                              <label>
-                                <input
-                                  type="checkbox"
-                                  checked={editingPermissions[member.id]?.[module]?.[action]}
-                                  disabled={!canEditSettings}
-                                  onchange={() => togglePermission(member.id, module, action)}
-                                />
-                                {actionLabel}
-                              </label>
-                            {/each}
-                          </div>
-                        </div>
-                      {/each}
+                      <TeamPermissionMatrix
+                        permissions={editingPermissions[member.id]}
+                        disabled={!canEditSettings}
+                        showTasksVisibility
+                        tasksVisibility={getMemberTasksVisibility(member.id)}
+                        visibilityGroup={`tasks-visibility-${member.id}`}
+                        onToggle={(module, action) => togglePermission(member.id, module, action)}
+                        onTasksVisibilityChange={(visibility) =>
+                          handleTasksVisibility(member.id, visibility)}
+                      />
 
-                      <div class="permission-row tasks-visibility-row">
-                        <span>Visibilidad de tareas</span>
-                        <div class="permission-actions">
-                          <label>
-                            <input
-                              type="radio"
-                              name="tasks-visibility-{member.id}"
-                              checked={getMemberTasksVisibility(member.id) !== "own"}
-                              disabled={!canEditSettings}
-                              onchange={() => handleTasksVisibility(member.id, "all")}
-                            />
-                            Todas
-                          </label>
-                          <label>
-                            <input
-                              type="radio"
-                              name="tasks-visibility-{member.id}"
-                              checked={getMemberTasksVisibility(member.id) === "own"}
-                              disabled={!canEditSettings}
-                              onchange={() => handleTasksVisibility(member.id, "own")}
-                            />
-                            Solo las suyas
-                          </label>
-                        </div>
-                      </div>
+                      <p class="field-help">
+                        El miembro solo puede consultar el listado de gastos con "Ver todos los
+                        gastos" o "Ver gastos propios". La visibilidad de las tareas se guarda
+                        junto con el resto de permisos.
+                      </p>
                     </div>
                   {/if}
                 </div>
@@ -2371,8 +2315,7 @@
   }
 
   label,
-  .field-label,
-  .permission-row span {
+  .field-label {
     font-size: 13px;
     font-weight: 700;
     color: var(--text-primary);
@@ -2776,17 +2719,6 @@
     overflow-wrap: anywhere;
   }
 
-  .permissions-editor {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    min-width: 0;
-  }
-
-  .permissions-editor.compact {
-    margin-top: 8px;
-  }
-
   .accordion {
     margin-bottom: 14px;
     min-width: 0;
@@ -2824,46 +2756,6 @@
   .accordion-panel {
     margin-top: 8px;
     min-width: 0;
-  }
-
-  .permission-row {
-    background: var(--bg-input);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    padding: 12px;
-    min-width: 0;
-  }
-
-  .permission-row > span {
-    display: block;
-    margin-bottom: 9px;
-    overflow-wrap: anywhere;
-  }
-
-  .permission-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-  }
-
-  .permission-actions label {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    min-height: 32px;
-    padding: 7px 9px;
-    border-radius: 8px;
-    background: var(--bg-card);
-    color: var(--text-secondary);
-    overflow: hidden;
-  }
-
-  .permission-actions input {
-    width: auto;
-    min-width: 0;
-    margin: 0;
-    accent-color: var(--accent-color);
-    flex-shrink: 0;
   }
 
   .members-list {
@@ -3359,10 +3251,6 @@
       padding: 0 2px;
       font-size: 11px;
       min-height: 34px;
-    }
-
-    .permission-actions {
-      grid-template-columns: 1fr;
     }
 
     .member-actions {

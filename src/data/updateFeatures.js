@@ -7,17 +7,23 @@
  * `localStorage.lastUpdateFeaturesVersion`.
  */
 export const updateData = {
-    version: "1.5.0", // Actualiza este valor en cada release
-    message: "MetricWork 1.5 - Imágenes en las tareas y libro de gastos en Estadísticas avanzadas",
+    version: "1.6.0", // Actualiza este valor en cada release
+    message: "MetricWork 1.6 - Permisos por módulo más claros: gastos con alcance propio y menú unificado",
     features: [
-        // Imágenes adjuntas en las tareas
-        "Las tareas ya admiten hasta 5 imágenes adjuntas: sube fotos del terreno, del material o del resultado esperado sin salir del formulario.",
-        "Las miniaturas aparecen en la tarjeta del kanban y se pueden ver a pantalla completa con el visor integrado (navegación con flechas y cierre con Escape).",
-        "Compatibilidad con fotos HEIC del iPhone (se convierten a JPEG automáticamente) y limpieza en Cloudinary de las imágenes que se quitan de una tarea o al eliminarla.",
+        // Permisos de gastos con alcance
+        "Los permisos de gastos ahora distinguen entre 'Ver todos los gastos' y 'Ver gastos propios' en lugar de una única casilla 'Ver'.",
+        "Sin ninguna de las dos casillas marcadas, el miembro no puede consultar el listado de gastos, aunque sí puede registrar los suyos.",
+        "Con 'Ver gastos propios' el libro de gastos muestra únicamente los registros que ha creado ese miembro.",
+        "Ver Estadísticas ya no da acceso al libro de gastos de todo el equipo: los gastos se rigen solo por sus propios permisos.",
 
-        // Libro de gastos en Estadísticas avanzadas
-        "Nuevo panel 'Libro de gastos' en Estadísticas avanzadas: reúne en una tabla única los gastos manuales, los pagos del equipo y las entradas de inventario.",
-        "El libro incluye filtros por origen, estado, categoría y búsqueda, resumen de total/pagado/pendiente/manual/automático, reparto por categoría y evolución mensual.",
-        "El libro respeta el periodo, la ubicación y el miembro seleccionados en la página, y sus totales se incluyen también en la exportación a PDF y Excel.",
+        // Menú de permisos unificado
+        "El menú de permisos es el mismo en Ajustes del equipo y en la ficha del equipo, e integra la visibilidad de tareas dentro de la fila 'Tareas'.",
+        "La visibilidad de tareas (todas o solo las suyas) se guarda junto con el resto de permisos del miembro, con un único botón 'Guardar'.",
+        "Cada módulo muestra solo las acciones que realmente se aplican: Estadísticas sin 'Eliminar' ni 'Controlar', Fantasmas con 'Crear' y 'Controlar', y así en el resto.",
+        "Nadie puede modificar sus propios permisos: los decide siempre el administrador del equipo.",
+
+        // Correcciones
+        "El libro de gastos ya no avisa de errores de carga cuando falta el permiso de Pagos o de Inventario: solo se cargan las fuentes permitidas.",
+        "Los permisos ya guardados se respetan: los miembros que tenían 'Ver' en gastos siguen viendo el libro completo y los que solo pueden crearlos siguen sin ver el listado.",
     ]
 };

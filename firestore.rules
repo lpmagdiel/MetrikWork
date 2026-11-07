@@ -34,24 +34,14 @@ service cloud.firestore {
              ];
     }
 
-    // Comprueba si el módulo de permisos está guardado para este miembro.
-    // No se presupone que exista: los equipos antiguos no tienen guardados los
-    // módulos añadidos más tarde y acceder a ellos provocaría un error.
-    // El documento del equipo se lee UNA sola vez: antes se repetía get()
-    // hasta ocho veces dentro de la misma comprobación y se agotaba el
-    // límite de 10 accesos a documentos por operación de Firestore.
+    // Mapa de permisos del miembro actual. El documento del equipo se lee
+    // UNA sola vez: antes se repetía get() hasta ocho veces dentro de la
+    // misma comprobación y se agotaba el límite de 10 accesos a documentos
+    // por operación de Firestore.
     function memberPermissionsMap(teamId) {
       let team = get(/databases/$(database)/documents/teams/$(teamId)).data;
       let permissions = team.get("memberPermissions", {});
       return permissions is map ? permissions : {};
-    }
-
-    function hasPermissionModule(teamId, module) {
-      let permissions = memberPermissionsMap(teamId);
-      let member = permissions.get(request.auth.uid, {});
-      return isTeamMember(teamId) &&
-             member is map &&
-             member.keys().hasAll([module]);
     }
 
     // Permiso de una acción dentro de un módulo, sin presuponer que el módulo
@@ -96,6 +86,19 @@ service cloud.firestore {
              modulePermissions.get(action, false) == true;
     }
 
+    // Un miembro con permisos de ajustes puede gestionar los permisos de los
+    // demás, pero nunca los suyos: así no puede concederse más acceso del
+    // que tiene. El administrador del equipo sí puede cambiarlos (entra por
+    // su propia rama de permiso) y quien acepta una invitación o abandona el
+    // equipo escribe su propia entrada (ramas independientes).
+    function isChangingOwnPermissions() {
+      let previous = resource.data.get("memberPermissions", {});
+      let next = request.resource.data.get("memberPermissions", {});
+      return previous is map &&
+             next is map &&
+             next.diff(previous).affectedKeys().hasAny([request.auth.uid]);
+    }
+
     function isTeamUpdateAllowedByModule(teamId) {
       let team = get(/databases/$(database)/documents/teams/$(teamId)).data;
       let permissions = team.get("memberPermissions", {});
@@ -103,6 +106,7 @@ service cloud.firestore {
       let modules = member is map ? member : {};
       let isMember = request.auth.uid in team.get("members", []);
       return isMember &&
+             !isChangingOwnPermissions() &&
              (
                modulePermissionEnabled(modules, "settings", "create") ||
                modulePermissionEnabled(modules, "settings", "edit") ||
@@ -132,18 +136,70 @@ service cloud.firestore {
              );
     }
 
-    // Los gastos tienen su propio módulo de permisos. En los equipos creados
-    // antes de separarlo, ese módulo no está guardado y el permiso se hereda
-    // del de pagos, para no revocar los accesos de golpe.
+    // Los gastos tienen su propio módulo de permisos y su lectura tiene
+    // alcance: "viewAll" (todo el libro) o "viewOwn" (solo los gastos del
+    // propio miembro). En los equipos creados antes de separarlo, ese módulo
+    // no está guardado y el permiso se hereda del de pagos, para no revocar
+    // los accesos de golpe. Los gastos guardados con la antigua casilla
+    // "view" equivalen a "viewAll".
+    function memberExpensesPermissions(teamId) {
+      let team = get(/databases/$(database)/documents/teams/$(teamId)).data;
+      if (request.auth.uid == team.get("admin", "")) {
+        return { viewAll: true, viewOwn: true, create: true, edit: true, delete: true };
+      }
+      if (!(request.auth.uid in team.get("members", []))) return {};
+
+      let permissions = team.get("memberPermissions", {});
+      let member = permissions is map ? permissions.get(request.auth.uid, {}) : {};
+      let modules = member is map ? member : {};
+      let expenses = modules.get("expenses", null);
+
+      if (expenses is map) {
+        let legacyView = !expenses.keys().hasAny(["viewAll", "viewOwn"]) &&
+                         expenses.get("view", false) == true;
+        return {
+          viewAll: expenses.get("viewAll", false) == true || legacyView,
+          viewOwn: expenses.get("viewOwn", false) == true,
+          create: expenses.get("create", false) == true,
+          edit: expenses.get("edit", false) == true,
+          delete: expenses.get("delete", false) == true
+        };
+      }
+
+      // Sin módulo de gastos guardado se hereda del de pagos.
+      let payments = modules.get("payments", null);
+      let paymentsPermissions = payments is map ? payments : {};
+      return {
+        viewAll: paymentsPermissions.get("view", false) == true ||
+                 paymentsPermissions.get("viewAll", false) == true,
+        viewOwn: paymentsPermissions.get("viewOwn", false) == true,
+        create: paymentsPermissions.get("create", false) == true,
+        edit: paymentsPermissions.get("edit", false) == true,
+        delete: paymentsPermissions.get("delete", false) == true
+      };
+    }
+
     function hasExpensesPermission(teamId, action) {
-      return isTeamAdmin(teamId) ||
-             (
-               hasModulePermission(teamId, "expenses", action) ||
-               (
-                 !hasPermissionModule(teamId, "expenses") &&
-                 hasModulePermission(teamId, "payments", action)
-               )
-             );
+      let permissions = memberExpensesPermissions(teamId);
+      // "view" es la lectura sin alcance: equivale a ver todos los gastos.
+      if (action == "view") return permissions.get("viewAll", false) == true;
+      return permissions.get(action, false) == true;
+    }
+
+    // Con "viewOwn" la consulta debe filtrar por createdBy: solo se leen los
+    // gastos registrados por el propio miembro.
+    function canReadExpense(teamId, data) {
+      let permissions = memberExpensesPermissions(teamId);
+      return permissions.get("viewAll", false) == true ||
+             (permissions.get("viewOwn", false) == true &&
+              data.createdBy == request.auth.uid);
+    }
+
+    function canEditExpense(teamId, data) {
+      let permissions = memberExpensesPermissions(teamId);
+      return permissions.get("edit", false) == true ||
+             (permissions.get("create", false) == true &&
+              data.createdBy == request.auth.uid);
     }
 
     function respectsTeamMemberLimit(teamDocument) {
@@ -1009,17 +1065,15 @@ service cloud.firestore {
       }
 
       match /expenses/{expenseId} {
-        allow read: if hasExpensesPermission(teamId, "view") ||
-                    hasTeamPermission(teamId, "stats", "view");
+        // El libro de gastos solo se abre con el módulo de gastos: con
+        // "viewAll" se ve todo y con "viewOwn" únicamente los gastos del
+        // propio miembro (la consulta filtra por createdBy).
+        allow read: if canReadExpense(teamId, resource.data);
         allow create: if hasExpensesPermission(teamId, "create") &&
                       request.resource.data.createdBy == request.auth.uid &&
                       isValidManualExpenseData(request.resource.data);
         allow update: if (
-                        hasExpensesPermission(teamId, "edit") ||
-                        (
-                          hasExpensesPermission(teamId, "create") &&
-                          resource.data.createdBy == request.auth.uid
-                        )
+                        canEditExpense(teamId, resource.data)
                       ) &&
                       request.resource.data.source == resource.data.source &&
                       request.resource.data.createdBy == resource.data.createdBy &&

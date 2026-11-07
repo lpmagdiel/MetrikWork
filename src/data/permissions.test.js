@@ -3,16 +3,20 @@ import {
   TEAM_PERMISSION_ACTIONS,
   TEAM_PERMISSION_LABELS,
   TEAM_PERMISSION_MODULES,
+  TEAM_PERMISSION_MODULE_ACTIONS,
+  TEAM_EXPENSE_VISIBILITY,
   createCustomRoleId,
   createDefaultMemberPermissions,
   createPermissionsFromTeamRole,
   createRoleTemplatePermissions,
   createTeamPermissions,
   getMemberPermissions,
+  getTeamExpenseVisibility,
   getTeamRoleTemplates,
   hasTeamPermission,
   normalizeCustomTeamRoles,
-  normalizeTeamPermissions
+  normalizeTeamPermissions,
+  toggleTeamPermission
 } from './permissions.js';
 
 describe('permissions', () => {
@@ -20,10 +24,35 @@ describe('permissions', () => {
     const permissions = createTeamPermissions(true);
 
     Object.values(TEAM_PERMISSION_MODULES).forEach((module) => {
-      Object.values(TEAM_PERMISSION_ACTIONS).forEach((action) => {
+      TEAM_PERMISSION_MODULE_ACTIONS[module].forEach((action) => {
         expect(permissions[module][action]).toBe(true);
       });
     });
+  });
+
+  it('expone en cada módulo solo las acciones que el backend comprueba', () => {
+    // Antes todos los módulos mostraban las mismas cinco casillas, así que
+    // aparecían opciones inertes como "Eliminar" en estadísticas.
+    expect(TEAM_PERMISSION_MODULE_ACTIONS.stats).toEqual(['view', 'edit']);
+    expect(TEAM_PERMISSION_MODULE_ACTIONS.ghosts).toEqual(['create', 'control']);
+    expect(TEAM_PERMISSION_MODULE_ACTIONS.expenses).toEqual([
+      'viewAll',
+      'viewOwn',
+      'create',
+      'edit',
+      'delete'
+    ]);
+
+    const permissions = createTeamPermissions(true);
+    expect(permissions.stats.delete).toBeUndefined();
+    expect(permissions.payments.control).toBeUndefined();
+    expect(permissions.ghosts.view).toBeUndefined();
+  });
+
+  it('mantiene las acciones globales disponibles para los módulos que las usan', () => {
+    expect(Object.values(TEAM_PERMISSION_ACTIONS)).toEqual(
+      expect.arrayContaining(['view', 'create', 'edit', 'delete', 'control'])
+    );
   });
 
   it('tiene una etiqueta para cada módulo, que es lo que dibuja su recuadro', () => {
@@ -143,7 +172,6 @@ describe('permissions', () => {
     expect(permissions.ghosts).toBeDefined();
     expect(permissions.ghosts.create).toBe(false);
     expect(permissions.ghosts.control).toBe(false);
-    expect(permissions.ghosts.view).toBe(false);
   });
 
   it('otorga control total al administrador del equipo', () => {
@@ -181,10 +209,62 @@ describe('permissions', () => {
     expect(TEAM_PERMISSION_LABELS.expenses).toBe('Gastos');
     expect(TEAM_PERMISSION_LABELS.payments).toBe('Pagos');
     expect(permissions.expenses).toBeDefined();
-    expect(permissions.expenses.view).toBe(false);
+    expect(permissions.expenses.viewAll).toBe(false);
+    expect(permissions.expenses.viewOwn).toBe(false);
     expect(permissions.expenses.create).toBe(false);
     expect(permissions.expenses.edit).toBe(false);
     expect(permissions.expenses.delete).toBe(false);
+    // La lectura de gastos ya no es una única casilla "ver".
+    expect(permissions.expenses.view).toBeUndefined();
+  });
+
+  it('permite ver todos los gastos o solo los propios, pero nunca ambos a la vez', () => {
+    const team = {
+      admin: 'admin-1',
+      memberPermissions: {
+        'member-1': normalizeTeamPermissions({ expenses: { viewAll: true } })
+      }
+    };
+
+    expect(hasTeamPermission(team, 'member-1', 'expenses', 'viewAll')).toBe(true);
+    expect(hasTeamPermission(team, 'member-1', 'expenses', 'viewOwn')).toBe(false);
+    expect(getTeamExpenseVisibility(team, 'member-1')).toBe(TEAM_EXPENSE_VISIBILITY.all);
+
+    const own = toggleTeamPermission(
+      normalizeTeamPermissions({ expenses: { viewAll: true } }),
+      'expenses',
+      'viewOwn'
+    );
+
+    expect(own.expenses.viewOwn).toBe(true);
+    expect(own.expenses.viewAll).toBe(false);
+  });
+
+  it('deja sin acceso al listado de gastos a quien solo puede crearlos', () => {
+    const team = {
+      admin: 'admin-1',
+      memberPermissions: {
+        'member-1': normalizeTeamPermissions({ expenses: { create: true } })
+      }
+    };
+
+    expect(hasTeamPermission(team, 'member-1', 'expenses', 'viewAll')).toBe(false);
+    expect(hasTeamPermission(team, 'member-1', 'expenses', 'viewOwn')).toBe(false);
+    expect(hasTeamPermission(team, 'member-1', 'expenses', 'create')).toBe(true);
+    expect(getTeamExpenseVisibility(team, 'member-1')).toBe(TEAM_EXPENSE_VISIBILITY.none);
+  });
+
+  it('calcula el alcance de gastos del propio y del administrador', () => {
+    const team = {
+      admin: 'admin-1',
+      memberPermissions: {
+        'member-1': normalizeTeamPermissions({ expenses: { viewOwn: true } })
+      }
+    };
+
+    expect(getTeamExpenseVisibility(team, 'member-1')).toBe(TEAM_EXPENSE_VISIBILITY.own);
+    expect(getTeamExpenseVisibility(team, 'admin-1')).toBe(TEAM_EXPENSE_VISIBILITY.all);
+    expect(getTeamExpenseVisibility(team, 'member-2')).toBe(TEAM_EXPENSE_VISIBILITY.none);
   });
 
   it('hereda los gastos de pagos en equipos creados antes de separarlos', () => {
@@ -198,6 +278,7 @@ describe('permissions', () => {
     };
 
     expect(hasTeamPermission(team, 'member-1', 'expenses', 'view')).toBe(true);
+    expect(hasTeamPermission(team, 'member-1', 'expenses', 'viewAll')).toBe(true);
     expect(hasTeamPermission(team, 'member-1', 'expenses', 'create')).toBe(true);
     expect(hasTeamPermission(team, 'member-1', 'expenses', 'edit')).toBe(false);
     expect(hasTeamPermission(team, 'member-1', 'expenses', 'delete')).toBe(false);
@@ -208,10 +289,21 @@ describe('permissions', () => {
       payments: { view: true, create: true }
     });
 
-    expect(permissions.expenses.view).toBe(true);
+    expect(permissions.expenses.viewAll).toBe(true);
+    expect(permissions.expenses.viewOwn).toBe(false);
     expect(permissions.expenses.create).toBe(true);
     expect(permissions.expenses.edit).toBe(false);
     expect(permissions.expenses.delete).toBe(false);
+  });
+
+  it('convierte la antigua casilla "ver" de gastos en "ver todos"', () => {
+    const permissions = normalizeTeamPermissions({
+      expenses: { view: true, create: true }
+    });
+
+    expect(permissions.expenses.viewAll).toBe(true);
+    expect(permissions.expenses.viewOwn).toBe(false);
+    expect(permissions.expenses.create).toBe(true);
   });
 
   it('deja el módulo de gastos explícito mandar sobre el de pagos', () => {
@@ -221,30 +313,33 @@ describe('permissions', () => {
         // Miembro con pagos pero sin gastos: el permiso explícito lo desactiva.
         sinGastos: normalizeTeamPermissions({
           payments: { view: true, create: true },
-          expenses: { view: false, create: false }
+          expenses: { viewAll: false, create: false }
         }),
         // Miembro con gastos pero sin pagos.
         soloGastos: normalizeTeamPermissions({
           payments: { view: false, create: false },
-          expenses: { view: true, create: true }
+          expenses: { viewAll: true, create: true }
         })
       }
     };
 
     expect(hasTeamPermission(team, 'sinGastos', 'expenses', 'view')).toBe(false);
+    expect(hasTeamPermission(team, 'sinGastos', 'expenses', 'viewAll')).toBe(false);
     expect(hasTeamPermission(team, 'sinGastos', 'expenses', 'create')).toBe(false);
     expect(hasTeamPermission(team, 'sinGastos', 'payments', 'view')).toBe(true);
 
     expect(hasTeamPermission(team, 'soloGastos', 'expenses', 'view')).toBe(true);
+    expect(hasTeamPermission(team, 'soloGastos', 'expenses', 'viewAll')).toBe(true);
     expect(hasTeamPermission(team, 'soloGastos', 'expenses', 'create')).toBe(true);
     expect(hasTeamPermission(team, 'soloGastos', 'payments', 'view')).toBe(false);
   });
 
   it('incluye los gastos en las plantillas de rol con acceso a pagos', () => {
-    expect(createRoleTemplatePermissions('manager').expenses.view).toBe(true);
+    expect(createRoleTemplatePermissions('manager').expenses.viewAll).toBe(true);
     expect(createRoleTemplatePermissions('manager').expenses.delete).toBe(false);
     expect(createRoleTemplatePermissions('accountant').expenses.delete).toBe(true);
-    expect(createRoleTemplatePermissions('auditor').expenses.view).toBe(true);
-    expect(createRoleTemplatePermissions('field_operator').expenses.view).toBe(false);
+    expect(createRoleTemplatePermissions('auditor').expenses.viewAll).toBe(true);
+    expect(createRoleTemplatePermissions('field_operator').expenses.viewAll).toBe(false);
+    expect(createRoleTemplatePermissions('field_operator').expenses.viewOwn).toBe(false);
   });
 });

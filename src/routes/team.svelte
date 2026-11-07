@@ -52,12 +52,12 @@
     updateTeamTask,
     deleteTeamTask,
     updateMemberPermissions,
+    updateMemberTasksVisibility,
     createDefaultMemberPermissions,
     normalizeTeamPermissions,
     hasTeamPermission,
     getVisibleTasksVisibility,
-    TEAM_PERMISSION_LABELS,
-    TEAM_PERMISSION_ACTION_LABELS,
+    toggleTeamPermission,
     createPermissionsFromTeamRole,
     getTeamRoleTemplates,
     applyWorkdayOvertimeLimit,
@@ -91,6 +91,7 @@
   import TitleHeader from "../components/TitleHeader.svelte";
   import WorkdayLoadingOverlay from "../components/WorkdayLoadingOverlay.svelte";
   import SegmentedSelector from "../components/SegmentedSelector.svelte";
+  import TeamPermissionMatrix from "../components/TeamPermissionMatrix.svelte";
   import { optimizeCloudinary } from "../helpers/image.js";
 
   let team = $derived($selectedTeam);
@@ -101,8 +102,13 @@
   let canViewMemberPrivate = $derived(isAdmin || canViewPayments);
   let canViewStats = $derived(hasTeamPermission(team, $userStore?.uid, "stats", "view"));
   let canViewExpenses = $derived(
-    hasTeamPermission(team, $userStore?.uid, "expenses", "view") || canViewStats,
+    hasTeamPermission(team, $userStore?.uid, "expenses", "viewAll") ||
+      hasTeamPermission(team, $userStore?.uid, "expenses", "viewOwn"),
   );
+  let canCreateExpenses = $derived(hasTeamPermission(team, $userStore?.uid, "expenses", "create"));
+  // El módulo de gastos es el único que da acceso al libro: ver estadísticas
+  // ya no muestra los gastos de todo el equipo.
+  let canAccessExpenses = $derived(canViewExpenses || canCreateExpenses);
   let canViewSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "view"));
   let canCreateSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "create"));
   let canEditSettings = $derived(hasTeamPermission(team, $userStore?.uid, "settings", "edit"));
@@ -120,8 +126,6 @@
   let workdayDailyRate = $derived(
     Number(team?.memberSettings?.[$userStore?.uid]?.dailyRate) || 0,
   );
-  const permissionModules = Object.entries(TEAM_PERMISSION_LABELS);
-  const permissionActions = Object.entries(TEAM_PERMISSION_ACTION_LABELS);
   let roleTemplates = $derived(getTeamRoleTemplates(team));
 
   let showMemberSettings = $state(false);
@@ -138,6 +142,7 @@
   let selectedNewMemberRole = $state("");
   let memberPermissions = $state(createDefaultMemberPermissions());
   let selectedMemberRole = $state("");
+  let memberTasksVisibility = $state("all");
   let dailyRate = $state(0);
   let extraHourRate = $state(0);
   let isSaving = $state(false);
@@ -419,6 +424,7 @@
     dailyRate = settings.dailyRate || 0;
     extraHourRate = settings.extraHourRate || 0;
     memberPermissions = normalizeTeamPermissions(team.memberPermissions?.[member.id]);
+    memberTasksVisibility = getVisibleTasksVisibility(team, member.id);
     selectedMemberRole = "";
     showMemberPermissions = false;
     if (canViewMemberPrivate) {
@@ -448,10 +454,19 @@
     selectedMemberRole = roleId;
   }
 
-  function togglePermission(target, module, action, scope = "") {
-    target[module][action] = !target[module][action];
-    if (scope === "new") selectedNewMemberRole = "";
-    if (scope === "member") selectedMemberRole = "";
+  function toggleNewMemberPermission(module, action) {
+    newMemberPermissions = toggleTeamPermission(newMemberPermissions, module, action);
+    selectedNewMemberRole = "";
+  }
+
+  function toggleMemberPermission(module, action) {
+    memberPermissions = toggleTeamPermission(memberPermissions, module, action);
+    selectedMemberRole = "";
+  }
+
+  function handleMemberTasksVisibility(visibility) {
+    if (!selectedMemberId || selectedMemberId === team?.admin) return;
+    memberTasksVisibility = visibility === "own" ? "own" : "all";
   }
 
   function showNotification(msg, type = "success") {
@@ -721,8 +736,16 @@
         dailyRate,
         extraHourRate,
       );
-      if (selectedMemberId !== team.admin) {
+      // Ni el administrador ni el propio member gestionan sus permisos: los
+      // permisos de cada miembro los decide siempre otro con acceso a ajustes.
+      const canSavePermissions =
+        selectedMemberId !== team.admin && selectedMemberId !== $userStore?.uid;
+      if (canSavePermissions) {
         await updateMemberPermissions(team.id, selectedMemberId, memberPermissions);
+        const savedVisibility = getVisibleTasksVisibility(team, selectedMemberId);
+        if (memberTasksVisibility !== savedVisibility) {
+          await updateMemberTasksVisibility(team.id, selectedMemberId, memberTasksVisibility);
+        }
       }
       showMemberSettings = false;
     } catch (error) {
@@ -863,7 +886,7 @@
               <span>Cobros</span>
             </button>
           {/if}
-          {#if canViewExpenses}
+          {#if canAccessExpenses}
             <button
               class="menu-card"
               onclick={() => (navigateTo(`/teams/${team.id}/expenses`))}
@@ -1040,24 +1063,10 @@
 
               <div class="permissions-editor">
                 <h4>Permisos del miembro</h4>
-                {#each permissionModules as [module, moduleLabel]}
-                  <div class="permission-row">
-                    <span class="permission-module">{moduleLabel}</span>
-                    <div class="permission-actions">
-                      {#each permissionActions as [action, actionLabel]}
-                        <label class="permission-toggle">
-                          <input
-                            type="checkbox"
-                            checked={newMemberPermissions[module][action]}
-                            onchange={() =>
-                              togglePermission(newMemberPermissions, module, action, "new")}
-                          />
-                          <span>{actionLabel}</span>
-                        </label>
-                      {/each}
-                    </div>
-                  </div>
-                {/each}
+                <TeamPermissionMatrix
+                  permissions={newMemberPermissions}
+                  onToggle={toggleNewMemberPermission}
+                />
               </div>
             </div>
           {/if}
@@ -1167,7 +1176,7 @@
           </div>
         </div>
 
-        {#if selectedMemberId !== team.admin}
+        {#if selectedMemberId !== team.admin && selectedMemberId !== $userStore?.uid && canEditSettings}
           <div class="settings-accordion">
             <button
               type="button"
@@ -1205,24 +1214,14 @@
 
                 <div class="permissions-editor">
                   <h4>Permisos del miembro</h4>
-                  {#each permissionModules as [module, moduleLabel]}
-                    <div class="permission-row">
-                      <span class="permission-module">{moduleLabel}</span>
-                      <div class="permission-actions">
-                        {#each permissionActions as [action, actionLabel]}
-                          <label class="permission-toggle">
-                            <input
-                              type="checkbox"
-                              checked={memberPermissions[module][action]}
-                              onchange={() =>
-                                togglePermission(memberPermissions, module, action, "member")}
-                            />
-                            <span>{actionLabel}</span>
-                          </label>
-                        {/each}
-                      </div>
-                    </div>
-                  {/each}
+                  <TeamPermissionMatrix
+                    permissions={memberPermissions}
+                    showTasksVisibility
+                    tasksVisibility={memberTasksVisibility}
+                    visibilityGroup={`tasks-visibility-${selectedMemberId}`}
+                    onToggle={toggleMemberPermission}
+                    onTasksVisibilityChange={handleMemberTasksVisibility}
+                  />
                 </div>
               </div>
             {/if}
@@ -1983,44 +1982,6 @@
     font-size: 14px;
     font-weight: 700;
     color: var(--text-primary);
-  }
-
-  .permission-row {
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    padding: 12px;
-    background: var(--bg-input);
-  }
-
-  .permission-module {
-    display: block;
-    margin-bottom: 10px;
-    font-size: 13px;
-    font-weight: 700;
-    color: var(--text-primary);
-  }
-
-  .permission-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-  }
-
-  .permission-toggle {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-height: 34px;
-    padding: 8px 10px;
-    border-radius: 8px;
-    background: var(--bg-card);
-    color: var(--text-secondary);
-    font-size: 13px;
-    font-weight: 600;
-  }
-
-  .permission-toggle input {
-    accent-color: var(--accent-color);
   }
 
   .save-settings-btn {

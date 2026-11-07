@@ -34,7 +34,10 @@ function resetExpenseStores() {
     expenseInventoryMovementsStore.set([]);
 }
 
-export function subscribeToTeamExpenses(teamId, { includeInventory = false } = {}) {
+export function subscribeToTeamExpenses(
+    teamId,
+    { includeInventory = false, includePayments = true, ownerUid = '' } = {},
+) {
     stopExpenseSubscriptions();
     resetExpenseStores();
     const version = ++subscriptionVersion;
@@ -44,9 +47,14 @@ export function subscribeToTeamExpenses(teamId, { includeInventory = false } = {
         return () => {};
     }
 
-    const requiredSources = includeInventory
-        ? ['manual', 'payments', 'inventory']
-        : ['manual', 'payments'];
+    // Solo se escuchan las fuentes que el miembro puede leer de verdad:
+    // los pagos y el inventario tienen sus propios permisos y pedirlos sin
+    // ellos provocaba errores de lectura en el libro de gastos.
+    const requiredSources = [
+        'manual',
+        ...(includePayments ? ['payments'] : []),
+        ...(includeInventory ? ['inventory'] : [])
+    ];
     const completedSources = new Set();
     const errors = [];
     teamExpensesStateStore.set({ loading: true, errors: [] });
@@ -96,14 +104,18 @@ export function subscribeToTeamExpenses(teamId, { includeInventory = false } = {
 
     listen(
         'manual',
-        () => collection(db, 'teams', teamId, 'expenses'),
+        () => (ownerUid
+            ? query(collection(db, 'teams', teamId, 'expenses'), where('createdBy', '==', ownerUid))
+            : collection(db, 'teams', teamId, 'expenses')),
         manualTeamExpensesStore
     );
-    listen(
-        'payments',
-        () => query(collection(db, 'team_payments'), where('teamId', '==', teamId)),
-        expensePaymentsStore
-    );
+    if (includePayments) {
+        listen(
+            'payments',
+            () => query(collection(db, 'team_payments'), where('teamId', '==', teamId)),
+            expensePaymentsStore
+        );
+    }
     if (includeInventory) {
         listen(
             'inventory',

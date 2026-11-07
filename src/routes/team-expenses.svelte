@@ -6,6 +6,7 @@
     CheckCircle2,
     Clock,
     DollarSign,
+    EyeOff,
     FileImage,
     FileText,
     Filter,
@@ -31,6 +32,7 @@
     expenseInventoryMovementsStore,
     expensePaymentsStore,
     filterExpenseLedger,
+    filterTeamExpensesByOwner,
     getExpenseCategoryLabel,
     hasTeamPermission,
     manualTeamExpensesStore,
@@ -100,14 +102,23 @@
   let team = $derived($selectedTeam);
   let teamId = $derived(team?.id || $selectedTeamId);
   let currency = $derived(team?.projectBudgetCurrency || "EUR");
-  let canViewExpenses = $derived(hasTeamPermission(team, $userStore?.uid, "expenses", "view"));
+  let canViewAllExpenses = $derived(hasTeamPermission(team, $userStore?.uid, "expenses", "viewAll"));
+  let canViewOwnExpenses = $derived(hasTeamPermission(team, $userStore?.uid, "expenses", "viewOwn"));
+  let canViewExpenses = $derived(canViewAllExpenses || canViewOwnExpenses);
   let canCreateExpenses = $derived(hasTeamPermission(team, $userStore?.uid, "expenses", "create"));
   let canEditExpenses = $derived(hasTeamPermission(team, $userStore?.uid, "expenses", "edit"));
   let canDeleteExpenses = $derived(hasTeamPermission(team, $userStore?.uid, "expenses", "delete"));
   let canViewStats = $derived(hasTeamPermission(team, $userStore?.uid, "stats", "view"));
   let canViewInventory = $derived(hasTeamPermission(team, $userStore?.uid, "inventory", "view"));
-  let canAccessExpenses = $derived(canViewExpenses || canViewStats);
-  let includeInventory = $derived(canViewInventory || canViewStats);
+  let canViewPayments = $derived(hasTeamPermission(team, $userStore?.uid, "payments", "view"));
+  // Sin permiso de lectura el miembro no ve el listado, aunque sí pueda
+  // registrar sus propios gastos.
+  let canAccessExpenses = $derived(canViewExpenses || canCreateExpenses);
+  // Los pagos y las entradas de inventario se leen con sus propios
+  // permisos: pedirlos sin ellos provocaba errores de lectura.
+  let includePayments = $derived(canViewAllExpenses && (canViewPayments || canViewStats));
+  let includeInventory = $derived(canViewAllExpenses && (canViewInventory || canViewStats));
+  let ownerUid = $derived(canViewAllExpenses ? "" : $userStore?.uid || "");
 
   let showExpenseForm = $state(false);
   let editingExpense = $state(null);
@@ -183,13 +194,18 @@
   let filtersTeamId = $state("");
 
   let members = $derived(team?.membersData || []);
-  let ledger = $derived(buildExpenseLedger({
-    manual: $manualTeamExpensesStore,
-    payments: $expensePaymentsStore,
-    inventoryMovements: $expenseInventoryMovementsStore,
-    members,
-    currency,
-  }));
+  let ledger = $derived.by(() => {
+    const fullLedger = buildExpenseLedger({
+      manual: $manualTeamExpensesStore,
+      payments: $expensePaymentsStore,
+      inventoryMovements: $expenseInventoryMovementsStore,
+      members,
+      currency,
+    });
+    // Con "Ver gastos propios" solo se muestran los registros del miembro.
+    if (canViewAllExpenses) return fullLedger;
+    return filterTeamExpensesByOwner(fullLedger, $userStore?.uid);
+  });
   let filteredExpenses = $derived(filterExpenseLedger(ledger, {
     startDate,
     endDate,
@@ -220,8 +236,14 @@
   let maxCategoryAmount = $derived(Math.max(...categoryBreakdown.map((item) => item.amount), 1));
 
   $effect(() => {
-    if (!teamId || !canAccessExpenses) return subscribeToTeamExpenses(null);
-    return subscribeToTeamExpenses(teamId, { includeInventory });
+    // Sin permiso de lectura no se escucha nada: la consulta del listado
+    // sería rechazada por las reglas y el miembro vería un error.
+    if (!teamId || !canViewExpenses) return subscribeToTeamExpenses(null);
+    return subscribeToTeamExpenses(teamId, {
+      includeInventory,
+      includePayments,
+      ownerUid,
+    });
   });
 
   $effect(() => {
@@ -801,214 +823,231 @@
     <main class="expenses-content">
       <TitleHeader title="Gastos" description={team.name || team.team || "Equipo"} action={goToTeamHome} />
 
-      <section class="source-note">
-        <div class="source-note-icon"><ReceiptText size={22} /></div>
-        <div>
-          <strong>Libro de gastos unificado</strong>
-          <p>Los pagos a miembros y las entradas de inventario con precio se incorporan automáticamente. Las jornadas pendientes no se suman hasta que existe un pago, evitando duplicar la nómina.</p>
-        </div>
-      </section>
-
-      <section class="summary-grid" aria-label="Resumen de gastos filtrados">
-        <article class="summary-card total">
-          <WalletCards size={20} />
-          <span>Total comprometido</span>
-          <strong>{formatMoney(summary.total)}</strong>
-          <small>{summary.count} movimientos</small>
-        </article>
-        <article class="summary-card paid">
-          <CheckCircle2 size={20} />
-          <span>Pagado</span>
-          <strong>{formatMoney(summary.paid)}</strong>
-          <small>Salida ya registrada</small>
-        </article>
-        <article class="summary-card pending">
-          <Clock size={20} />
-          <span>Pendiente</span>
-          <strong>{formatMoney(summary.pending)}</strong>
-          <small>Solo gastos manuales</small>
-        </article>
-        <article class="summary-card automatic">
-          <Filter size={20} />
-          <span>Automático</span>
-          <strong>{formatMoney(summary.automatic)}</strong>
-          <small>Pagos e inventario</small>
-        </article>
-        <article class="summary-card manual">
-          <FileText size={20} />
-          <span>Manual</span>
-          <strong>{formatMoney(summary.manual)}</strong>
-          <small>Introducido por el equipo</small>
-        </article>
-      </section>
-
-      <section class="filters-card">
-        <div class="filter-heading">
-          <div><Filter size={18} /><strong>Filtros</strong></div>
-          {#if canCreateExpenses}
-            <button class="add-expense-button" onclick={openNewExpense}>
-              <Plus size={18} /> Añadir gasto
-            </button>
-          {/if}
-        </div>
-
-        <div class="filter-grid">
-          <label class="search-field">
-            <span>Buscar</span>
-            <div><Search size={17} /><input type="search" bind:value={search} placeholder="Concepto, proveedor, factura..." /></div>
-          </label>
-          <label>
-            <span>Periodo</span>
-            <select bind:value={period} onchange={applyPeriod}>
-              <option value="month">Este mes</option>
-              <option value="year">Este año</option>
-              <option value="custom">Personalizado</option>
-              <option value="all">Todo</option>
-            </select>
-          </label>
-          <label>
-            <span>Desde</span>
-            <input type="date" max={endDate || undefined} bind:value={startDate} onchange={handleStartDateChange} disabled={period !== "custom"} />
-          </label>
-          <label>
-            <span>Hasta</span>
-            <input type="date" min={startDate || undefined} bind:value={endDate} onchange={handleEndDateChange} disabled={period !== "custom"} />
-          </label>
-          <label>
-            <span>Origen</span>
-            <select bind:value={sourceFilter}>
-              <option value="all">Todos</option>
-              <option value="manual">Manuales</option>
-              <option value="payment">Pagos</option>
-              {#if includeInventory}<option value="inventory">Inventario</option>{/if}
-            </select>
-          </label>
-          <label>
-            <span>Estado</span>
-            <select bind:value={statusFilter}>
-              <option value="all">Todos</option>
-              <option value="paid">Pagados</option>
-              <option value="pending">Pendientes</option>
-            </select>
-          </label>
-          <label>
-            <span>Categoría</span>
-            <select bind:value={categoryFilter}>
-              <option value="all">Todas</option>
-              {#each availableCategories as category (category.value)}
-                <option value={category.value}>{category.label}</option>
-              {/each}
-            </select>
-          </label>
-        </div>
-      </section>
-
-      {#if $teamExpensesStateStore.errors.length}
-        <section class="load-warning">
-          <AlertCircle size={19} />
+      {#if !canViewExpenses}
+        <section class="source-note">
+          <div class="source-note-icon"><EyeOff size={22} /></div>
           <div>
-            <strong>Algunas fuentes no se han podido cargar</strong>
-            <p>Se muestran los datos disponibles. Comprueba tus permisos o la conexión.</p>
+            <strong>Puedes registrar gastos, pero no ver el listado</strong>
+            <p>Tu administrador no te ha dado permiso para consultar los gastos del equipo. Los gastos que registres se guardan igualmente.</p>
+            {#if canCreateExpenses}
+              <button class="add-expense-button" onclick={openNewExpense}>
+                <Plus size={18} /> Añadir gasto
+              </button>
+            {/if}
           </div>
-        </section>
-      {/if}
-
-      {#if categoryBreakdown.length}
-        <section class="category-panel">
-          <h2>Principales categorías</h2>
-          <div class="category-bars">
-            {#each categoryBreakdown as item (item.label)}
-              <div class="category-row">
-                <div><span>{item.label}</span><strong>{formatMoney(item.amount)}</strong></div>
-                <div class="bar-track"><span style={`width: ${(item.amount / maxCategoryAmount) * 100}%`}></span></div>
-              </div>
-            {/each}
-          </div>
-        </section>
-      {/if}
-
-      {#if $teamExpensesStateStore.loading && ledger.length === 0}
-        <section class="empty-state" aria-live="polite">
-          <div class="loading-dot"></div>
-          <h2>Cargando gastos</h2>
-          <p>Consultando pagos, inventario y registros manuales.</p>
-        </section>
-      {:else if filteredExpenses.length === 0}
-        <section class="empty-state">
-          <ReceiptText size={52} />
-          <h2>No hay gastos en este periodo</h2>
-          <p>Ajusta los filtros o añade un gasto manual. Los pagos e incorporaciones de inventario aparecerán solos.</p>
-          {#if canCreateExpenses}
-            <button onclick={openNewExpense}><Plus size={18} /> Añadir gasto</button>
-          {/if}
         </section>
       {:else}
-        <section class="expense-list" aria-label="Movimientos de gastos">
-          {#each filteredExpenses as expense (expense.id)}
-            {@const SourceIcon = getSourceIcon(expense.source)}
-            <article class:pending={expense.status === "pending"} class="expense-item">
-              <div class={`expense-icon ${expense.source}`}><SourceIcon size={21} /></div>
-              <div class="expense-main">
-                <div class="expense-title-row">
-                  <h3>{expense.title}</h3>
-                  <span class={`source-badge ${expense.source}`}>{sourceLabels[expense.source] || expense.sourceLabel}</span>
-                  <span class:paid={expense.status === "paid"} class="status-badge">{statusLabels[expense.status] || expense.status}</span>
-                </div>
-                <p>{expense.description || expense.notes || expense.vendorName || expense.categoryLabel}</p>
-                <div class="expense-meta">
-                  <span><CalendarDays size={13} /> {formatDate(expense.date)}</span>
-                  <span>{expense.categoryLabel}</span>
-                  <span>{methodLabels[expense.method] || "No indicado"}</span>
-                  {#if expense.vendorName}<span>{expense.vendorName}</span>{/if}
-                  {#if expense.invoiceNumber}<span>Factura {expense.invoiceNumber}</span>{/if}
-                  {#if expense.locationName}<span>{expense.locationName}</span>{/if}
-                  {#if expense.source === "manual"}
-                    <span>{expense.deductible ? "Pot. deducible" : "No deducible"}</span>
-                  {/if}
-                  {#if expense.createdByName}<span>Por {expense.createdByName}</span>{/if}
-                </div>
-                {#if Array.isArray(expense.receipts) && expense.receipts.length}
-                  <div class="expense-receipts">
-                    {#each expense.receipts.slice(0, 4) as receipt, index (receipt.url)}
-                      <button
-                        type="button"
-                        class="expense-receipt-thumb"
-                        aria-label={`Ver ${receipt.name}`}
-                        onclick={() => openReceiptLightbox(expense, index)}
-                      >
-                        <img src={optimizeCloudinary(receipt.url, 96, { height: 96, crop: "fill" })} alt={receipt.name} loading="lazy" decoding="async" />
-                      </button>
-                    {/each}
-                    {#if expense.receipts.length > 4}
-                      <button type="button" class="expense-receipt-more" onclick={() => openReceiptLightbox(expense, 4)}>
-                        +{expense.receipts.length - 4}
-                      </button>
-                    {/if}
-                    <span class="expense-receipt-count">
-                      <FileImage size={13} /> {expense.receipts.length} {expense.receipts.length === 1 ? "recibo" : "recibos"}
-                    </span>
-                  </div>
-                {/if}
-              </div>
-              <div class="expense-side">
-                <strong>{formatMoney(expense.amount, expense.currency)}</strong>
-                {#if expense.status === "pending" && expense.dueDate}
-                  <small>Vence {formatDate(expense.dueDate)}</small>
-                {/if}
-                {#if expense.source === "manual"}
-                  <div class="expense-actions">
-                    {#if canManageExpense(expense)}
-                      <button onclick={() => openEditExpense(expense)} aria-label={`Editar ${expense.title}`}><Pencil size={16} /></button>
-                    {/if}
-                    {#if canDeleteExpenses}
-                      <button class="danger" onclick={() => removeExpense(expense)} disabled={deletingExpenseId === expense.id} aria-label={`Eliminar ${expense.title}`}><Trash2 size={16} /></button>
-                    {/if}
-                  </div>
-                {/if}
-              </div>
-            </article>
-          {/each}
+        <section class="source-note">
+          <div class="source-note-icon"><ReceiptText size={22} /></div>
+          <div>
+            <strong>Libro de gastos unificado</strong>
+            <p>Los pagos a miembros y las entradas de inventario con precio se incorporan automáticamente. Las jornadas pendientes no se suman hasta que existe un pago, evitando duplicar la nómina.</p>
+          </div>
         </section>
+      {/if}
+
+      {#if canViewExpenses}
+        <section class="summary-grid" aria-label="Resumen de gastos filtrados">
+          <article class="summary-card total">
+            <WalletCards size={20} />
+            <span>Total comprometido</span>
+            <strong>{formatMoney(summary.total)}</strong>
+            <small>{summary.count} movimientos</small>
+          </article>
+          <article class="summary-card paid">
+            <CheckCircle2 size={20} />
+            <span>Pagado</span>
+            <strong>{formatMoney(summary.paid)}</strong>
+            <small>Salida ya registrada</small>
+          </article>
+          <article class="summary-card pending">
+            <Clock size={20} />
+            <span>Pendiente</span>
+            <strong>{formatMoney(summary.pending)}</strong>
+            <small>Solo gastos manuales</small>
+          </article>
+          <article class="summary-card automatic">
+            <Filter size={20} />
+            <span>Automático</span>
+            <strong>{formatMoney(summary.automatic)}</strong>
+            <small>Pagos e inventario</small>
+          </article>
+          <article class="summary-card manual">
+            <FileText size={20} />
+            <span>Manual</span>
+            <strong>{formatMoney(summary.manual)}</strong>
+            <small>Introducido por el equipo</small>
+          </article>
+        </section>
+
+        <section class="filters-card">
+          <div class="filter-heading">
+            <div><Filter size={18} /><strong>Filtros</strong></div>
+            {#if canCreateExpenses}
+              <button class="add-expense-button" onclick={openNewExpense}>
+                <Plus size={18} /> Añadir gasto
+              </button>
+            {/if}
+          </div>
+
+          <div class="filter-grid">
+            <label class="search-field">
+              <span>Buscar</span>
+              <div><Search size={17} /><input type="search" bind:value={search} placeholder="Concepto, proveedor, factura..." /></div>
+            </label>
+            <label>
+              <span>Periodo</span>
+              <select bind:value={period} onchange={applyPeriod}>
+                <option value="month">Este mes</option>
+                <option value="year">Este año</option>
+                <option value="custom">Personalizado</option>
+                <option value="all">Todo</option>
+              </select>
+            </label>
+            <label>
+              <span>Desde</span>
+              <input type="date" max={endDate || undefined} bind:value={startDate} onchange={handleStartDateChange} disabled={period !== "custom"} />
+            </label>
+            <label>
+              <span>Hasta</span>
+              <input type="date" min={startDate || undefined} bind:value={endDate} onchange={handleEndDateChange} disabled={period !== "custom"} />
+            </label>
+            <label>
+              <span>Origen</span>
+              <select bind:value={sourceFilter}>
+                <option value="all">Todos</option>
+                <option value="manual">Manuales</option>
+                <option value="payment">Pagos</option>
+                {#if includeInventory}<option value="inventory">Inventario</option>{/if}
+              </select>
+            </label>
+            <label>
+              <span>Estado</span>
+              <select bind:value={statusFilter}>
+                <option value="all">Todos</option>
+                <option value="paid">Pagados</option>
+                <option value="pending">Pendientes</option>
+              </select>
+            </label>
+            <label>
+              <span>Categoría</span>
+              <select bind:value={categoryFilter}>
+                <option value="all">Todas</option>
+                {#each availableCategories as category (category.value)}
+                  <option value={category.value}>{category.label}</option>
+                {/each}
+              </select>
+            </label>
+          </div>
+        </section>
+
+        {#if $teamExpensesStateStore.errors.length}
+          <section class="load-warning">
+            <AlertCircle size={19} />
+            <div>
+              <strong>Algunas fuentes no se han podido cargar</strong>
+              <p>Se muestran los datos disponibles. Comprueba tus permisos o la conexión.</p>
+            </div>
+          </section>
+        {/if}
+
+        {#if categoryBreakdown.length}
+          <section class="category-panel">
+            <h2>Principales categorías</h2>
+            <div class="category-bars">
+              {#each categoryBreakdown as item (item.label)}
+                <div class="category-row">
+                  <div><span>{item.label}</span><strong>{formatMoney(item.amount)}</strong></div>
+                  <div class="bar-track"><span style={`width: ${(item.amount / maxCategoryAmount) * 100}%`}></span></div>
+                </div>
+              {/each}
+            </div>
+          </section>
+        {/if}
+
+        {#if $teamExpensesStateStore.loading && ledger.length === 0}
+          <section class="empty-state" aria-live="polite">
+            <div class="loading-dot"></div>
+            <h2>Cargando gastos</h2>
+            <p>Consultando pagos, inventario y registros manuales.</p>
+          </section>
+        {:else if filteredExpenses.length === 0}
+          <section class="empty-state">
+            <ReceiptText size={52} />
+            <h2>No hay gastos en este periodo</h2>
+            <p>Ajusta los filtros o añade un gasto manual. Los pagos e incorporaciones de inventario aparecerán solos.</p>
+            {#if canCreateExpenses}
+              <button onclick={openNewExpense}><Plus size={18} /> Añadir gasto</button>
+            {/if}
+          </section>
+        {:else}
+          <section class="expense-list" aria-label="Movimientos de gastos">
+            {#each filteredExpenses as expense (expense.id)}
+              {@const SourceIcon = getSourceIcon(expense.source)}
+              <article class:pending={expense.status === "pending"} class="expense-item">
+                <div class={`expense-icon ${expense.source}`}><SourceIcon size={21} /></div>
+                <div class="expense-main">
+                  <div class="expense-title-row">
+                    <h3>{expense.title}</h3>
+                    <span class={`source-badge ${expense.source}`}>{sourceLabels[expense.source] || expense.sourceLabel}</span>
+                    <span class:paid={expense.status === "paid"} class="status-badge">{statusLabels[expense.status] || expense.status}</span>
+                  </div>
+                  <p>{expense.description || expense.notes || expense.vendorName || expense.categoryLabel}</p>
+                  <div class="expense-meta">
+                    <span><CalendarDays size={13} /> {formatDate(expense.date)}</span>
+                    <span>{expense.categoryLabel}</span>
+                    <span>{methodLabels[expense.method] || "No indicado"}</span>
+                    {#if expense.vendorName}<span>{expense.vendorName}</span>{/if}
+                    {#if expense.invoiceNumber}<span>Factura {expense.invoiceNumber}</span>{/if}
+                    {#if expense.locationName}<span>{expense.locationName}</span>{/if}
+                    {#if expense.source === "manual"}
+                      <span>{expense.deductible ? "Pot. deducible" : "No deducible"}</span>
+                    {/if}
+                    {#if expense.createdByName}<span>Por {expense.createdByName}</span>{/if}
+                  </div>
+                  {#if Array.isArray(expense.receipts) && expense.receipts.length}
+                    <div class="expense-receipts">
+                      {#each expense.receipts.slice(0, 4) as receipt, index (receipt.url)}
+                        <button
+                          type="button"
+                          class="expense-receipt-thumb"
+                          aria-label={`Ver ${receipt.name}`}
+                          onclick={() => openReceiptLightbox(expense, index)}
+                        >
+                          <img src={optimizeCloudinary(receipt.url, 96, { height: 96, crop: "fill" })} alt={receipt.name} loading="lazy" decoding="async" />
+                        </button>
+                      {/each}
+                      {#if expense.receipts.length > 4}
+                        <button type="button" class="expense-receipt-more" onclick={() => openReceiptLightbox(expense, 4)}>
+                          +{expense.receipts.length - 4}
+                        </button>
+                      {/if}
+                      <span class="expense-receipt-count">
+                        <FileImage size={13} /> {expense.receipts.length} {expense.receipts.length === 1 ? "recibo" : "recibos"}
+                      </span>
+                    </div>
+                  {/if}
+                </div>
+                <div class="expense-side">
+                  <strong>{formatMoney(expense.amount, expense.currency)}</strong>
+                  {#if expense.status === "pending" && expense.dueDate}
+                    <small>Vence {formatDate(expense.dueDate)}</small>
+                  {/if}
+                  {#if expense.source === "manual"}
+                    <div class="expense-actions">
+                      {#if canManageExpense(expense)}
+                        <button onclick={() => openEditExpense(expense)} aria-label={`Editar ${expense.title}`}><Pencil size={16} /></button>
+                      {/if}
+                      {#if canDeleteExpenses}
+                        <button class="danger" onclick={() => removeExpense(expense)} disabled={deletingExpenseId === expense.id} aria-label={`Eliminar ${expense.title}`}><Trash2 size={16} /></button>
+                      {/if}
+                    </div>
+                  {/if}
+                </div>
+              </article>
+            {/each}
+          </section>
+        {/if}
       {/if}
     </main>
 
@@ -1246,7 +1285,7 @@
     <section class="empty-state page-state">
       <Users size={52} />
       <h2>Sin permiso</h2>
-      <p>Necesitas permiso para ver gastos o estadísticas del equipo.</p>
+      <p>Necesitas permiso para ver o registrar gastos del equipo.</p>
       <button onclick={goToTeamHome}>Volver al equipo</button>
     </section>
   {:else}

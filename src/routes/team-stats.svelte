@@ -35,6 +35,7 @@
     expenseInventoryMovementsStore,
     expensePaymentsStore,
     filterExpenseLedger,
+    filterTeamExpensesByOwner,
     getExpenseCategoryLabel,
     getTeamAdvancedStatsData,
     hasTeamPermission,
@@ -63,6 +64,17 @@
   let team = $derived($selectedTeam);
   let canViewStats = $derived(hasTeamPermission(team, $userStore?.uid, "stats", "view"));
   let canEditStats = $derived(hasTeamPermission(team, $userStore?.uid, "stats", "edit"));
+  // El libro de gastos se rige por el módulo de gastos: ver estadísticas ya
+  // no muestra los gastos de todo el equipo.
+  let canViewAllExpenses = $derived(hasTeamPermission(team, $userStore?.uid, "expenses", "viewAll"));
+  let canViewOwnExpenses = $derived(hasTeamPermission(team, $userStore?.uid, "expenses", "viewOwn"));
+  let canViewExpenses = $derived(canViewAllExpenses || canViewOwnExpenses);
+  let canReadExpensePayments = $derived(
+    canViewStats || hasTeamPermission(team, $userStore?.uid, "payments", "view"),
+  );
+  let canReadExpenseInventory = $derived(
+    canViewStats || hasTeamPermission(team, $userStore?.uid, "inventory", "view"),
+  );
   let canManageGhostRecords = $derived(
     !!(team?.id && $userStore?.uid) && (
       team.admin === $userStore.uid ||
@@ -654,15 +666,18 @@
   // Libro unificado: gastos manuales + pagos + entradas de inventario.
   // Reutiliza el mismo "libro de gastos" del módulo de gastos para que las
   // estadísticas no dupliquen reglas de negocio.
-  let expenseLedger = $derived(
-    buildExpenseLedger({
+  let expenseLedger = $derived.by(() => {
+    const ledger = buildExpenseLedger({
       manual: $manualTeamExpensesStore,
       payments: $expensePaymentsStore,
       inventoryMovements: $expenseInventoryMovementsStore,
       members,
       currency: budgetCurrency,
-    }),
-  );
+    });
+    // Con "ver gastos propios" solo entran los registros del miembro.
+    if (canViewAllExpenses) return ledger;
+    return filterTeamExpensesByOwner(ledger, $userStore?.uid);
+  });
 
   let filteredLedger = $derived.by(() =>
     filterExpenseLedger(expenseLedger, {
@@ -761,13 +776,18 @@
 
   // El libro de gastos se mantiene en tiempo real con la misma fuente que el
   // módulo de gastos: así las estadísticas no muestran importes desfasados.
+  // Solo se cargan las fuentes que el miembro puede leer de verdad.
   $effect(() => {
     const currentTeamId = team?.id;
-    if (!currentTeamId || !canViewStats) {
+    if (!currentTeamId || !canViewStats || !canViewExpenses) {
       subscribeToTeamExpenses(null);
       return;
     }
-    return subscribeToTeamExpenses(currentTeamId, { includeInventory: true });
+    return subscribeToTeamExpenses(currentTeamId, {
+      includeInventory: canReadExpenseInventory,
+      includePayments: canReadExpensePayments,
+      ownerUid: canViewAllExpenses ? "" : $userStore?.uid || "",
+    });
   });
 
   $effect(() => {
@@ -1529,6 +1549,7 @@
             </article>
           </section>
 
+          {#if canViewExpenses}
           <section class="ledger-section">
             <article class="panel ledger-panel">
               <div class="panel-heading">
@@ -1738,6 +1759,7 @@
               </div>
             </article>
           </section>
+          {/if}
 
           <section class="insights-grid">
             <article class="panel">

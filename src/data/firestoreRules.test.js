@@ -57,28 +57,50 @@ describe('firestore expense rules contract', () => {
   it('limita la colección de gastos a su propio módulo de permisos', () => {
     expect(rules).toMatch(/match \/expenses\/\{expenseId\}/);
     expect(rules).toMatch(/function hasExpensesPermission\(teamId, action\)/);
-    expect(rules).toMatch(/allow read: if hasExpensesPermission\(teamId, "view"\) \|\|\s+hasTeamPermission\(teamId, "stats", "view"\)/);
+    expect(rules).toMatch(/allow read: if canReadExpense\(teamId, resource\.data\)/);
     expect(rules).toMatch(/allow create: if hasExpensesPermission\(teamId, "create"\)/);
     expect(rules).toMatch(/allow delete: if hasExpensesPermission\(teamId, "delete"\)/);
   });
 
-  it('hereda el permiso de pagos mientras el miembro no tenga guardado el módulo de gastos', () => {
-    const body = extractFunctionBody(rules, 'hasExpensesPermission');
+  it('separa la lectura de gastos del permiso de estadísticas', () => {
+    // Ver estadísticas ya no muestra el libro de gastos: solo el módulo de
+    // gastos da acceso a los registros.
+    const expensesBlock = rules.split('match /expenses/{expenseId}')[1]?.split('match /chargeTemplates')[0] || '';
+    expect(expensesBlock).not.toContain('"stats"');
+    expect(expensesBlock).toContain('canReadExpense(teamId, resource.data)');
+  });
 
-    expect(body).toContain('hasModulePermission(teamId, "expenses", action)');
-    expect(body).toContain('!hasPermissionModule(teamId, "expenses")');
-    expect(body).toContain('hasModulePermission(teamId, "payments", action)');
+  it('limita los gastos propios a los registros creados por el miembro', () => {
+    const body = extractFunctionBody(rules, 'canReadExpense');
+
+    expect(body).toContain('permissions.get("viewAll", false) == true');
+    expect(body).toContain('permissions.get("viewOwn", false) == true');
+    expect(body).toContain('data.createdBy == request.auth.uid');
+  });
+
+  it('hereda el permiso de pagos mientras el miembro no tenga guardado el módulo de gastos', () => {
+    const body = extractFunctionBody(rules, 'memberExpensesPermissions');
+
+    expect(body).toContain('modules.get("expenses", null)');
+    expect(body).toContain('modules.get("payments", null)');
+    expect(body).toContain('viewAll');
+    expect(body).toContain('viewOwn');
+  });
+
+  it('convierte la antigua casilla "view" de gastos en "ver todos"', () => {
+    const body = extractFunctionBody(rules, 'memberExpensesPermissions');
+
+    expect(body).toContain('legacyView');
+    expect(body).toContain('expenses.keys().hasAny(["viewAll", "viewOwn"])');
   });
 
   it('no presupone que el módulo de permisos exista al leerlo', () => {
-    const body = extractFunctionBody(rules, 'hasPermissionModule');
+    const body = extractFunctionBody(rules, 'memberPermissionsMap');
 
     // El equipo se lee una sola vez y se usan accesores con valor por
     // defecto: indexar una clave inexistente provoca un error que deniega
     // la operación (y releer el equipo agota el límite de accesos).
-    expect(body).toContain('memberPermissionsMap(teamId)');
-    expect(body).toContain('permissions.get(request.auth.uid, {})');
-    expect(body).toContain('member.keys().hasAll([module])');
+    expect(body).toContain('team.get("memberPermissions", {})');
     expect(body).not.toContain('teamData(');
   });
 
@@ -291,15 +313,26 @@ describe('firestore team invitation rules contract', () => {
   });
 
   it('no relee el equipo repetidamente en las comprobaciones de permisos', () => {
-    const body = extractFunctionBody(rules, 'hasPermissionModule');
+    const body = extractFunctionBody(rules, 'memberPermissionsMap');
     // teamData() es un get(): repetirlo dentro de la misma comprobación
     // consumía el límite de accesos y denegaba a los miembros no administradores.
     expect(body).not.toContain('teamData(');
-    expect(body).toContain('memberPermissionsMap(');
+    expect(body).toContain('team.get("memberPermissions", {})');
 
     const moduleBody = extractFunctionBody(rules, 'hasModulePermission');
     expect(moduleBody).not.toContain('teamData(');
     expect(moduleBody).toContain('memberPermissionsMap(');
+  });
+
+  it('impide que un miembro se conceda más permisos de los que tiene', () => {
+    const body = extractFunctionBody(rules, 'isChangingOwnPermissions');
+
+    expect(body).toContain('resource.data.get("memberPermissions", {})');
+    expect(body).toContain('request.resource.data.get("memberPermissions", {})');
+    expect(body).toContain('affectedKeys().hasAny([request.auth.uid])');
+
+    const helper = extractFunctionBody(rules, 'isTeamUpdateAllowedByModule');
+    expect(helper).toContain('!isChangingOwnPermissions()');
   });
 
   it('usa get() con valor por defecto al comprobar la baja de un miembro', () => {
